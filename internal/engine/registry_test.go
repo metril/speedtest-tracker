@@ -53,3 +53,31 @@ func TestProgressJSONFieldNames(t *testing.T) {
 		t.Errorf("json = %s\nwant %s", b, want)
 	}
 }
+
+func TestRegistryConcurrentReplaceAndGet(t *testing.T) {
+	r := NewRegistry()
+	r.Register(stubEngine{name: "a"})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			r.Replace(map[string]Engine{"a": stubEngine{name: "a"}, "b": stubEngine{name: "b"}})
+		}
+	}()
+	for i := 0; i < 200; i++ {
+		if _, ok := r.Get("a"); !ok {
+			t.Error("engine a disappeared")
+			break
+		}
+		_ = r.Names()
+	}
+	<-done
+
+	if got := r.Names(); len(got) != 2 {
+		t.Errorf("Names = %v, want 2 engines after Replace", got)
+	}
+	if _, ok := r.Get("b"); !ok {
+		t.Error("Replace did not add b")
+	}
+}
