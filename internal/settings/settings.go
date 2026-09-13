@@ -1,6 +1,6 @@
-// Package settings is a typed accessor over the settings table. Only the
-// General section exists in milestone 1; Engines, Auth, Integrations and
-// Notifications are added in later milestones.
+// Package settings is a typed accessor over the settings table, with
+// General and Engines sections implemented and Auth, Integrations and
+// Notifications arriving in later milestones.
 package settings
 
 import (
@@ -41,7 +41,41 @@ var defaults = map[string]any{
 	KeyLogLevel:             "info",
 	KeyRetentionDaysResults: 90,
 	KeyRetentionDaysRuns:    30,
+
+	KeySpeedtestBin:             "speedtest",
+	KeyIperf3Bin:                "iperf3",
+	KeyOoklaAcceptLicense:       true,
+	KeyOoklaAcceptGDPR:          true,
+	KeyServerListTTLSeconds:     86400,
+	KeyDefaultOoklaOptions:      json.RawMessage(`{}`),
+	KeyDefaultCloudflareOptions: json.RawMessage(`{}`),
+	KeyDefaultIperf3Options:     json.RawMessage(`{}`),
 }
+
+// Engines is the Engines settings section: external binary paths, Ookla
+// consent flags, server-list cache TTL and per-engine default options.
+type Engines struct {
+	SpeedtestBin             string          `json:"speedtest_bin"`
+	Iperf3Bin                string          `json:"iperf3_bin"`
+	OoklaAcceptLicense       bool            `json:"ookla_accept_license"`
+	OoklaAcceptGDPR          bool            `json:"ookla_accept_gdpr"`
+	ServerListTTLSeconds     int             `json:"server_list_ttl_seconds"`
+	DefaultOoklaOptions      json.RawMessage `json:"default_ookla_options"`
+	DefaultCloudflareOptions json.RawMessage `json:"default_cloudflare_options"`
+	DefaultIperf3Options     json.RawMessage `json:"default_iperf3_options"`
+}
+
+// Keys of the Engines section.
+const (
+	KeySpeedtestBin             = "engines.speedtest_bin"
+	KeyIperf3Bin                = "engines.iperf3_bin"
+	KeyOoklaAcceptLicense       = "engines.ookla_accept_license"
+	KeyOoklaAcceptGDPR          = "engines.ookla_accept_gdpr"
+	KeyServerListTTLSeconds     = "engines.server_list_ttl_seconds"
+	KeyDefaultOoklaOptions      = "engines.default_ookla_options"
+	KeyDefaultCloudflareOptions = "engines.default_cloudflare_options"
+	KeyDefaultIperf3Options     = "engines.default_iperf3_options"
+)
 
 // Store reads and writes settings and notifies subscribers on change.
 type Store struct {
@@ -124,6 +158,41 @@ func (s *Store) General(ctx context.Context) (General, error) {
 		}
 	}
 	return g, nil
+}
+
+// Engines returns the Engines section, falling back to the seeded defaults
+// for any key that is missing.
+func (s *Store) Engines(ctx context.Context) (Engines, error) {
+	var e Engines
+	for _, f := range []struct {
+		key string
+		dst any
+	}{
+		{KeySpeedtestBin, &e.SpeedtestBin},
+		{KeyIperf3Bin, &e.Iperf3Bin},
+		{KeyOoklaAcceptLicense, &e.OoklaAcceptLicense},
+		{KeyOoklaAcceptGDPR, &e.OoklaAcceptGDPR},
+		{KeyServerListTTLSeconds, &e.ServerListTTLSeconds},
+		{KeyDefaultOoklaOptions, &e.DefaultOoklaOptions},
+		{KeyDefaultCloudflareOptions, &e.DefaultCloudflareOptions},
+		{KeyDefaultIperf3Options, &e.DefaultIperf3Options},
+	} {
+		raw, ok, err := s.Get(ctx, f.key)
+		if err != nil {
+			return Engines{}, err
+		}
+		if !ok {
+			encoded, err := json.Marshal(defaults[f.key])
+			if err != nil {
+				return Engines{}, err
+			}
+			raw = encoded
+		}
+		if err := json.Unmarshal(raw, f.dst); err != nil {
+			return Engines{}, fmt.Errorf("decode %s: %w", f.key, err)
+		}
+	}
+	return e, nil
 }
 
 // Subscribe returns a channel of changed keys and a cancel function. Sends

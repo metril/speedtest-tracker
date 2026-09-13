@@ -2,6 +2,7 @@ package settings
 
 import (
 	"context"
+	"encoding/json"
 	"path/filepath"
 	"testing"
 	"time"
@@ -114,5 +115,46 @@ func TestSubscribeDoesNotBlockOnSlowSubscriber(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Set blocked on a slow subscriber")
+	}
+}
+
+func TestEnginesDefaults(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.Engines(context.Background())
+	if err != nil {
+		t.Fatalf("Engines: %v", err)
+	}
+	if got.SpeedtestBin != "speedtest" || got.Iperf3Bin != "iperf3" {
+		t.Errorf("bins = %q/%q, want speedtest/iperf3", got.SpeedtestBin, got.Iperf3Bin)
+	}
+	if !got.OoklaAcceptLicense || !got.OoklaAcceptGDPR {
+		t.Errorf("license/gdpr = %v/%v, want true/true", got.OoklaAcceptLicense, got.OoklaAcceptGDPR)
+	}
+	if got.ServerListTTLSeconds != 86400 {
+		t.Errorf("ttl = %d, want 86400", got.ServerListTTLSeconds)
+	}
+	for name, raw := range map[string]json.RawMessage{
+		"ookla":      got.DefaultOoklaOptions,
+		"cloudflare": got.DefaultCloudflareOptions,
+		"iperf3":     got.DefaultIperf3Options,
+	} {
+		if string(raw) != "{}" {
+			t.Errorf("default %s options = %q, want {}", name, raw)
+		}
+	}
+}
+
+func TestEnginesReflectsOverride(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.Set(ctx, KeySpeedtestBin, "/opt/ookla/speedtest"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, err := s.Engines(ctx)
+	if err != nil {
+		t.Fatalf("Engines: %v", err)
+	}
+	if got.SpeedtestBin != "/opt/ookla/speedtest" {
+		t.Errorf("SpeedtestBin = %q", got.SpeedtestBin)
 	}
 }
