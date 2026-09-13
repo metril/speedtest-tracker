@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/metril/speedtest-tracker/internal/sse"
 )
 
 // Pinger reports whether the datastore is reachable.
@@ -22,6 +23,7 @@ type Deps struct {
 	Pinger Pinger
 	Logger *slog.Logger
 	UI     http.Handler
+	Hub    *sse.Hub
 }
 
 // requestTimeout bounds every /api/v1 request except the SSE stream.
@@ -31,6 +33,7 @@ const requestTimeout = 30 * time.Second
 func New(deps Deps) http.Handler {
 	r := chi.NewRouter()
 	r.Use(middleware.RequestID)
+	r.Use(securityHeaders)
 	r.Use(requestLogger(deps.Logger))
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
@@ -38,8 +41,10 @@ func New(deps Deps) http.Handler {
 
 	r.Get("/healthz", healthz(deps.Pinger))
 
-	// SSE lives outside the timeout group; handlers land here in M4.
-	r.Route("/api/v1/events", func(sse chi.Router) {})
+	// SSE lives outside the timeout group: the stream never ends on its own.
+	if deps.Hub != nil {
+		r.Get("/api/v1/events", sse.Handler(deps.Hub))
+	}
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Use(middleware.Timeout(requestTimeout))
