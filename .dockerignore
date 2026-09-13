@@ -1,0 +1,11 @@
+.git
+.github
+docs
+data
+node_modules
+web/node_modules
+internal/web/dist
+speedtest-tracker
+*.db
+*.db-wal
+*.db-shm
