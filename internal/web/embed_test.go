@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 )
@@ -77,5 +78,39 @@ func TestMissingAssetIsNotSPAFallback(t *testing.T) {
 		httptest.NewRequest(http.MethodGet, "/assets/missing.js", nil))
 	if rec.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", rec.Code)
+	}
+}
+
+// TestAssetsDirectoryIsNotListed guards against fs.Stat succeeding for a
+// directory and http.FileServer then rendering a directory listing for
+// GET /assets/.
+func TestAssetsDirectoryIsNotListed(t *testing.T) {
+	rec := httptest.NewRecorder()
+	handlerFor(builtFS()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/assets/", nil))
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404 (not a directory listing)", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "app-abc123.js") {
+		t.Errorf("body looks like a directory listing: %q", rec.Body.String())
+	}
+}
+
+func TestPathTraversalDoesNotEscapeDist(t *testing.T) {
+	for _, path := range []string{
+		"/assets/../index.html",
+		"/assets/../../embed.go",
+		"/../../go.mod",
+	} {
+		rec := httptest.NewRecorder()
+		handlerFor(builtFS()).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, path, nil))
+		if rec.Code == http.StatusInternalServerError {
+			t.Errorf("path %q: status = 500, want 200 or 404", path)
+		}
+		if rec.Code != http.StatusOK && rec.Code != http.StatusNotFound {
+			t.Errorf("path %q: status = %d, want 200 or 404", path, rec.Code)
+		}
+		if rec.Code == http.StatusOK && rec.Body.String() != "<html>app</html>" {
+			t.Errorf("path %q: body = %q, want index.html fallback", path, rec.Body.String())
+		}
 	}
 }

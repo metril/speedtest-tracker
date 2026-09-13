@@ -45,9 +45,13 @@ func handlerFor(fsys fs.FS) http.Handler {
 			serveIndex(w, index)
 			return
 		}
-		if _, err := fs.Stat(fsys, upath); err != nil {
+		info, err := fs.Stat(fsys, upath)
+		if err != nil || info.IsDir() {
 			// Hashed bundle files must 404 rather than return HTML,
-			// otherwise a stale import silently "succeeds".
+			// otherwise a stale import silently "succeeds". Directories
+			// are treated as missing too, so a request like /assets/
+			// never falls through to http.FileServer's directory
+			// listing.
 			if strings.HasPrefix(r.URL.Path, "/assets/") {
 				http.NotFound(w, r)
 				return
