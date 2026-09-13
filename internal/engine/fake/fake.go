@@ -21,9 +21,8 @@ type Options struct {
 // Engine is a deterministic engine. Steps is the number of progress events
 // per transfer phase; Delay is slept between events (zero in tests).
 type Engine struct {
-	Result engine.Result
-	Steps  int
-	Delay  time.Duration
+	Steps int
+	Delay time.Duration
 }
 
 // New returns a fake engine with five steps per phase and no delay.

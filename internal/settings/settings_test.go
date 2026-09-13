@@ -144,6 +144,21 @@ func TestEnginesDefaults(t *testing.T) {
 	}
 }
 
+func TestGeneralFallsBackToDefaultOnMissingKey(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if _, err := s.db.Write.ExecContext(ctx, `DELETE FROM settings WHERE key=?`, KeyTimezone); err != nil {
+		t.Fatalf("delete row: %v", err)
+	}
+	g, err := s.General(ctx)
+	if err != nil {
+		t.Fatalf("General: %v", err)
+	}
+	if g.Timezone != "UTC" {
+		t.Errorf("Timezone = %q, want the seeded default UTC", g.Timezone)
+	}
+}
+
 func TestEnginesReflectsOverride(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()

@@ -134,7 +134,8 @@ func (s *Store) Set(ctx context.Context, key string, value any) error {
 	return nil
 }
 
-// General decodes the whole General section.
+// General returns the General section, falling back to the seeded defaults
+// for any key that is missing (mirroring Engines).
 func (s *Store) General(ctx context.Context) (General, error) {
 	g := General{}
 	targets := map[string]any{
@@ -151,7 +152,11 @@ func (s *Store) General(ctx context.Context) (General, error) {
 			return General{}, err
 		}
 		if !ok {
-			continue
+			encoded, err := json.Marshal(defaults[key])
+			if err != nil {
+				return General{}, err
+			}
+			raw = encoded
 		}
 		if err := json.Unmarshal(raw, dest); err != nil {
 			return General{}, fmt.Errorf("decode %s: %w", key, err)
