@@ -10,7 +10,9 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/sse"
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 // Pinger reports whether the datastore is reachable.
@@ -20,10 +22,14 @@ type Pinger interface {
 
 // Deps are the router's collaborators.
 type Deps struct {
-	Pinger Pinger
-	Logger *slog.Logger
-	UI     http.Handler
-	Hub    *sse.Hub
+	Pinger     Pinger
+	Logger     *slog.Logger
+	UI         http.Handler
+	Hub        *sse.Hub
+	Store      *store.Store
+	Registry   *engine.Registry
+	Runner     Runner
+	ServerList ServerLister
 }
 
 // requestTimeout bounds every /api/v1 request except the SSE stream.
@@ -48,6 +54,20 @@ func New(deps Deps) http.Handler {
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Use(middleware.Timeout(requestTimeout))
+		if deps.Store == nil {
+			return
+		}
+		v1.Route("/targets", func(t chi.Router) {
+			t.Get("/", deps.listTargets)
+			t.Post("/", deps.createTarget)
+			t.Post("/test", deps.testTarget)
+			t.Get("/{id}", deps.getTarget)
+			t.Put("/{id}", deps.updateTarget)
+			t.Delete("/{id}", deps.deleteTarget)
+			t.Post("/{id}/run", deps.runTarget)
+			t.Get("/{id}/latest", deps.targetLatest)
+		})
+		v1.Get("/ookla/servers", deps.listOoklaServers)
 	})
 
 	if deps.UI != nil {
