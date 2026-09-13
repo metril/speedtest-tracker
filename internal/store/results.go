@@ -188,6 +188,9 @@ func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int6
 		out = out[:limit]
 		next = out[len(out)-1].ID
 	}
+	if err := s.attachTags(ctx, out); err != nil {
+		return nil, 0, err
+	}
 	return out, next, nil
 }
 
@@ -201,7 +204,11 @@ func (s *Store) GetResult(ctx context.Context, id int64) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("get result %d: %w", id, err)
 	}
-	return r, nil
+	one := []Result{*r}
+	if err := s.attachTags(ctx, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 // DeleteResult removes one result (result_tags cascade), or ErrNotFound.
@@ -226,7 +233,11 @@ func (s *Store) LatestResultForTarget(ctx context.Context, targetID int64) (*Res
 	if err != nil {
 		return nil, fmt.Errorf("latest result for target %d: %w", targetID, err)
 	}
-	return r, nil
+	one := []Result{*r}
+	if err := s.attachTags(ctx, one); err != nil {
+		return nil, err
+	}
+	return &one[0], nil
 }
 
 // LatestResults returns the newest result per target.
@@ -253,5 +264,11 @@ func (s *Store) LatestResults(ctx context.Context) ([]Result, error) {
 		}
 		out = append(out, *r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := s.attachTags(ctx, out); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
