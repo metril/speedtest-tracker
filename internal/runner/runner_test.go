@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -199,9 +200,12 @@ func TestLanesRunInParallel(t *testing.T) {
 	waitForRun(t, db, runID)
 	elapsed := time.Since(start)
 
-	// Each target takes ~2*4*60ms = 480ms; two lanes in parallel must beat
-	// the ~960ms a serial runner would need.
-	if elapsed > 900*time.Millisecond {
+	// Each target emits 3*Steps+2 = 14 progress events (connecting, Steps
+	// ping, Steps download, Steps upload, done), each followed by Delay:
+	// 14*60ms = 840ms per target. Two lanes running in parallel must beat
+	// the ~1680ms a serial runner would need; 1200ms leaves a comfortable
+	// margin over the ~840ms parallel case while staying well under serial.
+	if elapsed > 1200*time.Millisecond {
 		t.Errorf("elapsed = %v, lanes did not run in parallel", elapsed)
 	}
 	results, _, _ := db.ListResults(ctx, store.ResultFilter{})
@@ -297,4 +301,158 @@ func TestShutdownMarksInflightCanceled(t *testing.T) {
 	if _, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}}); err != ErrShuttingDown {
 		t.Errorf("Enqueue after shutdown = %v, want ErrShuttingDown", err)
 	}
+}
+
+// TestConcurrentEnqueueAndShutdownNoPanic hammers Enqueue concurrently with
+// Shutdown. Before the fix, Enqueue could send on a lane channel just as
+// Shutdown closed it under r.mu, panicking. Every run that does get
+// created must still reach a terminal status.
+func TestConcurrentEnqueueAndShutdownNoPanic(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "concurrent.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	reg := engine.NewRegistry()
+	reg.Register(fake.New())
+	r := New(Config{
+		Store:    db,
+		Registry: reg,
+		Hub:      sse.NewHub(),
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Grace:    2 * time.Second,
+	})
+	r.Start()
+	ctx := context.Background()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const n = 20
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	var runIDs []int64
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			id, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+			if err != nil {
+				if err != ErrShuttingDown && err != ErrQueueFull {
+					t.Errorf("Enqueue: %v", err)
+				}
+				return
+			}
+			mu.Lock()
+			runIDs = append(runIDs, id)
+			mu.Unlock()
+		}()
+	}
+
+	shutdownDone := make(chan error, 1)
+	go func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		shutdownDone <- r.Shutdown(shutdownCtx)
+	}()
+
+	wg.Wait()
+	if err := <-shutdownDone; err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	mu.Lock()
+	ids := append([]int64(nil), runIDs...)
+	mu.Unlock()
+	for _, id := range ids {
+		run, err := db.GetRun(ctx, id)
+		if err != nil {
+			t.Fatalf("GetRun(%d): %v", id, err)
+		}
+		switch run.Status {
+		case "done", "failed", "canceled", "skipped":
+		default:
+			t.Errorf("run %d status = %q, want terminal", id, run.Status)
+		}
+	}
+}
+
+// TestEnqueueDedupeIsRaceFree fires many concurrent Enqueue calls for the
+// same schedule and asserts exactly one run is created.
+func TestEnqueueDedupeIsRaceFree(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+	if _, err := db.Write.ExecContext(ctx,
+		`INSERT INTO schedules(id,name,cron) VALUES(9,'n','* * * * *')`); err != nil {
+		t.Fatal(err)
+	}
+	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 20 * time.Millisecond})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "d", Engine: "fake", Enabled: true, Lane: "wan"})
+	sched := int64(9)
+
+	const n = 10
+	ids := make([]int64, n)
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			id, err := r.Enqueue(ctx, RunRequest{Trigger: "cron", ScheduleID: &sched, TargetIDs: []int64{tid}})
+			if err != nil {
+				t.Errorf("Enqueue: %v", err)
+				return
+			}
+			ids[i] = id
+		}(i)
+	}
+	wg.Wait()
+
+	first := ids[0]
+	for i, id := range ids {
+		if id != first {
+			t.Errorf("run %d got id %d, want the deduped run %d", i, id, first)
+		}
+	}
+	r.Cancel(first)
+	waitForRun(t, db, first)
+}
+
+// TestCancelQueuedRunNeverStarts cancels a run while it still sits behind
+// another run in the same lane's channel. It must land on "canceled"
+// without ever having started_at set, i.e. it never actually ran.
+func TestCancelQueuedRunNeverStarts(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
+	tidA, _ := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	tidB, _ := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+
+	runA, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tidA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runB, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tidB}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// runA occupies the wan lane's single worker for ~20*2*30ms; runB is
+	// still waiting in the lane channel at this point.
+	time.Sleep(20 * time.Millisecond)
+	if !r.Cancel(runB) {
+		t.Fatal("Cancel returned false for a queued run")
+	}
+
+	runBRow := waitForRun(t, db, runB)
+	if runBRow.Status != "canceled" {
+		t.Errorf("runB status = %q, want canceled", runBRow.Status)
+	}
+	if runBRow.StartedAt != nil {
+		t.Errorf("runB started_at = %v, want nil (never started)", *runBRow.StartedAt)
+	}
+
+	r.Cancel(runA)
+	waitForRun(t, db, runA)
 }

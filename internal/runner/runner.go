@@ -77,6 +77,7 @@ type runState struct {
 	pending  int // lane jobs not yet finished
 	failed   bool
 	canceled bool
+	started  bool // true once any lane has begun executing (running written)
 }
 
 // Runner owns the lane queues and their workers.
@@ -144,22 +145,13 @@ func (r *Runner) laneChan(lane string) chan job {
 // returns the run id without waiting for the test to finish. When the
 // request names a schedule that already has a queued or running run, the
 // existing run id is returned and nothing new is queued.
+//
+// The schedule dedupe check, run creation, and the lane-channel sends all
+// happen under r.mu: this makes concurrent Enqueue calls for the same
+// schedule race-free (exactly one run gets created) and makes Enqueue
+// mutually exclusive with Shutdown closing the lane channels, so a send on
+// a closed channel can never happen.
 func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
-	r.mu.Lock()
-	if r.closing || !r.started {
-		r.mu.Unlock()
-		return 0, ErrShuttingDown
-	}
-	r.mu.Unlock()
-
-	if req.ScheduleID != nil {
-		if id, ok, err := r.cfg.Store.QueuedRunForSchedule(ctx, *req.ScheduleID); err != nil {
-			return 0, err
-		} else if ok {
-			return id, nil
-		}
-	}
-
 	targets, err := r.cfg.Store.ListTargetsByIDs(ctx, req.TargetIDs)
 	if err != nil {
 		return 0, err
@@ -181,39 +173,61 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		byLane[lane] = append(byLane[lane], t)
 	}
 
+	r.mu.Lock()
+	if r.closing || !r.started {
+		r.mu.Unlock()
+		return 0, ErrShuttingDown
+	}
+
+	if req.ScheduleID != nil {
+		if id, ok, err := r.cfg.Store.QueuedRunForSchedule(ctx, *req.ScheduleID); err != nil {
+			r.mu.Unlock()
+			return 0, err
+		} else if ok {
+			r.mu.Unlock()
+			return id, nil
+		}
+	}
+
 	runID, err := r.cfg.Store.CreateRun(ctx, req.Trigger, req.ScheduleID)
 	if err != nil {
+		r.mu.Unlock()
 		return 0, err
 	}
 	runCtx, cancel := context.WithCancel(context.Background())
-
-	r.mu.Lock()
-	if r.closing {
-		r.mu.Unlock()
-		cancel()
-		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "shutting down")
-		return 0, ErrShuttingDown
-	}
 	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: len(order)}
+
 	chans := make([]chan job, 0, len(order))
 	for _, lane := range order {
 		chans = append(chans, r.laneChan(lane))
 	}
-	r.mu.Unlock()
 
+	// Publish "queued" before any lane can possibly move the run to
+	// "running", so clients never observe running before queued.
+	r.publishRun(runID, "queued", "")
+
+	queueFull := false
 	for i, lane := range order {
 		select {
 		case chans[i] <- job{runID: runID, targets: byLane[lane]}:
 		default:
-			cancel()
-			r.mu.Lock()
-			delete(r.runs, runID)
-			r.mu.Unlock()
-			_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "lane queue full")
-			return 0, ErrQueueFull
+			queueFull = true
+		}
+		if queueFull {
+			break
 		}
 	}
-	r.publishRun(runID, "queued", "")
+	if queueFull {
+		cancel()
+		delete(r.runs, runID)
+	}
+	r.mu.Unlock()
+
+	if queueFull {
+		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "lane queue full")
+		r.publishRun(runID, "failed", "lane queue full")
+		return 0, ErrQueueFull
+	}
 	return runID, nil
 }
 
@@ -229,19 +243,36 @@ func (r *Runner) runContext(runID int64) (context.Context, bool) {
 }
 
 // Cancel aborts an in-flight or queued run. It reports whether the run was
-// known to the runner.
+// known to the runner. When the run has not started any lane yet, the
+// canceled status is persisted immediately (rather than waiting for a
+// worker to eventually dequeue it), and started_at is never set.
 func (r *Runner) Cancel(runID int64) bool {
 	r.mu.Lock()
 	st, ok := r.runs[runID]
-	if ok {
-		st.canceled = true
-	}
-	r.mu.Unlock()
 	if !ok {
+		r.mu.Unlock()
 		return false
 	}
-	st.cancel()
+	st.canceled = true
+	notStarted := !st.started
+	cancel := st.cancel
+	r.mu.Unlock()
+
+	cancel()
+	if notStarted {
+		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "")
+		r.publishRun(runID, "canceled", "")
+	}
 	return true
+}
+
+// markStarted records that a run has begun executing at least one lane.
+func (r *Runner) markStarted(runID int64) {
+	r.mu.Lock()
+	if st, ok := r.runs[runID]; ok {
+		st.started = true
+	}
+	r.mu.Unlock()
 }
 
 // execute runs one lane's targets sequentially.
@@ -250,6 +281,13 @@ func (r *Runner) execute(j job) {
 	if !ok {
 		return
 	}
+	if ctx.Err() != nil {
+		// Canceled while still queued: never write "running" or start a
+		// target, so started_at stays unset.
+		r.finishLane(j.runID, false, true)
+		return
+	}
+	r.markStarted(j.runID)
 	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
 		r.publishRun(j.runID, "running", "")
 	}
@@ -326,19 +364,23 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target) boo
 	res.ServerID, res.ServerName, res.ServerHost = out.ServerID, out.ServerName, out.ServerHost
 	res.ISP, res.ExternalIP, res.ResultURL = out.ISP, out.ExternalIP, out.ResultURL
 	res.Raw = out.Raw
-	r.storeResult(res)
-	return false
+	// A failure to persist the result means the run must not end up "done"
+	// with no result row for this target, even though the test itself
+	// succeeded.
+	return !r.storeResult(res)
 }
 
-// storeResult writes the row and publishes the result event.
-func (r *Runner) storeResult(res *store.Result) {
+// storeResult writes the row and publishes the result event. It reports
+// whether the row was written.
+func (r *Runner) storeResult(res *store.Result) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := r.cfg.Store.InsertResult(ctx, res); err != nil {
-		r.cfg.Logger.Error("store result", "error", err, "target", res.TargetName)
-		return
+		r.cfg.Logger.Error("store result", "error", err, "target", res.TargetName, "run_id", res.RunID)
+		return false
 	}
 	r.cfg.Hub.Publish(r.cfg.Hub.Marshal(sse.EventResult, res))
+	return true
 }
 
 // finishLane records a lane job's outcome and, when it is the run's last
@@ -388,7 +430,10 @@ func (r *Runner) publishRun(runID int64, status, errMsg string) {
 }
 
 // Shutdown stops accepting work, waits up to Grace for in-flight lanes,
-// then cancels what is left and marks those runs canceled.
+// then force-cancels what is left and marks only the runs still genuinely
+// in flight as canceled — a run finishLane already resolved to done/failed
+// is never relabeled. If ctx is done before everything settles, Shutdown
+// returns ctx.Err().
 func (r *Runner) Shutdown(ctx context.Context) error {
 	r.mu.Lock()
 	if r.closing {
@@ -406,11 +451,13 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 
 	graceTimer := time.NewTimer(r.cfg.Grace)
 	defer graceTimer.Stop()
+	gaveUp := false
 	select {
 	case <-done:
 		return nil
 	case <-graceTimer.C:
 	case <-ctx.Done():
+		gaveUp = true
 	}
 
 	r.mu.Lock()
@@ -422,17 +469,34 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	}
 	r.mu.Unlock()
 
-	select {
-	case <-done:
-	case <-ctx.Done():
-	case <-time.After(5 * time.Second):
+	if !gaveUp {
+		select {
+		case <-done:
+		case <-ctx.Done():
+			gaveUp = true
+		}
 	}
+
 	for _, id := range stuck {
+		r.mu.Lock()
+		_, stillInFlight := r.runs[id]
+		r.mu.Unlock()
+		if !stillInFlight {
+			// finishLane already ran and persisted the run's real terminal
+			// status (done/failed/canceled); do not overwrite it.
+			continue
+		}
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := r.cfg.Store.SetRunStatus(markCtx, id, "canceled", "server shutdown"); err != nil {
 			r.cfg.Logger.Error("mark canceled", "error", err, "run_id", id)
+		} else {
+			r.publishRun(id, "canceled", "server shutdown")
 		}
 		cancel()
+	}
+
+	if gaveUp {
+		return ctx.Err()
 	}
 	return nil
 }
