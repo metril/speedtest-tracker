@@ -68,6 +68,20 @@ func New(deps Deps) http.Handler {
 			t.Get("/{id}/latest", deps.targetLatest)
 		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
+		v1.Route("/runs", func(rt chi.Router) {
+			rt.Get("/", deps.listRuns)
+			rt.Post("/", deps.createRun)
+			rt.Get("/{id}", deps.getRun)
+			rt.Delete("/{id}", deps.cancelRun)
+		})
+		v1.Route("/results", func(rs chi.Router) {
+			rs.Get("/", deps.listResults)
+			rs.Get("/{id}", deps.getResult)
+			rs.Delete("/{id}", deps.deleteResult)
+			rs.Post("/{id}/reexecute", deps.reexecuteResult)
+			rs.Put("/{id}/tags", deps.setResultTags)
+		})
+		v1.Get("/tags", deps.listTags)
 	})
 
 	if deps.UI != nil {
