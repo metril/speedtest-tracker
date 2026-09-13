@@ -50,7 +50,9 @@ func (l *ServerList) Invalidate() {
 	l.cache, l.fetchedAt = nil, time.Time{}
 }
 
-// Servers returns the cached list, refreshing it when older than the TTL.
+// Servers returns the cached list, refreshing it when older than the TTL. A
+// refresh failure returns the error as-is; it never falls back to serving a
+// stale cache.
 func (l *ServerList) Servers(ctx context.Context) ([]Server, error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()

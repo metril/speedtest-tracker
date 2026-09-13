@@ -3,9 +3,11 @@ package ookla
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/exectest"
@@ -89,6 +91,32 @@ func TestRunErrorExitWithStderr(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "boom") {
 		t.Errorf("err = %v, want it to contain stderr output", err)
+	}
+}
+
+func TestRunHonoursContextCancel(t *testing.T) {
+	bin := exectest.Build(t, "speedtest", "sleep 30")
+	e := New(bin, Config{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := e.Run(ctx, nil, nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return within 3s of cancellation")
 	}
 }
 
