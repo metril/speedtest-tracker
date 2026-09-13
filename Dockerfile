@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 
 # ---- stage 1: build the SPA into internal/web/dist -------------------------
-FROM node:24-alpine AS web
+FROM --platform=$BUILDPLATFORM node:24-alpine AS web
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -9,14 +9,16 @@ COPY web/ ./
 RUN npm run build
 
 # ---- stage 2: build the static Go binary ----------------------------------
-FROM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.25 AS build
 ARG VERSION=dev
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web /src/internal/web/dist ./internal/web/dist
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath \
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
       -ldflags "-s -w -X main.version=${VERSION}" \
       -o /out/speedtest-tracker ./cmd/speedtest-tracker
 
