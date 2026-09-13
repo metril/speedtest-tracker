@@ -11,7 +11,6 @@ build: web-build go-build
 
 web-build:
 	cd web && npm ci && npm run build
-	git checkout -- internal/web/dist/.gitkeep
 
 go-build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/speedtest-tracker
