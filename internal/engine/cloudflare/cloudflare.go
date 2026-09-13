@@ -187,10 +187,10 @@ func (e *Engine) latency(ctx context.Context, o Options, prog func(engine.Progre
 	if len(samples) == 0 {
 		return 0, 0, colo, ip, errors.New("cloudflare: no latency samples")
 	}
-	min := samples[0]
+	best := samples[0]
 	for _, s := range samples {
-		if s < min {
-			min = s
+		if s < best {
+			best = s
 		}
 	}
 	var jitter float64
@@ -206,10 +206,10 @@ func (e *Engine) latency(ctx context.Context, o Options, prog func(engine.Progre
 		jitter = sum / float64(len(samples)-1)
 	}
 	// A zero RTT (loopback, coarse clock) would make bps infinite later.
-	if min <= 0 {
-		min = 0.001
+	if best <= 0 {
+		best = 0.001
 	}
-	return min, jitter, colo, ip, nil
+	return best, jitter, colo, ip, nil
 }
 
 // transfer runs every configured size in phase and returns the p90 of the
@@ -222,12 +222,14 @@ func (e *Engine) transfer(ctx context.Context, o Options, phase engine.Phase, si
 	for i, size := range sizes {
 		var (
 			dur time.Duration
+			n   int64
 			err error
 		)
 		if phase == engine.PhaseDownload {
-			dur, err = e.download(ctx, o.BaseURL, size)
+			dur, n, err = e.download(ctx, o.BaseURL, size)
 		} else {
 			dur, err = e.upload(ctx, o.BaseURL, size)
+			n = int64(size)
 		}
 		if err != nil {
 			return 0, 0, err
@@ -242,7 +244,7 @@ func (e *Engine) transfer(ctx context.Context, o Options, phase engine.Phase, si
 		}
 		bps := float64(size) * 8 / secs
 		rates = append(rates, bps)
-		total += int64(size)
+		total += n
 		engine.Emit(prog, engine.Progress{
 			Phase: phase, Progress: float64(i+1) / float64(len(sizes)),
 			Bps: bps, PingMs: pingMs, ElapsedMs: elapsed(), ServerName: colo,
@@ -251,24 +253,25 @@ func (e *Engine) transfer(ctx context.Context, o Options, phase engine.Phase, si
 	return percentile(rates, 0.9), total, nil
 }
 
-func (e *Engine) download(ctx context.Context, base string, size int) (time.Duration, error) {
+func (e *Engine) download(ctx context.Context, base string, size int) (time.Duration, int64, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("%s/__down?bytes=%d", base, size), nil)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	t0 := time.Now()
 	resp, err := e.client.Do(req)
 	if err != nil {
-		return 0, fmt.Errorf("cloudflare download: %w", err)
+		return 0, 0, fmt.Errorf("cloudflare download: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
-		return 0, fmt.Errorf("cloudflare download: status %d", resp.StatusCode)
+		return 0, 0, fmt.Errorf("cloudflare download: status %d", resp.StatusCode)
 	}
-	if _, err := io.Copy(io.Discard, resp.Body); err != nil {
-		return 0, fmt.Errorf("cloudflare download: %w", err)
+	n, err := io.Copy(io.Discard, resp.Body)
+	if err != nil {
+		return 0, n, fmt.Errorf("cloudflare download: %w", err)
 	}
-	return time.Since(t0), nil
+	return time.Since(t0), n, nil
 }
 
 func (e *Engine) upload(ctx context.Context, base string, size int) (time.Duration, error) {

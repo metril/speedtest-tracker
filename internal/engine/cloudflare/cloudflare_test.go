@@ -3,6 +3,7 @@ package cloudflare
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 	"strconv"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
 )
@@ -114,6 +116,39 @@ func TestRunServerError(t *testing.T) {
 	opts, _ := json.Marshal(Options{BaseURL: srv.URL, LatencySamples: 1, DownloadSizes: []int{1000}, UploadSizes: []int{1000}})
 	if _, err := New(srv.Client()).Run(context.Background(), opts, nil); err == nil {
 		t.Fatal("want error")
+	}
+}
+
+func TestRunHonoursContextCancel(t *testing.T) {
+	blocked := make(chan struct{})
+	mux := http.NewServeMux()
+	mux.HandleFunc("/cdn-cgi/trace", func(w http.ResponseWriter, r *http.Request) {
+		close(blocked)
+		<-r.Context().Done()
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	opts, _ := json.Marshal(Options{BaseURL: srv.URL, LatencySamples: 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		<-blocked
+		cancel()
+	}()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := New(srv.Client()).Run(ctx, opts, nil)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Errorf("err = %v, want context.Canceled", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("Run did not return within 3s of cancellation")
 	}
 }
 
