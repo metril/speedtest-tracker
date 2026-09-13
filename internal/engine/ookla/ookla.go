@@ -6,11 +6,33 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os/exec"
 	"strconv"
+	"strings"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
+	"github.com/metril/speedtest-tracker/internal/engine/execx"
 )
+
+// stderrTailLimit bounds how much of the CLI's stderr we keep around to
+// fold into an error message; stderr is not expected to be large.
+const stderrTailLimit = 4 << 10 // 4 KiB
+
+// tailBuffer is an io.Writer that keeps only the last limit bytes written
+// to it.
+type tailBuffer struct {
+	buf   []byte
+	limit int
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.limit {
+		b.buf = b.buf[len(b.buf)-b.limit:]
+	}
+	return len(p), nil
+}
+
+func (b *tailBuffer) String() string { return strings.TrimSpace(string(b.buf)) }
 
 // Options are the Ookla engine's per-target options.
 type Options struct {
@@ -77,13 +99,13 @@ func (e *Engine) Run(ctx context.Context, opts json.RawMessage, prog func(engine
 	if err != nil {
 		return nil, err
 	}
-	cmd := exec.CommandContext(ctx, e.Bin, e.Args(o)...)
-	cmd.SysProcAttr = sysProcAttr()
+	cmd := execx.Command(ctx, e.Bin, e.Args(o)...)
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, err
 	}
-	cmd.Stderr = io.Discard
+	stderr := &tailBuffer{limit: stderrTailLimit}
+	cmd.Stderr = stderr
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", e.Bin, err)
 	}
@@ -92,11 +114,19 @@ func (e *Engine) Run(ctx context.Context, opts json.RawMessage, prog func(engine
 	_, _ = io.Copy(io.Discard, stdout) // drain so the child never blocks
 	waitErr := cmd.Wait()
 
-	if parseErr != nil {
+	if res != nil {
+		// A parsed result outranks a nonzero exit: some CLI versions exit
+		// nonzero after already printing a valid result record.
+		return res, nil
+	}
+	if parseErr != nil && !errors.Is(parseErr, errNoResult) {
 		return nil, parseErr // the CLI's own error message is the useful one
 	}
 	if waitErr != nil {
+		if tail := stderr.String(); tail != "" {
+			return nil, fmt.Errorf("%s: %w: %s", e.Bin, waitErr, tail)
+		}
 		return nil, fmt.Errorf("%s: %w", e.Bin, waitErr)
 	}
-	return res, nil
+	return nil, parseErr
 }

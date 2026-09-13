@@ -66,6 +66,12 @@ type logLine struct {
 // bufSize caps a JSONL line at 1 MiB; result lines are a few KiB at most.
 const bufSize = 1 << 20
 
+// errNoResult is returned when the stream ended without a result record and
+// without a log-level error record either. It lets callers (e.g. ookla.Run)
+// distinguish "the CLI told us why it failed" from "we have nothing to go
+// on but the exit code and stderr".
+var errNoResult = errors.New("speedtest: no result record in output")
+
 // parseStream consumes the CLI's JSONL output, emitting a Progress event for
 // every ping/download/upload record and returning the Result built from the
 // final result record. An error-level log record is returned as the error if
@@ -144,7 +150,7 @@ func parseStream(r io.Reader, prog func(engine.Progress)) (*engine.Result, error
 	if logErr != nil {
 		return nil, fmt.Errorf("speedtest: %s", logErr.Message)
 	}
-	return nil, errors.New("speedtest: no result record in output")
+	return nil, errNoResult
 }
 
 func transferProgress(phase engine.Phase, t transfer, serverName string) engine.Progress {

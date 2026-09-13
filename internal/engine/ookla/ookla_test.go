@@ -67,6 +67,31 @@ func TestRunErrorExit(t *testing.T) {
 	}
 }
 
+func TestRunSuccessDespiteNonZeroExit(t *testing.T) {
+	// A parsed result line must win over a nonzero exit code: some CLI
+	// versions exit nonzero after already printing a valid result record.
+	bin := exectest.Build(t, "speedtest", exectest.ScriptEmitFile(fixturePath(t, "tcp_success.jsonl"), 1))
+	res, err := New(bin, Config{}).Run(context.Background(), nil, nil)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.DownloadBps != 92_000_000 {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+func TestRunErrorExitWithStderr(t *testing.T) {
+	// No stdout and no JSON error line: the error must surface stderr.
+	bin := exectest.Build(t, "speedtest", "echo boom >&2\nexit 2")
+	_, err := New(bin, Config{}).Run(context.Background(), nil, nil)
+	if err == nil {
+		t.Fatal("want error")
+	}
+	if !strings.Contains(err.Error(), "boom") {
+		t.Errorf("err = %v, want it to contain stderr output", err)
+	}
+}
+
 func TestRunMissingBinary(t *testing.T) {
 	_, err := New("/nonexistent/speedtest", Config{}).Run(context.Background(), nil, nil)
 	if err == nil {

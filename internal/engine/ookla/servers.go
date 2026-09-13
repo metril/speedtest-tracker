@@ -4,10 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/metril/speedtest-tracker/internal/engine/execx"
 )
 
 // Server is one entry of the Ookla server list.
@@ -65,8 +66,7 @@ func (l *ServerList) Servers(ctx context.Context) ([]Server, error) {
 }
 
 func fetchServers(ctx context.Context, bin string) ([]Server, error) {
-	cmd := exec.CommandContext(ctx, bin, "-L", "-f", "json")
-	cmd.SysProcAttr = sysProcAttr()
+	cmd := execx.Command(ctx, bin, "-L", "-f", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("%s -L: %w", bin, err)
