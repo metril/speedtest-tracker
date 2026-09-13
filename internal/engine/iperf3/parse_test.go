@@ -98,6 +98,25 @@ func TestParseSummaryUDP(t *testing.T) {
 	}
 }
 
+func TestParseSummaryUDPReverse(t *testing.T) {
+	res, err := parseSummary(fixture(t, "udp_reverse.json"), mustOptions(t, `{"host":"nas.lan","protocol":"udp","reverse":true}`))
+	if err != nil {
+		t.Fatalf("parseSummary: %v", err)
+	}
+	if res.DownloadBps != 94_400_000 {
+		t.Errorf("DownloadBps = %v, want 94400000", res.DownloadBps)
+	}
+	if res.UploadBps != 0 {
+		t.Errorf("UploadBps = %v, want 0", res.UploadBps)
+	}
+	if res.JitterMs != 0.951 {
+		t.Errorf("JitterMs = %v, want 0.951", res.JitterMs)
+	}
+	if res.PacketLossPct != 0.024 {
+		t.Errorf("PacketLossPct = %v, want 0.024", res.PacketLossPct)
+	}
+}
+
 func TestParseSummaryError(t *testing.T) {
 	_, err := parseSummary(fixture(t, "error.json"), mustOptions(t, `{"host":"nas.lan"}`))
 	if err == nil {

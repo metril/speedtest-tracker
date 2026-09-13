@@ -61,6 +61,15 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 	if o.Reverse && o.Bidir {
 		return Options{}, errors.New("iperf3 options: reverse and bidir are mutually exclusive")
 	}
+	if o.Bidir && o.Protocol == "udp" {
+		return Options{}, errors.New("iperf3 options: bidir is not supported with udp")
+	}
+	if o.UDPBitrate != "" && o.Protocol != "udp" {
+		return Options{}, errors.New("iperf3 options: udp_bitrate requires protocol udp")
+	}
+	if o.Password != "" && (o.Username == "" || o.RSAPublicKeyPath == "") {
+		return Options{}, errors.New("iperf3 options: password requires username and rsa_public_key_path")
+	}
 	return o, nil
 }
 

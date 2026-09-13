@@ -65,6 +65,10 @@ func TestParseOptionsValidation(t *testing.T) {
 		`{"host":"h","duration_s":-5}`,
 		`{"host":"h","reverse":true,"bidir":true}`,
 		`{"host":"h",`,
+		`{"host":"h","udp_bitrate":"100M"}`,            // udp_bitrate without protocol udp
+		`{"host":"h","protocol":"udp","bidir":true}`,   // bidir with udp
+		`{"host":"h","password":"x"}`,                  // password without username/rsa key
+		`{"host":"h","password":"x","username":"bob"}`, // password without rsa key
 	} {
 		if _, err := parseOptions(json.RawMessage(raw)); err == nil {
 			t.Errorf("parseOptions(%s) = nil error, want error", raw)

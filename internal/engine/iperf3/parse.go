@@ -10,6 +10,13 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine"
 )
 
+// errNoDocument is returned when a summary or stream document contained no
+// usable result (empty/unparseable JSON, or no throughput/end event). It
+// lets Run distinguish "we have nothing to go on but the exit code and
+// stderr" from "iperf3 told us why it failed", mirroring errNoResult in the
+// ookla engine.
+var errNoDocument = errors.New("iperf3: no result document in output")
+
 type sum struct {
 	Start         float64 `json:"start"`
 	End           float64 `json:"end"`
@@ -44,7 +51,7 @@ type summary struct {
 func parseSummary(data []byte, o Options) (*engine.Result, error) {
 	var s summary
 	if err := json.Unmarshal(data, &s); err != nil {
-		return nil, fmt.Errorf("iperf3: parse json: %w", err)
+		return nil, fmt.Errorf("%w: parse json: %v", errNoDocument, err)
 	}
 	if s.Error != "" {
 		return nil, fmt.Errorf("iperf3: %s", s.Error)
@@ -82,7 +89,7 @@ func parseSummary(data []byte, o Options) (*engine.Result, error) {
 		res.BytesUp = s.End.SumReceived.Bytes
 	}
 	if res.DownloadBps == 0 && res.UploadBps == 0 {
-		return nil, errors.New("iperf3: no throughput in summary")
+		return nil, fmt.Errorf("%w: no throughput in summary", errNoDocument)
 	}
 	return res, nil
 }
@@ -166,7 +173,7 @@ func parseStreamJSONL(r io.Reader, o Options, prog func(engine.Progress)) (*engi
 		return nil, fmt.Errorf("iperf3: %s", errMsg)
 	}
 	if res == nil {
-		return nil, errors.New("iperf3: no end event in stream")
+		return nil, fmt.Errorf("%w: no end event in stream", errNoDocument)
 	}
 	engine.Emit(prog, engine.Progress{
 		Phase: engine.PhaseDone, Progress: 1,
