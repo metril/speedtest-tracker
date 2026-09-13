@@ -1,0 +1,14 @@
+/speedtest-tracker
+/dist/
+/data/
+docs/superpowers/
+.superpowers/
+node_modules/
+web/node_modules/
+web/.vite/
+internal/web/dist/*
+!internal/web/dist/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+.DS_Store
