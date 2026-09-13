@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -61,7 +63,10 @@ func (s *Store) SetResultTags(ctx context.Context, resultID int64, names []strin
 
 	var exists int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM results WHERE id=?`, resultID).Scan(&exists); err != nil {
-		return nil, ErrNotFound
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("check result %d exists: %w", resultID, err)
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM result_tags WHERE result_id=?`, resultID); err != nil {
 		return nil, fmt.Errorf("clear result tags: %w", err)

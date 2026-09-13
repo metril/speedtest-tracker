@@ -52,6 +52,23 @@ func TestSetResultTags(t *testing.T) {
 	}
 }
 
+func TestSetResultTagsCancelledContextNotNotFound(t *testing.T) {
+	s := openTemp(t)
+	tid, _ := s.CreateTarget(context.Background(), &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	rid := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	_, err := s.SetResultTags(cancelled, rid, []string{"x"})
+	if err == nil {
+		t.Fatal("SetResultTags with cancelled context: want error, got nil")
+	}
+	if errors.Is(err, ErrNotFound) {
+		t.Errorf("SetResultTags with cancelled context = %v, want a non-ErrNotFound error", err)
+	}
+}
+
 func TestListResultsIncludesTags(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 	tid, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
