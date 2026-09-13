@@ -1,0 +1,4 @@
+{"event":"start","data":{"connecting_to":{"host":"nas.lan","port":5201},"version":"iperf 3.17.1"}}
+{"event":"interval","data":{"sum":{"start":0,"end":1.0,"seconds":1.0,"bytes":12500000,"bits_per_second":100000000}}}
+{"event":"interval","data":{"sum":{"start":1.0,"end":2.0,"seconds":1.0,"bytes":13000000,"bits_per_second":104000000}}}
+{"event":"end","data":{"end":{"sum_sent":{"seconds":2.0,"bytes":25500000,"bits_per_second":102000000,"sender":true},"sum_received":{"seconds":2.0,"bytes":25000000,"bits_per_second":100000000,"sender":false}}}}

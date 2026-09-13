@@ -1,0 +1,1 @@
+{"start":{"connecting_to":{"host":"nas.lan","port":5201},"version":"iperf 3.17.1"},"end":{"sum_bidir_forward":{"seconds":10.0,"bytes":125000000,"bits_per_second":100000000,"sender":true},"sum_bidir_reverse":{"seconds":10.0,"bytes":250000000,"bits_per_second":200000000,"sender":false}}}

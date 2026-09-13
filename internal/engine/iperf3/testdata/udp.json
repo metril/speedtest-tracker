@@ -1,0 +1,1 @@
+{"start":{"connecting_to":{"host":"nas.lan","port":5201},"version":"iperf 3.17.1","test_start":{"protocol":"UDP"}},"end":{"sum":{"seconds":10.0,"bytes":125000000,"bits_per_second":100000000,"jitter_ms":0.842,"lost_packets":12,"packets":90000,"lost_percent":0.013}}}
