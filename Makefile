@@ -2,15 +2,20 @@ BINARY   := speedtest-tracker
 VERSION  ?= dev
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build web-build go-build test go-test web-test dev lint clean
+.PHONY: all build web-build web-deps go-build test go-test web-test dev lint clean
 
 all: build
 
 ## build: build the web UI into internal/web/dist, then the Go binary
 build: web-build go-build
 
-web-build:
-	cd web && npm ci && npm run build
+web-build: web-deps
+	cd web && npm run build
+
+web-deps: web/node_modules/.package-lock.json
+
+web/node_modules/.package-lock.json: web/package-lock.json
+	cd web && npm ci
 
 go-build:
 	CGO_ENABLED=0 go build -trimpath -ldflags '$(LDFLAGS)' -o $(BINARY) ./cmd/speedtest-tracker
@@ -22,7 +27,7 @@ go-test:
 	go vet ./...
 	go test ./... -race
 
-web-test:
+web-test: web-deps
 	cd web && npm test
 
 ## dev: run the Go server and the Vite dev server side by side
@@ -30,7 +35,7 @@ dev:
 	go run ./cmd/speedtest-tracker & cd web && npm run dev
 
 ## lint: go vet plus TypeScript type checking
-lint:
+lint: web-deps
 	go vet ./...
 	cd web && npm run lint
 
