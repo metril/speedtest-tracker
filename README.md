@@ -5,9 +5,9 @@ named schedules, SQLite as the source of truth, with an embedded React UI.
 
 ## Status
 
-Milestone 1 (skeleton): configuration, SQLite store and migrations, settings
-store, HTTP router with `/healthz`, and the embedded SPA shell. Test engines
-arrive in milestone 2.
+Milestone 2 (engines): the `Engine` interface plus the Ookla, Cloudflare,
+iperf3 and fake engines with fixture-tested parsers. Targets, schedules and
+the UI arrive in later milestones.
 
 ## Requirements
 
@@ -31,6 +31,29 @@ and stored in the database.
 | --- | --- | --- |
 | `ST_DB_PATH` | `/data/speedtest.db` in a container, else `./data/speedtest.db` | SQLite file |
 | `ST_LISTEN` | `:8080` | HTTP listen address |
+
+## Engines
+
+| Engine | How it runs | Options |
+| --- | --- | --- |
+| `ookla` | `speedtest -f jsonl --progress=yes --accept-license --accept-gdpr [-s ID]`; server list from `speedtest -L -f json`, cached | `server_id` |
+| `cloudflare` | native Go against `speed.cloudflare.com` (`/cdn-cgi/trace`, `/__down`, `/__up`), p90 of per-transfer throughput | `download_sizes`, `upload_sizes`, `latency_samples`, `base_url` |
+| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
+| `fake` | deterministic, no I/O; used by tests | `fail`, `download_bps`, `upload_bps` |
+
+Binary paths and the Ookla consent flags live in the Engines settings section
+(`engines.speedtest_bin`, `engines.iperf3_bin`, `engines.ookla_accept_license`,
+`engines.ookla_accept_gdpr`, `engines.server_list_ttl_seconds`).
+
+Run one test by hand (requires the corresponding binary to be installed):
+
+```bash
+./speedtest-tracker run --engine cloudflare --opts '{}'
+./speedtest-tracker run --engine ookla --opts '{"server_id":12345}'
+./speedtest-tracker run --engine iperf3 --opts '{"host":"nas.lan","reverse":true}'
+```
+
+The Result JSON goes to stdout; progress events stream to stderr as JSON lines.
 
 ## Docker
 

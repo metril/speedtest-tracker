@@ -27,6 +27,11 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		os.Exit(healthcheckMain(config.Load().Listen))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "run" {
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+		defer stop()
+		os.Exit(runCmd(ctx, os.Args[2:], os.Stdout, os.Stderr))
+	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
