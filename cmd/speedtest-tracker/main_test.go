@@ -60,3 +60,39 @@ func TestRunServesHealthzAndShutsDown(t *testing.T) {
 		t.Fatal("run did not return after context cancel")
 	}
 }
+
+func TestHealthcheckSucceedsAgainstRunningServer(t *testing.T) {
+	addr := freePort(t)
+	t.Setenv("ST_LISTEN", addr)
+	t.Setenv("ST_DB_PATH", filepath.Join(t.TempDir(), "main.db"))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	errCh := make(chan error, 1)
+	go func() { errCh <- run(ctx, slog.New(slog.NewJSONHandler(io.Discard, nil))) }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	var err error
+	for time.Now().Before(deadline) {
+		if err = healthcheck(addr); err == nil {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("healthcheck: %v", err)
+	}
+	if code := healthcheckMain(addr); code != 0 {
+		t.Errorf("healthcheckMain = %d, want 0", code)
+	}
+}
+
+func TestHealthcheckFailsWhenServerDown(t *testing.T) {
+	addr := freePort(t) // nothing listening on this address
+	if err := healthcheck(addr); err == nil {
+		t.Fatal("healthcheck against a closed port: want error, got nil")
+	}
+	if code := healthcheckMain(addr); code != 1 {
+		t.Errorf("healthcheckMain = %d, want 1", code)
+	}
+}
