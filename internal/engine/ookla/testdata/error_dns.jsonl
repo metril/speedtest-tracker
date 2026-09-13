@@ -1,0 +1,2 @@
+{"type":"log","timestamp":"2026-09-13T10:05:00Z","level":"info","message":"Selecting server"}
+{"type":"log","timestamp":"2026-09-13T10:05:01Z","level":"error","message":"Cannot read: Temporary failure in name resolution"}
