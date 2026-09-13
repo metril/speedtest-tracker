@@ -1,0 +1,1 @@
+{"servers":[{"id":12345,"host":"speed.example.net:8080","port":8080,"name":"Example Server","location":"Berlin","country":"Germany"},{"id":67890,"host":"fast.example.org:8080","port":8080,"name":"Fast Example","location":"Munich","country":"Germany"}]}
