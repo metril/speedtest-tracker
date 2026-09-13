@@ -2,8 +2,11 @@ package store
 
 import (
 	"context"
+	"database/sql"
+	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func openTemp(t *testing.T) *Store {
@@ -70,19 +73,79 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 
 func TestPragmas(t *testing.T) {
 	s := openTemp(t)
-	for _, tc := range []struct{ pragma, want string }{
-		{"journal_mode", "wal"},
-		{"foreign_keys", "1"},
-		{"busy_timeout", "5000"},
-		{"synchronous", "1"},
+	for _, pool := range []struct {
+		name string
+		db   *sql.DB
+	}{
+		{"write", s.Write},
+		{"read", s.Read},
 	} {
-		var got string
-		if err := s.Write.QueryRow("PRAGMA " + tc.pragma).Scan(&got); err != nil {
-			t.Fatalf("PRAGMA %s: %v", tc.pragma, err)
+		for _, tc := range []struct{ pragma, want string }{
+			{"journal_mode", "wal"},
+			{"foreign_keys", "1"},
+			{"busy_timeout", "5000"},
+			{"synchronous", "1"},
+		} {
+			var got string
+			if err := pool.db.QueryRow("PRAGMA " + tc.pragma).Scan(&got); err != nil {
+				t.Fatalf("%s pool PRAGMA %s: %v", pool.name, tc.pragma, err)
+			}
+			if got != tc.want {
+				t.Errorf("%s pool PRAGMA %s = %q, want %q", pool.name, tc.pragma, got, tc.want)
+			}
 		}
-		if got != tc.want {
-			t.Errorf("PRAGMA %s = %q, want %q", tc.pragma, got, tc.want)
-		}
+	}
+}
+
+// TestReadPoolDoesNotTakeWriteLock ensures only the write pool uses
+// _txlock=immediate. If the read pool inherited it, a read BeginTx would
+// itself try to grab the write lock and block behind an open write
+// transaction, defeating WAL's concurrent readers.
+func TestReadPoolDoesNotTakeWriteLock(t *testing.T) {
+	s := openTemp(t)
+
+	wtx, err := s.Write.BeginTx(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("write BeginTx: %v", err)
+	}
+	defer wtx.Rollback()
+	if _, err := wtx.Exec(`INSERT INTO targets(name,engine) VALUES('t','ookla')`); err != nil {
+		t.Fatalf("write insert: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	rtx, err := s.Read.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatalf("read BeginTx blocked on write lock: %v", err)
+	}
+	defer rtx.Rollback()
+
+	var n int
+	if err := rtx.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_master`).Scan(&n); err != nil {
+		t.Fatalf("read query blocked: %v", err)
+	}
+}
+
+func TestOpenEscapesSpecialPathCharacters(t *testing.T) {
+	dir, err := os.MkdirTemp("", "a?b#c")
+	if err != nil {
+		t.Skipf("cannot create dir with special chars on this filesystem: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+
+	s, err := Open(filepath.Join(dir, "test.db"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer s.Close()
+
+	var n int
+	if err := s.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if n != 1 {
+		t.Errorf("schema_migrations rows = %d, want 1", n)
 	}
 }
 

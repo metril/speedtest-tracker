@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -23,13 +24,15 @@ type Store struct {
 	Path  string
 }
 
-// pragmas are appended to the DSN so every new connection in either pool
-// gets them, not just the first one.
-const pragmas = "?_pragma=journal_mode(WAL)" +
-	"&_pragma=foreign_keys(1)" +
-	"&_pragma=busy_timeout(5000)" +
-	"&_pragma=synchronous(1)" +
-	"&_txlock=immediate"
+// commonPragmas apply to every connection in both pools.
+var commonPragmas = url.Values{
+	"_pragma": []string{
+		"journal_mode(WAL)",
+		"foreign_keys(1)",
+		"busy_timeout(5000)",
+		"synchronous(1)",
+	},
+}
 
 // Open opens (creating parent directories and the file as needed) the
 // database at path, applies pending migrations and returns the Store.
@@ -39,16 +42,28 @@ func Open(path string) (*Store, error) {
 			return nil, fmt.Errorf("create db directory: %w", err)
 		}
 	}
-	dsn := "file:" + path + pragmas
+	base := "file:" + url.PathEscape(path)
 
-	write, err := sql.Open("sqlite", dsn)
+	// _txlock=immediate makes every BEGIN take the write lock up front.
+	// That belongs only on the write pool: a read pool with the same
+	// setting would have its BeginTx calls block on (or steal) the
+	// write lock, defeating WAL's concurrent readers.
+	writeQuery := url.Values{}
+	for k, v := range commonPragmas {
+		writeQuery[k] = v
+	}
+	writeQuery.Set("_txlock", "immediate")
+	dsnWrite := base + "?" + writeQuery.Encode()
+	dsnRead := base + "?" + commonPragmas.Encode()
+
+	write, err := sql.Open("sqlite", dsnWrite)
 	if err != nil {
 		return nil, fmt.Errorf("open write pool: %w", err)
 	}
 	write.SetMaxOpenConns(1)
 	write.SetMaxIdleConns(1)
 
-	read, err := sql.Open("sqlite", dsn)
+	read, err := sql.Open("sqlite", dsnRead)
 	if err != nil {
 		write.Close()
 		return nil, fmt.Errorf("open read pool: %w", err)
