@@ -53,7 +53,12 @@ Run one test by hand (requires the corresponding binary to be installed):
 ./speedtest-tracker run --engine iperf3 --opts '{"host":"nas.lan","reverse":true}'
 ```
 
-The Result JSON goes to stdout; progress events stream to stderr as JSON lines.
+`run` reads the same settings database as the server (`ST_DB_PATH`),
+creating it with the seeded defaults if it doesn't exist yet, so binary
+paths and the Ookla consent flags match whatever the server has configured.
+`--speedtest-bin`/`--iperf3-bin` override just the binary path for that one
+invocation. The Result JSON goes to stdout; progress events stream to
+stderr as JSON lines.
 
 ## Docker
 

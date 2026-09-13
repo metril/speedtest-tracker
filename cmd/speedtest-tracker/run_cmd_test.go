@@ -4,11 +4,19 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
+
+// withTestDB points ST_DB_PATH at a fresh temp file so runCmd's settings
+// lookup never touches a real database.
+func withTestDB(t *testing.T) {
+	t.Helper()
+	t.Setenv("ST_DB_PATH", filepath.Join(t.TempDir(), "test.db"))
+}
 
 func TestBuildRegistryHasAllEngines(t *testing.T) {
 	r := buildRegistry(settings.Engines{SpeedtestBin: "speedtest", Iperf3Bin: "iperf3"})
@@ -19,6 +27,7 @@ func TestBuildRegistryHasAllEngines(t *testing.T) {
 }
 
 func TestRunCmdFakeEngine(t *testing.T) {
+	withTestDB(t)
 	var out, errBuf bytes.Buffer
 	code := runCmd(context.Background(), []string{"--engine", "fake", "--opts", "{}"}, &out, &errBuf)
 	if code != 0 {
@@ -40,6 +49,7 @@ func TestRunCmdFakeEngine(t *testing.T) {
 }
 
 func TestRunCmdUnknownEngine(t *testing.T) {
+	withTestDB(t)
 	var out, errBuf bytes.Buffer
 	if code := runCmd(context.Background(), []string{"--engine", "nope"}, &out, &errBuf); code == 0 {
 		t.Fatal("want non-zero exit")
@@ -50,6 +60,7 @@ func TestRunCmdUnknownEngine(t *testing.T) {
 }
 
 func TestRunCmdEngineFailure(t *testing.T) {
+	withTestDB(t)
 	var out, errBuf bytes.Buffer
 	code := runCmd(context.Background(), []string{"--engine", "fake", "--opts", `{"fail":true}`}, &out, &errBuf)
 	if code == 0 {
@@ -61,8 +72,24 @@ func TestRunCmdEngineFailure(t *testing.T) {
 }
 
 func TestRunCmdInvalidOpts(t *testing.T) {
+	withTestDB(t)
 	var out, errBuf bytes.Buffer
 	if code := runCmd(context.Background(), []string{"--engine", "iperf3", "--opts", "{}"}, &out, &errBuf); code == 0 {
 		t.Fatal("want non-zero exit for missing host")
+	}
+}
+
+func TestRunCmdBinOverrides(t *testing.T) {
+	withTestDB(t)
+	var out, errBuf bytes.Buffer
+	// The fake engine ignores bin overrides, but this exercises the flag
+	// parsing and settings-merge path end to end without a real binary.
+	code := runCmd(context.Background(), []string{
+		"--engine", "fake", "--opts", "{}",
+		"--speedtest-bin", "/custom/speedtest",
+		"--iperf3-bin", "/custom/iperf3",
+	}, &out, &errBuf)
+	if code != 0 {
+		t.Fatalf("exit code = %d, stderr = %s", code, errBuf.String())
 	}
 }

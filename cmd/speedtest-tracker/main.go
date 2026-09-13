@@ -29,8 +29,9 @@ func main() {
 	}
 	if len(os.Args) > 1 && os.Args[1] == "run" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-		defer stop()
-		os.Exit(runCmd(ctx, os.Args[2:], os.Stdout, os.Stderr))
+		code := runCmd(ctx, os.Args[2:], os.Stdout, os.Stderr)
+		stop()
+		os.Exit(code)
 	}
 
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
