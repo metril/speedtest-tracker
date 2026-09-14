@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
+import { inputClass } from '@/features/settings/styles';
 import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { TimezoneSelect } from '../../components/TimezoneSelect';
@@ -22,8 +24,6 @@ const PRESETS = [
 /** How long to wait after the last keystroke before asking the server to
  * validate the cron expression. */
 const PREVIEW_DEBOUNCE_MS = 300;
-
-const field = 'w-full h-9 rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-fg';
 
 interface Props {
   initial?: Schedule;
@@ -88,7 +88,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
           <FormField id="schedule-name" label="Name">
             <input
               id="schedule-name" value={name} onChange={(e) => setName(e.target.value)}
-              className={field}
+              className={inputClass}
             />
           </FormField>
 
@@ -97,7 +97,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
               {PRESETS.map((p) => (
                 <button
                   key={p.expr} type="button" onClick={() => setCron(p.expr)}
-                  className={`rounded-md border px-2 py-1 text-xs ${cron === p.expr ? 'border-accent text-accent' : 'border-line-strong text-muted hover:bg-surface'}`}
+                  className={`rounded-md border px-2 py-1 text-xs ${cron === p.expr ? 'border-accent text-accent' : 'border-line-strong text-muted hover:bg-raised'}`}
                 >
                   {p.label}
                 </button>
@@ -106,7 +106,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
             <FormField id="schedule-cron" label="Cron expression">
               <input
                 id="schedule-cron" value={cron} onChange={(e) => setCron(e.target.value)}
-                className={`${field} font-mono`}
+                className={cn(inputClass, 'font-mono')}
               />
             </FormField>
             <p data-testid="cron-preview" className="text-xs text-muted">
@@ -119,7 +119,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
           <FormField id="schedule-tz" label="Timezone">
             <TimezoneSelect
               id="schedule-tz" value={timezone} onChange={setTimezone}
-              className={field}
+              className={inputClass}
             />
           </FormField>
 

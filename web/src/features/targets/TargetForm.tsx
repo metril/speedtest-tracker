@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { inputClass } from '@/features/settings/styles';
 import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { ENGINES, type Target, type TargetInput, type ThresholdSet } from '../../lib/api';
@@ -17,7 +18,6 @@ interface Props {
   error?: string;
 }
 
-const field = 'w-full h-9 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
 
 /** TargetForm creates or edits one target. */
 export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: Props) {
@@ -59,17 +59,17 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
         >
           <div className="grid gap-3 sm:grid-cols-3">
             <FormField id="target-name" label="Name" error={touched && nameInvalid ? 'Name is required' : undefined}>
-              <input id="target-name" className={field} value={name}
+              <input id="target-name" className={inputClass} value={name}
                 onChange={(e) => setName(e.target.value)} />
             </FormField>
             <FormField id="target-engine" label="Engine">
-              <select id="target-engine" className={field} value={engine}
+              <select id="target-engine" className={inputClass} value={engine}
                 onChange={(e) => { setEngine(e.target.value); setOptions({}); }}>
                 {ENGINES.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
             </FormField>
             <FormField id="target-lane" label="Lane">
-              <select id="target-lane" className={field} value={lane}
+              <select id="target-lane" className={inputClass} value={lane}
                 onChange={(e) => setLane(e.target.value)}>
                 {LANES.map((l) => <option key={l} value={l}>{l}</option>)}
               </select>

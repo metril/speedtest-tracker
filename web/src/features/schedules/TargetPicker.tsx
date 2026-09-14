@@ -82,7 +82,7 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
               key={engine} type="button" aria-pressed={engines.has(engine)}
               onClick={() => toggleChip(engines, setEngines, engine)}
               className={`rounded-full border px-2 py-0.5 text-xs uppercase ${
-                engines.has(engine) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-surface'
+                engines.has(engine) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-raised'
               }`}
             >
               {engine}
@@ -93,7 +93,7 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
               key={lane} type="button" aria-pressed={lanes.has(lane)}
               onClick={() => toggleChip(lanes, setLanes, lane)}
               className={`rounded-full border px-2 py-0.5 text-xs ${
-                lanes.has(lane) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-surface'
+                lanes.has(lane) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-raised'
               }`}
             >
               {lane}
@@ -104,11 +104,11 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
 
       <div className="flex gap-2">
         <button type="button" onClick={selectAllMatching}
-          className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-surface">
+          className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised">
           Select all matching
         </button>
         <button type="button" onClick={clearMatching}
-          className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-surface">
+          className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised">
           Clear matching
         </button>
         <span className="ml-auto self-center text-xs text-faint">
@@ -124,7 +124,7 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
           const id = `target-picker-${t.id}`;
           return (
             <li key={t.id}>
-              <label htmlFor={id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface">
+              <label htmlFor={id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-raised">
                 <Checkbox
                   id={id} checked={selectedSet.has(t.id)}
                   onCheckedChange={() => toggleTarget(t.id)}
