@@ -66,6 +66,68 @@ export interface ResultFilters {
   limit?: number;
 }
 
+export type Range = '24h' | '7d' | '30d';
+
+export interface HistoryPoint {
+  bucket_start: string;
+  count: number;
+  fail_count: number;
+  avg_download_bps: number;
+  min_download_bps: number;
+  max_download_bps: number;
+  avg_upload_bps: number;
+  min_upload_bps: number;
+  max_upload_bps: number;
+  avg_ping_ms: number;
+  min_ping_ms: number;
+  max_ping_ms: number;
+  avg_jitter_ms: number;
+}
+
+export interface History {
+  target_id: number;
+  from: string;
+  to: string;
+  bucket_seconds: number;
+  points: HistoryPoint[];
+}
+
+export interface TargetSummary {
+  target_id: number;
+  target_name: string;
+  engine: string;
+  latest: Result | null;
+  count: number;
+  fail_count: number;
+  success_rate: number;
+  avg_download_bps: number;
+  min_download_bps: number;
+  max_download_bps: number;
+  avg_upload_bps: number;
+  avg_ping_ms: number;
+  max_ping_ms: number;
+}
+
+export interface SummaryStats {
+  from: string;
+  to: string;
+  targets: TargetSummary[];
+  total_results: number;
+  total_failures: number;
+  success_rate: number;
+}
+
+export interface Incident {
+  target_id: number | null;
+  target_name: string;
+  kind: 'result' | 'skipped';
+  status: string;
+  started_at: string;
+  ended_at: string;
+  count: number;
+  error?: string;
+}
+
 export interface TargetInput {
   name: string;
   engine: string;
@@ -197,6 +259,22 @@ export const validateCron = async (cron: string, timezone: string) =>
 
 export const listRuns = (scheduleId?: number) =>
   request<RunsPage>(`/runs${query({ schedule_id: scheduleId, limit: 20 })}`);
+
+export const targetHistory = (id: number, range: Range) =>
+  request<History>(`/targets/${id}/history${query({ range })}`);
+export const statsSummary = (range: Range) =>
+  request<SummaryStats>(`/stats/summary${query({ range })}`);
+export const listOutages = (range: Range) =>
+  request<{ from: string; to: string; incidents: Incident[] }>(`/outages${query({ range })}`);
+
+/** resultsCsvUrl builds the export link for the current filters. It is a
+ * plain href, not a fetch: the browser streams the download itself. */
+export const resultsCsvUrl = (filters: ResultFilters) =>
+  `${BASE}/results.csv${query({ ...filters, limit: undefined })}`;
+
+export const renameTag = (id: number, name: string) =>
+  request<{ id: number; name: string }>(`/tags/${id}`, { method: 'PUT', body: JSON.stringify({ name }) });
+export const deleteTag = (id: number) => request<void>(`/tags/${id}`, { method: 'DELETE' });
 
 /** targetLatest resolves to null when a target has no result yet, so
  * callers can render an empty state instead of an error. */

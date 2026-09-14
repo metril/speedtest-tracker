@@ -2,7 +2,9 @@ import {
   useInfiniteQuery, useMutation, useQuery, useQueryClient,
 } from '@tanstack/react-query';
 import * as api from './api';
-import type { ResultFilters, ScheduleInput, TargetInput } from './api';
+import type {
+  Range, ResultFilters, ScheduleInput, TargetInput,
+} from './api';
 
 export const queryKeys = {
   targets: ['targets'] as const,
@@ -14,6 +16,9 @@ export const queryKeys = {
   scheduleRuns: (id: number) => ['runs', 'schedule', id] as const,
   cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
   targetLatest: (id: number) => ['target-latest', id] as const,
+  history: (id: number, range: Range) => ['history', id, range] as const,
+  summary: (range: Range) => ['summary', range] as const,
+  outages: (range: Range) => ['outages', range] as const,
 };
 
 export function useTargets() {
@@ -171,5 +176,53 @@ export function useTargetLatest(id: number) {
   return useQuery({
     queryKey: queryKeys.targetLatest(id),
     queryFn: () => api.targetLatest(id),
+  });
+}
+
+export function useSummary(range: Range) {
+  return useQuery({
+    queryKey: queryKeys.summary(range),
+    queryFn: () => api.statsSummary(range),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  });
+}
+
+export function useTargetHistory(id: number, range: Range, enabled = true) {
+  return useQuery({
+    queryKey: queryKeys.history(id, range),
+    queryFn: () => api.targetHistory(id, range),
+    enabled,
+    staleTime: 60_000,
+  });
+}
+
+export function useOutages(range: Range) {
+  return useQuery({
+    queryKey: queryKeys.outages(range),
+    queryFn: () => api.listOutages(range),
+    staleTime: 60_000,
+  });
+}
+
+export function useRenameTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, name }: { id: number; name: string }) => api.renameTag(id, name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tags });
+      qc.invalidateQueries({ queryKey: ['results'] });
+    },
+  });
+}
+
+export function useDeleteTag() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteTag(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.tags });
+      qc.invalidateQueries({ queryKey: ['results'] });
+    },
   });
 }
