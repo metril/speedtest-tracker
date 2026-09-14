@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { useIperf3Servers, useOoklaServers } from '../../lib/queries';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
@@ -46,6 +47,33 @@ export function validateEngineOptions(engine: string, options: Options): string 
 }
 
 const DEBOUNCE_MS = 300;
+
+/** iperf3 option keys tucked behind the "Advanced options" disclosure —
+ * everything but host and the public-list picker. */
+const IPERF3_ADVANCED_KEYS = [
+  'port', 'protocol', 'parallel', 'duration_s', 'udp_bitrate', 'bind',
+  'username', 'rsa_public_key_path', 'password', 'reverse', 'bidir',
+] as const;
+
+function hasAdvancedIperf3Options(options: Options): boolean {
+  return IPERF3_ADVANCED_KEYS.some((k) => options[k] !== undefined && options[k] !== '');
+}
+
+/** summarizeIperf3Advanced renders the closed-disclosure summary line,
+ * e.g. "port 5201 · TCP · 10 s · -R". */
+function summarizeIperf3Advanced(options: Options): string {
+  const port = options.port !== undefined ? options.port : 5201;
+  const protocol = (options.protocol === 'udp' ? 'udp' : 'tcp').toUpperCase();
+  const duration = options.duration_s !== undefined ? options.duration_s : 10;
+  const parts: string[] = [`port ${port}`, protocol, `${duration} s`];
+  if (options.parallel !== undefined) parts.push(`x${options.parallel}`);
+  if (protocol === 'UDP' && options.udp_bitrate) parts.push(String(options.udp_bitrate));
+  if (options.bind) parts.push(`bind ${options.bind}`);
+  if (options.username) parts.push('auth');
+  if (options.reverse === true) parts.push('-R');
+  if (options.bidir === true) parts.push('--bidir');
+  return parts.join(' · ');
+}
 
 /** EngineOptionFields renders the option form for one engine. */
 export function EngineOptionFields({ engine, options, onChange }: Props) {
@@ -297,6 +325,11 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
   // as OoklaFields — see its onInteractOutside comment.
   const anchorRef = useRef<HTMLInputElement>(null);
 
+  // Advanced options (everything but host/picker) start collapsed on a
+  // fresh target, but open by default when editing one that already has
+  // any of them set, so nothing configured is hidden from view.
+  const [advancedOpen, setAdvancedOpen] = useState(() => hasAdvancedIperf3Options(options));
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
     return () => clearTimeout(t);
@@ -321,6 +354,9 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
     setPickedHints({ reverse: s.supports_reverse, udp: s.supports_udp });
     setSearch(`${s.host}:${s.port}`);
     setFocused(false);
+    // Surface the advanced section so the -R hint below the host field
+    // isn't the only clue that this server needs it ticked.
+    if (s.supports_reverse) setAdvancedOpen(true);
   };
 
   const hints = pickedHints
@@ -369,6 +405,25 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
           </PopoverContent>
         </Popover>
       </div>
+
+      <div className="sm:col-span-2">
+        <button
+          type="button"
+          aria-expanded={advancedOpen}
+          aria-controls="iperf-advanced-options"
+          onClick={() => setAdvancedOpen((o) => !o)}
+          className="flex items-center gap-1 text-sm font-medium text-muted hover:text-fg"
+        >
+          <ChevronRight className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
+          Advanced options
+        </button>
+        {!advancedOpen && (
+          <p className="mt-1 text-xs text-faint">{summarizeIperf3Advanced(options)}</p>
+        )}
+      </div>
+
+      {advancedOpen && (
+      <div id="iperf-advanced-options" className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
       <div>
         <label className={label} htmlFor="iperf-port">Port</label>
         <input id="iperf-port" className={field} value={text('port')} placeholder="5201"
@@ -444,6 +499,8 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
           onCheckedChange={(checked) => onChange(setOption(options, 'bidir', checked === true))} />
         Bidirectional (--bidir)
       </label>
+      </div>
+      )}
     </div>
   );
 }

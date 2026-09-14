@@ -281,8 +281,46 @@ describe('Iperf3Fields: picker wiring', () => {
     expect(screen.getByLabelText('Host')).toHaveValue('manual.example.net');
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'changed.example.net' } });
     expect(onChange).toHaveBeenCalledWith({ host: 'changed.example.net' });
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5202' } });
     expect(onChange).toHaveBeenCalledWith({ host: 'manual.example.net', port: 5202 });
+  });
+});
+
+describe('Iperf3Fields: advanced options disclosure', () => {
+  it('starts closed on a fresh target, with a summary line and no advanced fields', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
+    expect(screen.getByText('port 5201 · TCP · 10 s')).toBeInTheDocument();
+  });
+
+  it('starts open when editing a target with an advanced option already set', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ parallel: 4 }} onChange={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Parallel streams')).toHaveValue('4');
+  });
+
+  it('toggles open and closed on click', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Port')).toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
+  });
+
+  it('summarizes reverse and a non-default port in the closed state', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ port: 5201, reverse: true }} onChange={vi.fn()} />);
+    // Editing a target with an advanced option set starts open; close it to see the summary.
+    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    expect(screen.getByText('port 5201 · TCP · 10 s · -R')).toBeInTheDocument();
   });
 });
 
