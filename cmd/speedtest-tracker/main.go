@@ -20,6 +20,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/config"
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/iperf3list"
 	"github.com/metril/speedtest-tracker/internal/metrics"
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/ooklaweb"
@@ -434,6 +435,12 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 
 	pj := prune.New(prune.Config{Store: db, Settings: st, Logger: logger})
 
+	iperf3Refresher := iperf3list.New(iperf3list.Config{
+		Store:  db,
+		URL:    "https://export.iperf3serverlist.net/listed_iperf3_servers.json",
+		Logger: logger,
+	})
+
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(context.Background())
@@ -444,6 +451,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, &metricsEnabled, logger)
 	}()
 	go pj.Run(watchCtx)
+	go iperf3Refresher.Run(watchCtx)
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
@@ -457,6 +465,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Runner:          rn,
 			ServerList:      servers,
 			OoklaSearch:     ooklaSearch,
+			Iperf3:          iperf3Refresher,
 			ReloadSchedules: sch.Reload,
 			Scheduler:       sch,
 			Settings:        st,

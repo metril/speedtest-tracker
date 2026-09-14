@@ -66,6 +66,11 @@ type Deps struct {
 	// /api/v1/settings. Optional: nil means those routes are not mounted.
 	Settings *settings.Store
 
+	// Iperf3 triggers an immediate refresh for POST
+	// /api/v1/iperf3/servers/refresh. Optional: nil makes that route
+	// answer 503; GET /api/v1/iperf3/servers still works either way.
+	Iperf3 Iperf3Refresher
+
 	// TestClient is the HTTP client used to probe VM/VL endpoints for
 	// POST /api/v1/settings/test/{target}. Optional: nil means a client
 	// with a probeTimeout timeout is used.
@@ -191,6 +196,10 @@ func New(deps Deps) http.Handler {
 			s.Get("/{id}/next", deps.scheduleNext)
 		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
+		v1.Route("/iperf3/servers", func(ip chi.Router) {
+			ip.Get("/", deps.listIperf3Servers)
+			ip.Post("/refresh", deps.refreshIperf3Servers)
+		})
 		v1.Route("/runs", func(rt chi.Router) {
 			rt.Get("/", etagJSON(deps.listRuns))
 			rt.Post("/", deps.createRun)

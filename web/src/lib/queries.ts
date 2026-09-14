@@ -10,6 +10,7 @@ export const queryKeys = {
   targets: ['targets'] as const,
   results: (filters: ResultFilters) => ['results', filters] as const,
   ooklaServers: (q: string) => ['ookla-servers', q] as const,
+  iperf3Servers: (q: string) => ['iperf3-servers', q] as const,
   tags: ['tags'] as const,
   runs: ['runs'] as const,
   schedules: ['schedules'] as const,
@@ -65,6 +66,23 @@ export function useOoklaServers(q: string, enabled: boolean) {
     queryFn: () => api.listOoklaServers(q),
     enabled,
     staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useIperf3Servers(q: string, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.iperf3Servers(q),
+    queryFn: () => api.listIperf3Servers(q),
+    enabled,
+    staleTime: 60 * 60 * 1000,
+  });
+}
+
+export function useRefreshIperf3Servers() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.refreshIperf3Servers(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['iperf3-servers'] }),
   });
 }
 

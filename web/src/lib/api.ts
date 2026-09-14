@@ -55,6 +55,31 @@ export interface OoklaServer {
   distance_km?: number;
 }
 
+export interface Iperf3Server {
+  id: number;
+  host: string;
+  port: number;
+  options?: string;
+  supports_reverse: boolean;
+  supports_udp: boolean;
+  gbs?: string;
+  continent?: string;
+  country?: string;
+  site?: string;
+  provider?: string;
+}
+
+export interface Iperf3ServersPage {
+  fetched_at: string;
+  servers: Iperf3Server[];
+  total: number;
+}
+
+export const listIperf3Servers = (q: string) =>
+  request<Iperf3ServersPage>(`/iperf3/servers${query({ q })}`);
+export const refreshIperf3Servers = () =>
+  request<{ fetched_at: string; count: number }>('/iperf3/servers/refresh', { method: 'POST' });
+
 export interface ResultsPage {
   results: Result[];
   next_cursor: string;

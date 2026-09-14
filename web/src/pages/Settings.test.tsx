@@ -97,6 +97,9 @@ function renderSettings(opts: {
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
     if (url.startsWith('/api/v1/settings')) return jsonResponse(settings);
+    if (url.startsWith('/api/v1/iperf3/servers')) {
+      return jsonResponse({ fetched_at: '2026-09-13T12:00:00.000Z', servers: [], total: 0 });
+    }
     throw new Error(`unexpected fetch: ${url}`);
   });
   if (opts.put) vi.spyOn(api, 'updateSettings').mockImplementation(opts.put);

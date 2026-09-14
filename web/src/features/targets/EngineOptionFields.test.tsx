@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
-import type { OoklaServer } from '../../lib/api';
-import { EngineOptionFields, OoklaResultsList } from './EngineOptionFields';
+import type { Iperf3Server, OoklaServer } from '../../lib/api';
+import { EngineOptionFields, Iperf3ResultsList, OoklaResultsList } from './EngineOptionFields';
 
 function wrap(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -29,6 +29,15 @@ const denver: OoklaServer = {
 const boulder: OoklaServer = {
   id: '102', name: 'Xfinity', location: 'Boulder, CO', country: 'United States',
   host: 'boulder.example:8080', sponsor: 'Xfinity', lat: 40.0, lon: -105.3, distance_km: 40,
+};
+
+const frankfurtIperf: Iperf3Server = {
+  id: 1, host: 'iperf.example.net', port: 5201, options: '-R,-u',
+  supports_reverse: true, supports_udp: true, country: 'DE', site: 'Frankfurt', provider: 'Example Net',
+};
+const denverIperf: Iperf3Server = {
+  id: 2, host: 'speed.other.net', port: 5202, supports_reverse: false, supports_udp: false,
+  country: 'US', site: 'Denver', provider: 'Other Net',
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;
@@ -144,6 +153,80 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
 
   it('shows an error state', () => {
     render(<OoklaResultsList servers={[]} isFetching={false} isError onSelect={vi.fn()} />);
+    expect(screen.getByText(/Server list unavailable/)).toBeInTheDocument();
+  });
+});
+
+// Same jsdom-hang rationale as the Ookla suite above: the picker's fetch
+// wiring is checked here without ever focusing the field (which would
+// mount the Popover); the visible list rendering is covered separately by
+// "Iperf3ResultsList (tested directly, no Popover)".
+describe('Iperf3Fields: picker wiring (popover stays closed)', () => {
+  it('fetches the public server list (debounced) without needing a query', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+    const [url] = fetchMock.mock.calls[0];
+    expect(String(url)).toContain('/iperf3/servers');
+  });
+
+  it('re-fetches with the typed query once the debounce settles', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [], total: 0 }));
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    fetchMock.mockClear();
+
+    fireEvent.change(screen.getByLabelText('Pick from public list'), { target: { value: 'denver' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+    const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
+    expect(String(url)).toContain('q=denver');
+  });
+
+  it('keeps the host and port fields directly editable', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="iperf3" options={{ host: 'manual.example.net' }} onChange={onChange} />);
+    expect(screen.getByLabelText('Host')).toHaveValue('manual.example.net');
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'changed.example.net' } });
+    expect(onChange).toHaveBeenCalledWith({ host: 'changed.example.net' });
+    fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5202' } });
+    expect(onChange).toHaveBeenCalledWith({ host: 'manual.example.net', port: 5202 });
+  });
+});
+
+describe('Iperf3ResultsList (tested directly, no Popover)', () => {
+  it('renders host:port, site/country, provider and capability hints', () => {
+    render(
+      <Iperf3ResultsList servers={[frankfurtIperf, denverIperf]} isFetching={false} isError={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByText('iperf.example.net:5201')).toBeInTheDocument();
+    expect(screen.getByText('speed.other.net:5202')).toBeInTheDocument();
+    expect(screen.getByText(/Frankfurt, DE/)).toBeInTheDocument();
+    expect(screen.getByText(/Example Net/)).toBeInTheDocument();
+    expect(screen.getByText(/supports -R/)).toBeInTheDocument();
+    expect(screen.getByText(/supports UDP/)).toBeInTheDocument();
+  });
+
+  it('calls onSelect with the chosen server, prefilling host and port', () => {
+    const onSelect = vi.fn();
+    render(
+      <Iperf3ResultsList servers={[frankfurtIperf]} isFetching={false} isError={false} onSelect={onSelect} />,
+    );
+    fireEvent.click(screen.getByText('iperf.example.net:5201'));
+    expect(onSelect).toHaveBeenCalledWith(frankfurtIperf);
+  });
+
+  it('shows a searching indicator while fetching', () => {
+    render(<Iperf3ResultsList servers={[]} isFetching isError={false} onSelect={vi.fn()} />);
+    expect(screen.getByText('Searching…')).toBeInTheDocument();
+  });
+
+  it('shows an empty state when there are no hits', () => {
+    render(<Iperf3ResultsList servers={[]} isFetching={false} isError={false} onSelect={vi.fn()} />);
+    expect(screen.getByText('No servers found')).toBeInTheDocument();
+  });
+
+  it('shows an error state', () => {
+    render(<Iperf3ResultsList servers={[]} isFetching={false} isError onSelect={vi.fn()} />);
     expect(screen.getByText(/Server list unavailable/)).toBeInTheDocument();
   });
 });

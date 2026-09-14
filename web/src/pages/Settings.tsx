@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { LabelsEditor } from '../components/LabelsEditor';
 import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
 import { ChannelEditor } from '../features/settings/ChannelEditor';
+import { Iperf3ServerListSection } from '../features/settings/Iperf3ServerListSection';
 import {
   buttonClass, fieldClass, inputClass, labelClass,
 } from '../features/settings/styles';
@@ -301,6 +302,15 @@ export function Settings() {
             <input id="engines-ttl" type="number" min={1} className={inputClass}
               value={engines.server_list_ttl_seconds}
               onChange={(e) => setEngines({ ...engines, server_list_ttl_seconds: Number(e.target.value) })} />
+          </div>
+
+          <div className="grid gap-2 border-t border-line pt-4">
+            <h3 className="text-sm font-semibold text-fg">iperf3 server list</h3>
+            <p className="text-sm text-faint">
+              A cached list of public iperf3 servers, refreshed daily, used by the target form's
+              &quot;Pick from public list&quot; picker.
+            </p>
+            <Iperf3ServerListSection />
           </div>
         </Section>
 
