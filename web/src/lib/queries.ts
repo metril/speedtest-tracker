@@ -50,7 +50,10 @@ export function useDeleteTarget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.deleteTarget(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.targets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+      qc.invalidateQueries({ queryKey: queryKeys.deletedTargets });
+    },
   });
 }
 

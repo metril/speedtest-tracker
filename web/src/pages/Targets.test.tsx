@@ -69,6 +69,7 @@ describe('Targets page delete confirmation', () => {
       const url = String(input);
       if (url.endsWith('/targets') && (!init || init.method === undefined)) return jsonResponse(targets);
       if (url.endsWith('/targets/1') && init?.method === 'DELETE') return { ok: true, status: 204, statusText: 'no content', text: async () => '' } as Response;
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
       return jsonResponse(targets);
     });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -84,6 +85,50 @@ describe('Targets page delete confirmation', () => {
         expect.objectContaining({ method: 'DELETE' }),
       );
     });
+  });
+
+  it('shows the deleted target in Recently deleted right after deleting it', async () => {
+    const targets = [target()];
+    let isDeleted = false;
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/targets') && (!init || init.method === undefined)) {
+        return jsonResponse(isDeleted ? [] : targets);
+      }
+      if (url.endsWith('/targets/1') && init?.method === 'DELETE') {
+        isDeleted = true;
+        return { ok: true, status: 204, statusText: 'no content', text: async () => '' } as Response;
+      }
+      if (url.endsWith('/targets/deleted')) {
+        return jsonResponse(isDeleted
+          ? [{
+            id: 1, name: 'home', engine: 'ookla', lane: 'wan',
+            deleted_at: '2026-01-01T00:00:00Z', version: 2,
+          }]
+          : []);
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+
+    // Collapsed with no expand affordance while nothing is deleted yet.
+    expect(screen.getByRole('button', { name: /Recently deleted/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+
+    const toggle = await screen.findByRole('button', { name: /Recently deleted \(1\)/ });
+    expect(toggle).not.toBeDisabled();
+
+    fireEvent.click(toggle);
+    // The row now appears in the Recently deleted table (and no longer in
+    // the live targets table, which is now empty).
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Restore' })).toBeInTheDocument();
+    });
+    expect(screen.getByText('home')).toBeInTheDocument();
   });
 });
 

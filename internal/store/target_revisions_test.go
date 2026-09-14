@@ -164,6 +164,10 @@ func TestListDeletedTargetsAndRestore(t *testing.T) {
 		Name: "home", Engine: "ookla", Enabled: true, Lane: "wan",
 		Options: json.RawMessage(`{"server_id":1234}`),
 	})
+	original, err := s.GetTarget(ctx, id)
+	if err != nil {
+		t.Fatalf("GetTarget: %v", err)
+	}
 	if err := s.DeleteTarget(ctx, id); err != nil {
 		t.Fatalf("DeleteTarget: %v", err)
 	}
@@ -190,6 +194,9 @@ func TestListDeletedTargetsAndRestore(t *testing.T) {
 	}
 	if restored.ID != id || restored.Name != "home" || string(restored.Options) != `{"server_id":1234}` {
 		t.Errorf("restored = %+v", restored)
+	}
+	if restored.CreatedAt != original.CreatedAt {
+		t.Errorf("restored.CreatedAt = %q, want original %q", restored.CreatedAt, original.CreatedAt)
 	}
 
 	deleted2, err := s.ListDeletedTargets(ctx)

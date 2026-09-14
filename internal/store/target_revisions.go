@@ -197,9 +197,12 @@ func (s *Store) RestoreTarget(ctx context.Context, t *Target) (*Target, error) {
 		return nil, ErrIDConflict
 	}
 
+	// created_at is carried over from the snapshot so a restore doesn't
+	// look like a brand-new target; updated_at is left to its column
+	// default (now), since the row's content is being written fresh.
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO targets(id,name,engine,enabled,lane,options,thresholds) VALUES(?,?,?,?,?,?,?)`,
-		t.ID, t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds),
+		`INSERT INTO targets(id,name,engine,enabled,lane,options,thresholds,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		t.ID, t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds), t.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("insert restored target %d: %w", t.ID, err)
 	}
