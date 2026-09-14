@@ -225,6 +225,10 @@ func TestCreateTargetValidation(t *testing.T) {
 		{"missing name", map[string]any{"engine": "fake"}},
 		{"unknown engine", map[string]any{"name": "x", "engine": "nope"}},
 		{"bad options", map[string]any{"name": "x", "engine": "fake", "options": map[string]any{"fail": "yes"}}},
+		{"malformed thresholds", map[string]any{"name": "x", "engine": "fake",
+			"thresholds": map[string]any{"download_mbps_min": "not-a-number"}}},
+		{"out of range thresholds", map[string]any{"name": "x", "engine": "fake",
+			"thresholds": map[string]any{"loss_pct_max": -5}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -238,6 +242,42 @@ func TestCreateTargetValidation(t *testing.T) {
 				t.Errorf("envelope = %+v", body.Error)
 			}
 		})
+	}
+}
+
+// TestUpdateTargetRejectsMalformedThresholds is the regression case for
+// finding 5: a malformed thresholds document used to be stored as opaque
+// JSON and only fail later at notify time (ParseThresholds), silently
+// disabling notifications for the target. It must now be rejected at
+// create/update time instead of ever reaching storage.
+func TestUpdateTargetRejectsMalformedThresholds(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+	})
+	var created store.Target
+	json.NewDecoder(rec.Body).Decode(&created)
+
+	path := "/api/v1/targets/" + itoa(created.ID)
+	rec = do(t, h, http.MethodPut, path, map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"thresholds": map[string]any{"ping_ms_max": "fast"},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body)
+	}
+
+	unchanged, err := (func() (store.Target, error) {
+		rec := do(t, h, http.MethodGet, path, nil)
+		var tgt store.Target
+		decErr := json.NewDecoder(rec.Body).Decode(&tgt)
+		return tgt, decErr
+	})()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(unchanged.Thresholds) != "{}" {
+		t.Fatalf("rejected update must not persist: thresholds = %s", unchanged.Thresholds)
 	}
 }
 

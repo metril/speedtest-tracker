@@ -12,6 +12,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/runner"
+	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
@@ -67,6 +68,15 @@ func (d Deps) validateTarget(w http.ResponseWriter, b *targetBody) bool {
 	}
 	if len(b.Thresholds) == 0 || isJSONNull(b.Thresholds) {
 		b.Thresholds = json.RawMessage(`{}`)
+	}
+	var th settings.Thresholds
+	if err := json.Unmarshal(b.Thresholds, &th); err != nil {
+		errBadRequest(w, "invalid thresholds: "+err.Error())
+		return false
+	}
+	if err := validateThresholds(th); err != nil {
+		errBadRequest(w, "invalid thresholds: "+err.Error())
+		return false
 	}
 	eng, ok := d.Registry.Get(b.Engine)
 	if !ok {
