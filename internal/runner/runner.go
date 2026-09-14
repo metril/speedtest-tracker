@@ -89,6 +89,12 @@ type runState struct {
 type Runner struct {
 	cfg Config
 
+	// enqueueMu serializes the schedule-dedupe check with run creation so
+	// concurrent Enqueue calls for the same schedule never create two rows.
+	// It guards only that SQLite round-trip, is never held together with
+	// r.mu, and no other goroutine needs it.
+	enqueueMu sync.Mutex
+
 	mu      sync.Mutex
 	lanes   map[string]chan job
 	runs    map[int64]*runState
@@ -146,21 +152,40 @@ func (r *Runner) laneChan(lane string) chan job {
 	return ch
 }
 
+// filterRunnable drops disabled targets for every trigger except "manual",
+// which may deliberately run a disabled target (e.g. a one-off manual test
+// while a target is paused).
+func filterRunnable(targets []store.Target, trigger string) []store.Target {
+	if trigger == "manual" {
+		return targets
+	}
+	out := make([]store.Target, 0, len(targets))
+	for _, t := range targets {
+		if t.Enabled {
+			out = append(out, t)
+		}
+	}
+	return out
+}
+
 // Enqueue creates a run row and queues its targets, grouped by lane. It
 // returns the run id without waiting for the test to finish. When the
 // request names a schedule that already has a queued or running run, the
 // existing run id is returned and nothing new is queued.
 //
-// The schedule dedupe check, run creation, and the lane-channel sends all
-// happen under r.mu: this makes concurrent Enqueue calls for the same
-// schedule race-free (exactly one run gets created) and makes Enqueue
-// mutually exclusive with Shutdown closing the lane channels, so a send on
-// a closed channel can never happen.
+// The schedule dedupe check and run creation happen under enqueueMu (a
+// separate lock from r.mu) so SQLite I/O is never done while r.mu is held.
+// r.mu is then taken only for the closing check, the run-map insert and the
+// lane-channel sends, which keeps Enqueue mutually exclusive with Shutdown
+// closing those channels (so a send on a closed channel can never happen)
+// without blocking other goroutines on I/O. Publishing happens after r.mu
+// is released.
 func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	targets, err := r.cfg.Store.ListTargetsByIDs(ctx, req.TargetIDs)
 	if err != nil {
 		return 0, err
 	}
+	targets = filterRunnable(targets, req.Trigger)
 	if len(targets) == 0 {
 		return 0, ErrNoTargets
 	}
@@ -178,38 +203,45 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		byLane[lane] = append(byLane[lane], t)
 	}
 
-	r.mu.Lock()
-	if r.closing || !r.started {
-		r.mu.Unlock()
-		return 0, ErrShuttingDown
-	}
-
+	r.enqueueMu.Lock()
 	if req.ScheduleID != nil {
 		if id, ok, err := r.cfg.Store.QueuedRunForSchedule(ctx, *req.ScheduleID); err != nil {
-			r.mu.Unlock()
+			r.enqueueMu.Unlock()
 			return 0, err
 		} else if ok {
-			r.mu.Unlock()
+			r.enqueueMu.Unlock()
 			return id, nil
 		}
 	}
-
 	runID, err := r.cfg.Store.CreateRun(ctx, req.Trigger, req.ScheduleID)
+	r.enqueueMu.Unlock()
 	if err != nil {
-		r.mu.Unlock()
 		return 0, err
 	}
+
 	runCtx, cancel := context.WithCancel(context.Background())
+
+	r.mu.Lock()
+	if r.closing || !r.started {
+		r.mu.Unlock()
+		cancel()
+		// The run row was already created before we could see closing; it
+		// never gets a lane job, so resolve it as canceled rather than
+		// leaving it stuck at "queued".
+		err := r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "shutting down")
+		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
+			r.cfg.Logger.Error("set run status", "error", err, "run_id", runID)
+		} else if err == nil {
+			r.publishRun(runID, "canceled", "shutting down")
+		}
+		return 0, ErrShuttingDown
+	}
 	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: len(order)}
 
 	chans := make([]chan job, 0, len(order))
 	for _, lane := range order {
 		chans = append(chans, r.laneChan(lane))
 	}
-
-	// Publish "queued" before any lane can possibly move the run to
-	// "running", so clients never observe running before queued.
-	r.publishRun(runID, "queued", "")
 
 	queueFull := false
 	for i, lane := range order {
@@ -233,6 +265,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		r.publishRun(runID, "failed", "lane queue full")
 		return 0, ErrQueueFull
 	}
+	r.publishRun(runID, "queued", "")
 	return runID, nil
 }
 
@@ -241,9 +274,12 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 // happen atomically under r.mu, together with execute's own canceled/started
 // check, so a lane can never observe canceled==false and go on to write
 // "running" after Cancel has already committed to canceling the run. When
-// the run has not started any lane yet, the canceled status is persisted
-// immediately (rather than waiting for a worker to eventually dequeue it),
-// and started_at is never set.
+// the run has not started any lane yet, Cancel claims it by deleting it
+// from r.runs (the same claim discipline claimForForceCancel and finishLane
+// use) and persists the canceled status itself; a lane job for this run
+// still sitting in a channel will later find the run gone from r.runs and
+// return without writing or publishing anything, so the terminal status is
+// never written twice.
 func (r *Runner) Cancel(runID int64) bool {
 	r.mu.Lock()
 	st, ok := r.runs[runID]
@@ -253,12 +289,19 @@ func (r *Runner) Cancel(runID int64) bool {
 	}
 	st.canceled = true
 	notStarted := !st.started
+	if notStarted {
+		delete(r.runs, runID)
+	}
 	st.cancel()
 	r.mu.Unlock()
 
 	if notStarted {
-		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "")
-		r.publishRun(runID, "canceled", "")
+		err := r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "")
+		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
+			r.cfg.Logger.Error("cancel: set run status", "error", err, "run_id", runID)
+		} else if err == nil {
+			r.publishRun(runID, "canceled", "")
+		}
 	}
 	return true
 }
@@ -272,13 +315,13 @@ func (r *Runner) execute(j job) {
 		return
 	}
 	ctx := st.ctx
-	if st.canceled || ctx.Err() != nil {
-		// Canceled (by Cancel, or the run's context otherwise done) while
-		// still queued: never write "running" or start a target, so
-		// started_at stays unset. Checking st.canceled here, under the same
-		// lock Cancel uses to set it, closes the race where a lane reads
-		// ctx.Err()==nil right before Cancel commits and goes on to write
-		// "running" anyway.
+	if st.canceled || r.closing || ctx.Err() != nil {
+		// Canceled (by Cancel, Shutdown, or the run's context otherwise
+		// done) while still queued: never write "running" or start a
+		// target, so started_at stays unset. Checking st.canceled and
+		// r.closing here, under the same lock Cancel and Shutdown use to
+		// set them, closes the race where a lane reads ctx.Err()==nil right
+		// before one of them commits and goes on to write "running" anyway.
 		r.mu.Unlock()
 		r.finishLane(j.runID, false, true)
 		return
@@ -420,10 +463,13 @@ func (r *Runner) finishLane(runID int64, failed, canceled bool) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if err := r.cfg.Store.SetRunStatus(ctx, runID, status, ""); err != nil {
+	err := r.cfg.Store.SetRunStatus(ctx, runID, status, "")
+	if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 		r.cfg.Logger.Error("set run status", "error", err, "run_id", runID)
 	}
-	r.publishRun(runID, status, "")
+	if err == nil {
+		r.publishRun(runID, status, "")
+	}
 }
 
 // publishRun emits the run SSE event.
@@ -505,9 +551,10 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 			continue
 		}
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		if err := r.cfg.Store.SetRunStatus(markCtx, id, "canceled", "server shutdown"); err != nil {
+		err := r.cfg.Store.SetRunStatus(markCtx, id, "canceled", "server shutdown")
+		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 			r.cfg.Logger.Error("mark canceled", "error", err, "run_id", id)
-		} else {
+		} else if err == nil {
 			r.publishRun(id, "canceled", "server shutdown")
 		}
 		cancel()

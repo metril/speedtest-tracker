@@ -50,7 +50,10 @@ var terminalRunStatuses = map[string]bool{
 
 // SetRunStatus moves the run to status. Entering "running" stamps
 // started_at; a terminal status stamps finished_at and stores errMsg
-// (empty errMsg is stored as NULL).
+// (empty errMsg is stored as NULL). A run already in a terminal status
+// (done|failed|canceled|skipped) can never be moved to another status: that
+// transition is rejected with ErrInvalidTransition instead of silently
+// overwriting the run's real outcome.
 func (s *Store) SetRunStatus(ctx context.Context, id int64, status, errMsg string) error {
 	var errVal any
 	if errMsg != "" {
@@ -63,12 +66,26 @@ func (s *Store) SetRunStatus(ctx context.Context, id int64, status, errMsg strin
 	case terminalRunStatuses[status]:
 		q += `, finished_at=` + nowExpr
 	}
-	q += ` WHERE id=?`
+	q += ` WHERE id=? AND status NOT IN ('done','failed','canceled','skipped')`
 	res, err := s.Write.ExecContext(ctx, q, status, errVal, id)
 	if err != nil {
 		return fmt.Errorf("set run %d status: %w", id, err)
 	}
-	return requireAffected(res)
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n > 0 {
+		return nil
+	}
+	// No row updated: either the run doesn't exist, or it exists but is
+	// already terminal and the WHERE clause blocked the transition.
+	cur, err := s.GetRun(ctx, id)
+	if err != nil {
+		return err
+	}
+	if terminalRunStatuses[cur.Status] {
+		return ErrInvalidTransition
+	}
+	return fmt.Errorf("set run %d status: no rows updated (current status %q)", id, cur.Status)
 }
 
 // GetRun returns the run, or ErrNotFound.

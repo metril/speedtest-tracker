@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -716,4 +717,187 @@ func TestShutdownGaveUpReturnsCtxErr(t *testing.T) {
 	if run.Status != "canceled" && run.Status != "done" && run.Status != "failed" {
 		t.Errorf("status after gaveUp shutdown = %q, want terminal", run.Status)
 	}
+}
+
+// TestExecuteSkipsQueuedRunsAfterShutdownBegins enqueues three runs into one
+// lane behind a slow engine, then calls Shutdown right away. The first run
+// must already be running (started_at set) by the time Shutdown flips
+// r.closing; the other two are still sitting in the lane channel and must
+// be dequeued straight into "canceled" (via execute's r.closing check)
+// without ever starting an engine or getting started_at set.
+func TestExecuteSkipsQueuedRunsAfterShutdownBegins(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "closing-lane.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	reg := engine.NewRegistry()
+	reg.Register(&fake.Engine{Steps: 50, Delay: 40 * time.Millisecond})
+	r := New(Config{
+		Store: db, Registry: reg, Hub: sse.NewHub(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Grace:  200 * time.Millisecond,
+	})
+	r.Start()
+	ctx := context.Background()
+
+	var runIDs []int64
+	for i := 0; i < 3; i++ {
+		tid, err := db.CreateTarget(ctx, &store.Target{
+			Name: "t" + strconv.Itoa(i), Engine: "fake", Enabled: true, Lane: "wan"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		id, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		runIDs = append(runIDs, id)
+	}
+
+	// Give the lane's single worker time to dequeue and start the first run
+	// before Shutdown flips r.closing.
+	time.Sleep(60 * time.Millisecond)
+
+	shutdownCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	if err := r.Shutdown(shutdownCtx); err != nil {
+		t.Fatalf("Shutdown: %v", err)
+	}
+
+	first, err := db.GetRun(ctx, runIDs[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.StartedAt == nil {
+		t.Error("first run never started")
+	}
+	if first.Status != "canceled" && first.Status != "done" && first.Status != "failed" {
+		t.Errorf("first run status = %q, want terminal", first.Status)
+	}
+
+	for i, id := range runIDs[1:] {
+		run, err := db.GetRun(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status != "canceled" {
+			t.Errorf("queued run %d status = %q, want canceled", i+1, run.Status)
+		}
+		if run.StartedAt != nil {
+			t.Errorf("queued run %d started_at = %v, want nil (must never have started)", i+1, *run.StartedAt)
+		}
+	}
+}
+
+// TestEnqueueSkipsDisabledTargetsExceptManual covers the Target.Enabled
+// gate: a scheduled/cron/api trigger must never run a disabled target, but
+// a manual run may deliberately target one.
+func TestEnqueueSkipsDisabledTargetsExceptManual(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := r.Enqueue(ctx, RunRequest{Trigger: "cron", TargetIDs: []int64{tid}}); err != ErrNoTargets {
+		t.Errorf("cron on a disabled target = %v, want ErrNoTargets", err)
+	}
+
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatalf("manual on a disabled target: %v", err)
+	}
+	run := waitForRun(t, db, runID)
+	if run.Status != "done" {
+		t.Errorf("manual run on disabled target status = %q, want done", run.Status)
+	}
+}
+
+// TestEnqueueSkipsDisabledTargetInMixedSet checks a non-manual request that
+// names both an enabled and a disabled target: only the enabled one runs.
+func TestEnqueueSkipsDisabledTargetInMixedSet(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+	on, err := db.CreateTarget(ctx, &store.Target{Name: "on", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	off, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "cron", TargetIDs: []int64{on, off}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, db, runID)
+	results, _, err := db.ListResults(ctx, store.ResultFilter{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(results) != 1 || results[0].TargetName != "on" {
+		t.Errorf("results = %+v, want exactly one result for the enabled target", results)
+	}
+}
+
+// TestCancelNotStartedNeverDoubleWritesTerminalStatus covers the claim
+// discipline from Cancel: once Cancel has persisted "canceled" for a run
+// that never started, the worker eventually dequeuing that run's lane job
+// must find it already gone from r.runs and must not write or publish the
+// terminal status again (which would, among other things, bump
+// finished_at to a later timestamp).
+func TestCancelNotStartedNeverDoubleWritesTerminalStatus(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
+	tidA, err := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tidB, err := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runA, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tidA}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runB, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tidB}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// No sleep: cancel runB while it still sits behind runA's slow engine in
+	// the wan lane's channel (same setup as TestCancelQueuedRunNeverStarts).
+	if !r.Cancel(runB) {
+		t.Fatal("Cancel returned false for a queued run")
+	}
+	before := waitForRun(t, db, runB)
+	if before.Status != "canceled" || before.FinishedAt == nil {
+		t.Fatalf("runB after cancel = %+v", before)
+	}
+	finishedAt := *before.FinishedAt
+
+	// Give the wan lane's worker plenty of time to finish runA and dequeue
+	// runB's job; execute() must find runB gone from r.runs and return
+	// without touching the store again.
+	time.Sleep(300 * time.Millisecond)
+
+	after, err := db.GetRun(ctx, runB)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != "canceled" {
+		t.Errorf("runB status after dequeue = %q, want canceled (unchanged)", after.Status)
+	}
+	if after.FinishedAt == nil || *after.FinishedAt != finishedAt {
+		t.Errorf("runB finished_at changed from %v to %v: status was written a second time", finishedAt, after.FinishedAt)
+	}
+
+	r.Cancel(runA)
+	waitForRun(t, db, runA)
 }

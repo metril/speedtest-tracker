@@ -113,3 +113,30 @@ func TestQueuedRunForSchedule(t *testing.T) {
 		t.Error("finished run still reported as queued")
 	}
 }
+
+// TestSetRunStatusRejectsTransitionOutOfTerminal covers the terminal-state
+// guard: once a run is done/failed/canceled/skipped, no further status
+// write may change it.
+func TestSetRunStatusRejectsTransitionOutOfTerminal(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+
+	for _, terminal := range []string{"done", "failed", "canceled", "skipped"} {
+		id, err := s.CreateRun(ctx, "manual", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := s.SetRunStatus(ctx, id, terminal, ""); err != nil {
+			t.Fatalf("set %s: %v", terminal, err)
+		}
+		if err := s.SetRunStatus(ctx, id, "running", ""); !errors.Is(err, ErrInvalidTransition) {
+			t.Errorf("transition out of %s = %v, want ErrInvalidTransition", terminal, err)
+		}
+		r, err := s.GetRun(ctx, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if r.Status != terminal {
+			t.Errorf("status after rejected transition = %q, want unchanged %q", r.Status, terminal)
+		}
+	}
+}
