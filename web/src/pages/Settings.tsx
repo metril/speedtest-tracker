@@ -8,6 +8,7 @@ import type {
   AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
 } from '../lib/api';
 import { ApiError } from '../lib/api';
+import { newId } from '../lib/id';
 import {
   useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
 } from '../lib/queries';
@@ -109,7 +110,7 @@ export function Settings() {
   const addChannel = () => {
     if (!notifications) return;
     const channel: NotifyChannel = {
-      id: crypto.randomUUID().slice(0, 8), type: 'ntfy', name: 'New channel', enabled: true, url: '',
+      id: newId(8), type: 'ntfy', name: 'New channel', enabled: true, url: '',
     };
     setNotifications({ ...notifications, channels: [...notifications.channels, channel] });
   };
