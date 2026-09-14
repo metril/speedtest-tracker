@@ -189,6 +189,25 @@ describe('Settings page', () => {
     });
   });
 
+  it('lets the SLA download field be typed empty (not snap back to 0) and sends 0 on save', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    const settings = settingsFixture();
+    settings.general.sla_download_mbps = 1000;
+    renderSettings({ put, settings });
+    const downloadField = await screen.findByLabelText('Plan download (Mbps)');
+    expect(downloadField).toHaveValue(1000);
+
+    await userEvent.clear(downloadField);
+    expect(downloadField).toHaveValue(null);
+
+    await userEvent.click(
+      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
+    );
+    expect(put).toHaveBeenCalledWith({
+      general: expect.objectContaining({ sla_download_mbps: 0 }),
+    });
+  });
+
   it('saves an edited iperf3 server list URL, including clearing it to disable', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({ put, path: '/settings/engines' });

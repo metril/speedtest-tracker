@@ -80,11 +80,14 @@ function renderDashboard() {
 it('does not fetch a previous-period history until "Compare with previous period" is toggled on', async () => {
   renderDashboard();
   await screen.findByText('home');
-  fetchMock.mockClear();
 
+  const urlsBeforeToggle = fetchMock.mock.calls.map(([input]) => String(input));
+  expect(urlsBeforeToggle.some((u) => u.includes('/targets/1/history') && u.includes('offset=1'))).toBe(false);
+
+  fetchMock.mockClear();
   await userEvent.click(screen.getByLabelText('Compare with previous period'));
 
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
-  const urls = fetchMock.mock.calls.map(([input]) => String(input));
-  expect(urls.some((u) => u.includes('/targets/1/history') && u.includes('offset=1'))).toBe(true);
+  const urlsAfterToggle = fetchMock.mock.calls.map(([input]) => String(input));
+  expect(urlsAfterToggle.some((u) => u.includes('/targets/1/history') && u.includes('offset=1'))).toBe(true);
 });

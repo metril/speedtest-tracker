@@ -2,7 +2,9 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   act, fireEvent, render, screen, waitFor,
 } from '@testing-library/react';
-import { createContext, useContext, type ReactNode } from 'react';
+import {
+  createContext, useContext, useState, type ReactNode,
+} from 'react';
 import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
@@ -177,6 +179,17 @@ describe('OoklaFields: search wiring', () => {
     fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'dublin' } });
     await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
     expect(String(fetchMock.mock.calls[0][0])).toContain('country=IE');
+  });
+
+  it('omits country from the query while the "Other…" input is incomplete or invalid', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ servers: [], near: '' }));
+    wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Country code'), { target: { value: 'i' } });
+    fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'dublin' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('country=');
   });
 
   it('keeps the manual ID input usable when the remote search errors', async () => {
@@ -359,6 +372,33 @@ describe('Iperf3Fields: picker wiring', () => {
     fireEvent.click(await screen.findByText('speed.other.net:5202'));
 
     expect(onChange).toHaveBeenCalledWith({ host: 'speed.other.net', port: 5202 });
+  });
+
+  it('clears a previous pick\'s reverse and port_range_end when the next pick supports neither', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({
+      fetched_at: '', servers: [frankfurtIperf, denverIperf], total: 2,
+    }));
+    const onChange = vi.fn();
+    function ControlledIperf3Fields() {
+      const [options, setOptions] = useState<Record<string, unknown>>({});
+      return (
+        <EngineOptionFields
+          engine="iperf3" options={options}
+          onChange={(next) => { setOptions(next); onChange(next); }}
+        />
+      );
+    }
+    wrap(<ControlledIperf3Fields />);
+
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
+    fireEvent.click(await screen.findByText('iperf.example.net:5201–5210'));
+    expect(onChange).toHaveBeenLastCalledWith({
+      host: 'iperf.example.net', port: 5201, reverse: true, port_range_end: 5210,
+    });
+
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
+    fireEvent.click(await screen.findByText('speed.other.net:5202'));
+    expect(onChange).toHaveBeenLastCalledWith({ host: 'speed.other.net', port: 5202 });
   });
 });
 

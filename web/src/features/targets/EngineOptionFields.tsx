@@ -192,9 +192,14 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   // outside interaction — see the onInteractOutside comment below.
   const anchorRef = useRef<HTMLInputElement>(null);
 
-  const [countrySelect, setCountrySelect] = useState(() => initialCountry().select);
-  const [countryOther, setCountryOther] = useState(() => initialCountry().other);
-  const country = countrySelect === 'other' ? countryOther.trim().toUpperCase() : countrySelect;
+  const [{ select: initialSelect, other: initialOther }] = useState(initialCountry);
+  const [countrySelect, setCountrySelect] = useState(initialSelect);
+  const [countryOther, setCountryOther] = useState(initialOther);
+  const rawCountry = countrySelect === 'other' ? countryOther.trim().toUpperCase() : countrySelect;
+  // The free-text "Other…" input accepts anything as the user types; only
+  // a complete 2-letter code is sent to the search (the server also
+  // validates this, but sending a partial/invalid code would just 400).
+  const country = /^[A-Za-z]{2}$/.test(rawCountry) ? rawCountry : undefined;
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
@@ -202,7 +207,7 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   }, [search]);
 
   const enabled = debouncedSearch.trim().length >= 2;
-  const servers = useOoklaServers(debouncedSearch, country || undefined, enabled);
+  const servers = useOoklaServers(debouncedSearch, country, enabled);
   const serverId = options.server_id === undefined ? '' : String(options.server_id);
   const open = focused && enabled;
 
@@ -448,8 +453,12 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
   const handlePick = (s: Iperf3Server) => {
     let next = setOption(options, 'host', s.host);
     next = setOption(next, 'port', s.port);
-    if (s.supports_reverse) next = setOption(next, 'reverse', true);
-    if (s.port_end && s.port_end > s.port) next = setOption(next, 'port_range_end', s.port_end);
+    // Every pick fully replaces these two fields (not just sets them when
+    // true) so switching from a server that supports -R / a wide port
+    // range to one that doesn't clears the stale values instead of
+    // leaving them stuck on from the previous pick.
+    next = setOption(next, 'reverse', s.supports_reverse);
+    next = setOption(next, 'port_range_end', s.port_end && s.port_end > s.port ? s.port_end : '');
     onChange(next);
     setPickedHints({ reverse: s.supports_reverse, udp: s.supports_udp });
     setSearch(`${s.host}:${s.port}`);

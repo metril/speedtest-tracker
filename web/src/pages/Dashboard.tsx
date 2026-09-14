@@ -67,17 +67,25 @@ function useAllTargetHistories(
 /** mergePrevByIndex overlays a previous-period history onto rows already
  * merged onto the current window's x-axis (mergeByBucket): the previous
  * window's timestamps are different, so alignment is positional -- the
- * i-th previous bucket's value lands on the i-th current row, under
- * `<key>_<id>_prev`. */
+ * n-th previous point for a target lands on that *same target's* n-th
+ * current point. That's each target's own running cursor over the rows
+ * where it actually has data, not the merged row's overall index: a
+ * target missing a bucket another target has must not shift its own
+ * alignment against its previous-period series. */
 function mergePrevByIndex(
   rows: Record<string, number | string>[],
   prevHistories: Map<number, HistoryPoint[]>,
   targetIds: number[],
   keys: (keyof HistoryPoint)[],
 ): Record<string, number | string>[] {
-  return rows.map((row, i) => {
+  const cursor = new Map<number, number>();
+  return rows.map((row) => {
     const next = { ...row };
     for (const id of targetIds) {
+      const hasCurrent = keys.some((key) => `${key}_${id}` in row);
+      if (!hasCurrent) continue;
+      const i = cursor.get(id) ?? 0;
+      cursor.set(id, i + 1);
       const p = (prevHistories.get(id) ?? [])[i];
       if (!p) continue;
       for (const key of keys) next[`${key}_${id}_prev`] = Number(p[key]);

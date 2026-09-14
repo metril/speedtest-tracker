@@ -69,12 +69,20 @@ export function SummaryTiles({ stats, previousStats, spark, general }: {
   const slaCompliance = stats.sla_compliance;
   const prevSlaCompliance = previousStats && previousStats.total_results > 0
     ? previousStats.sla_compliance : undefined;
-  const planSubtext = general && (general.sla_download_mbps || general.sla_upload_mbps)
-    ? `${general.sla_download_mbps ?? 0}/${general.sla_upload_mbps ?? 0} Mbps plan`
-    : undefined;
+  // Omit whichever direction has no plan speed configured (0/unset)
+  // rather than rendering a misleading "0" for it.
+  const planDownload = general?.sla_download_mbps || undefined;
+  const planUpload = general?.sla_upload_mbps || undefined;
+  const planSubtext = planDownload && planUpload
+    ? `${planDownload}/${planUpload} Mbps plan`
+    : planDownload
+      ? `${planDownload} Mbps download plan`
+      : planUpload
+        ? `${planUpload} Mbps upload plan`
+        : undefined;
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <div className={`grid grid-cols-2 gap-3 sm:grid-cols-4 ${slaCompliance != null ? 'lg:grid-cols-5' : ''}`}>
       <KpiTile
         label="Success rate"
         value={formatPercent(stats.success_rate)}

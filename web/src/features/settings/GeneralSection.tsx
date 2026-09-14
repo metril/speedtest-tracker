@@ -1,11 +1,39 @@
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { fieldClass, inputClass, labelClass } from './styles';
 import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
+type SLAKey = 'sla_download_mbps' | 'sla_upload_mbps';
+
+function toRaw(v: number | undefined): string {
+  return v === undefined ? '' : String(v);
+}
+
 export function GeneralSection() {
   const { general, setGeneral, saving, error, saved, save } = useSettingsSection('general');
+
+  // Local raw-string mirror of the two SLA fields, same pattern as
+  // ThresholdFields: `general.sla_*_mbps` alone can't represent "the user
+  // is mid-way through clearing this field" (it's a plain number), so a
+  // blank input would otherwise snap back to showing "0" the instant it's
+  // emptied. Seeded once; blank means 0 ("no plan") on submit.
+  const [raw, setRaw] = useState<Record<SLAKey, string>>(() => ({
+    sla_download_mbps: toRaw(general.sla_download_mbps),
+    sla_upload_mbps: toRaw(general.sla_upload_mbps),
+  }));
+
+  function setSla(key: SLAKey, text: string) {
+    setRaw((r) => ({ ...r, [key]: text }));
+    const n = text.trim() === '' ? 0 : Number(text);
+    if (Number.isFinite(n)) setGeneral({ ...general, [key]: n });
+  }
+
+  function clearSla(key: SLAKey) {
+    setRaw((r) => ({ ...r, [key]: '' }));
+    setGeneral({ ...general, [key]: 0 });
+  }
 
   return (
     <Section
@@ -73,13 +101,10 @@ export function GeneralSection() {
             <label htmlFor="general-sla-download" className={labelClass}>Plan download (Mbps)</label>
             <div className="flex gap-2">
               <Input id="general-sla-download" type="number" min={0}
-                value={general.sla_download_mbps ?? ''}
-                onChange={(e) => setGeneral({
-                  ...general,
-                  sla_download_mbps: e.target.value === '' ? 0 : Number(e.target.value),
-                })} />
+                value={raw.sla_download_mbps}
+                onChange={(e) => setSla('sla_download_mbps', e.target.value)} />
               <Button type="button" variant="outline" size="sm"
-                onClick={() => setGeneral({ ...general, sla_download_mbps: 0 })}>
+                onClick={() => clearSla('sla_download_mbps')}>
                 Clear
               </Button>
             </div>
@@ -88,13 +113,10 @@ export function GeneralSection() {
             <label htmlFor="general-sla-upload" className={labelClass}>Plan upload (Mbps)</label>
             <div className="flex gap-2">
               <Input id="general-sla-upload" type="number" min={0}
-                value={general.sla_upload_mbps ?? ''}
-                onChange={(e) => setGeneral({
-                  ...general,
-                  sla_upload_mbps: e.target.value === '' ? 0 : Number(e.target.value),
-                })} />
+                value={raw.sla_upload_mbps}
+                onChange={(e) => setSla('sla_upload_mbps', e.target.value)} />
               <Button type="button" variant="outline" size="sm"
-                onClick={() => setGeneral({ ...general, sla_upload_mbps: 0 })}>
+                onClick={() => clearSla('sla_upload_mbps')}>
                 Clear
               </Button>
             </div>
