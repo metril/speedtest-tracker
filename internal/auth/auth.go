@@ -45,7 +45,22 @@ type Identity struct {
 	Groups  []string
 	IsAdmin bool
 	TokenID int64
+	// Source names the credential that produced this identity: SourceOpen,
+	// SourceForward or SourceToken. Unlike Mode (the configured mode, which
+	// in forward_auth can still be satisfied by a bearer token when
+	// AllowTokens is set), Source always names the actual method used, so
+	// callers that must distinguish "authenticated via a proxy header" from
+	// "authenticated via a bearer/query token" — e.g. the auth-settings
+	// write guard — can rely on it regardless of the configured mode.
+	Source string
 }
+
+// Identity.Source values.
+const (
+	SourceOpen    = "open"
+	SourceForward = "forward"
+	SourceToken   = "token"
+)
 
 type identityCtxKey struct{}
 
@@ -72,6 +87,13 @@ type config struct {
 	allowTokens  bool
 }
 
+// touchQueueCap bounds the number of pending token-touch updates. It is
+// sized generously above expected steady-state traffic; when it is full a
+// touch is dropped (the token's last-used timestamp is best-effort and
+// self-heals on the next request) rather than blocking the request
+// goroutine.
+const touchQueueCap = 64
+
 // Middleware resolves identity for incoming requests.
 type Middleware struct {
 	logger *slog.Logger
@@ -84,21 +106,66 @@ type Middleware struct {
 	touchMu sync.Mutex
 	touched map[int64]time.Time
 
+	touchCh   chan int64
+	touchDone chan struct{}
+	touchWG   sync.WaitGroup
+	closeOnce sync.Once
+
 	warnedUnknownMode sync.Once
 }
 
-// New returns a Middleware. Configure must be called before use; an
-// unconfigured Middleware treats every request as unauthorized.
+// New returns a Middleware and starts its single background worker that
+// applies token-touch updates off the request goroutine. Configure must be
+// called before use; an unconfigured Middleware treats every request as
+// unauthorized. Call Close to stop the worker cleanly on shutdown.
 func New(logger *slog.Logger, tokens TokenLookup, now func() time.Time) *Middleware {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Middleware{
-		logger:  logger,
-		tokens:  tokens,
-		now:     now,
-		touched: map[int64]time.Time{},
+	m := &Middleware{
+		logger:    logger,
+		tokens:    tokens,
+		now:       now,
+		touched:   map[int64]time.Time{},
+		touchCh:   make(chan int64, touchQueueCap),
+		touchDone: make(chan struct{}),
 	}
+	m.touchWG.Add(1)
+	go m.touchWorker()
+	return m
+}
+
+// touchWorker is the single goroutine that applies TouchToken calls, so a
+// burst of authenticated requests never spawns unbounded concurrent writes.
+func (m *Middleware) touchWorker() {
+	defer m.touchWG.Done()
+	for {
+		select {
+		case id := <-m.touchCh:
+			m.doTouch(id)
+		case <-m.touchDone:
+			return
+		}
+	}
+}
+
+// doTouch actually calls TouchToken on a detached context so a cancelled
+// request (or the shutdown of the worker itself) still lets an in-flight
+// touch complete without blocking on any particular caller's deadline.
+func (m *Middleware) doTouch(id int64) {
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
+	defer cancel()
+	if err := m.tokens.TouchToken(ctx, id); err != nil {
+		m.logger.Warn("auth: touch token failed", "token_id", id, "err", err)
+	}
+}
+
+// Close stops the touch worker, waiting for it to exit. Any touch update
+// still queued when Close is called is dropped. Safe to call once; further
+// calls are no-ops.
+func (m *Middleware) Close() {
+	m.closeOnce.Do(func() { close(m.touchDone) })
+	m.touchWG.Wait()
 }
 
 // Configure parses cfg and, if every CIDR is valid, atomically swaps it in
@@ -142,7 +209,7 @@ func (m *Middleware) Identify(r *http.Request) (Identity, error) {
 
 	switch cfg.mode {
 	case settings.AuthModeOpen:
-		return Identity{Mode: settings.AuthModeOpen, IsAdmin: true}, nil
+		return Identity{Mode: settings.AuthModeOpen, IsAdmin: true, Source: SourceOpen}, nil
 
 	case settings.AuthModeForward:
 		if plain, ok := bearerToken(r); ok && cfg.allowTokens {
@@ -218,6 +285,7 @@ func (m *Middleware) identifyForward(r *http.Request, cfg config) (Identity, err
 		User:    user,
 		Groups:  groups,
 		IsAdmin: isAdmin,
+		Source:  SourceForward,
 	}, nil
 }
 
@@ -248,9 +316,14 @@ func (m *Middleware) identifyToken(ctx context.Context, mode, plain string) (Ide
 		User:    "token:" + label,
 		IsAdmin: true,
 		TokenID: id,
+		Source:  SourceToken,
 	}, nil
 }
 
+// maybeTouch coalesces touches per token id to at most one per minute, then
+// hands the actual write off to touchWorker via a bounded channel so it
+// never runs on the request goroutine. A full queue drops the touch rather
+// than blocking the caller.
 func (m *Middleware) maybeTouch(id int64) {
 	now := m.now()
 
@@ -266,10 +339,10 @@ func (m *Middleware) maybeTouch(id int64) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.WithoutCancel(context.Background()), 2*time.Second)
-	defer cancel()
-	if err := m.tokens.TouchToken(ctx, id); err != nil {
-		m.logger.Warn("auth: touch token failed", "token_id", id, "err", err)
+	select {
+	case m.touchCh <- id:
+	default:
+		m.logger.Warn("auth: touch queue full, dropping", "token_id", id)
 	}
 }
 

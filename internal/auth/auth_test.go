@@ -3,10 +3,12 @@ package auth_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,9 +17,12 @@ import (
 )
 
 type fakeTokens struct {
-	byHash  map[string]int64
-	touched []int64
-	err     error
+	byHash map[string]int64
+	err    error
+
+	mu        sync.Mutex
+	touched   []int64
+	touchedCh chan int64 // optional: if non-nil, TouchToken also sends id here
 }
 
 func (f *fakeTokens) LookupToken(_ context.Context, hash string) (int64, bool, error) {
@@ -27,8 +32,54 @@ func (f *fakeTokens) LookupToken(_ context.Context, hash string) (int64, bool, e
 	id, ok := f.byHash[hash]
 	return id, ok, nil
 }
+
+// TouchToken runs on Middleware's background worker goroutine, so access to
+// touched must be synchronized.
 func (f *fakeTokens) TouchToken(_ context.Context, id int64) error {
+	f.mu.Lock()
 	f.touched = append(f.touched, id)
+	f.mu.Unlock()
+	if f.touchedCh != nil {
+		f.touchedCh <- id
+	}
+	return nil
+}
+
+func (f *fakeTokens) touchCount() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return len(f.touched)
+}
+
+// waitForTouch blocks until the worker reports one touch on ch, or fails
+// the test after a generous timeout.
+func waitForTouch(t *testing.T, ch <-chan int64) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for the async touch worker")
+	}
+}
+
+// blockingTokens is a TokenLookup whose TouchToken blocks until release is
+// closed, used to fill the touch queue and prove a full queue drops rather
+// than blocking the caller.
+type blockingTokens struct {
+	mu      sync.Mutex
+	byHash  map[string]int64
+	release chan struct{}
+}
+
+func (b *blockingTokens) LookupToken(_ context.Context, hash string) (int64, bool, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	id, ok := b.byHash[hash]
+	return id, ok, nil
+}
+
+func (b *blockingTokens) TouchToken(_ context.Context, _ int64) error {
+	<-b.release
 	return nil
 }
 
@@ -211,21 +262,97 @@ func TestHandlerWritesJSON401AndPopulatesContext(t *testing.T) {
 
 func TestTouchIsThrottled(t *testing.T) {
 	plain, hash, _, _ := auth.GenerateToken()
-	tk := &fakeTokens{byHash: map[string]int64{hash: 7}}
+	tk := &fakeTokens{byHash: map[string]int64{hash: 7}, touchedCh: make(chan int64, 8)}
 	now := time.Now()
 	m := auth.New(slog.Default(), tk, func() time.Time { return now })
+	t.Cleanup(m.Close)
 	m.Configure(settings.Auth{Mode: settings.AuthModeToken})
 	r := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
 	r.Header.Set("Authorization", "Bearer "+plain)
 	for i := 0; i < 5; i++ {
 		m.Identify(r)
 	}
-	if len(tk.touched) != 1 {
-		t.Fatalf("touched %d times, want 1 — last_used_at must not be a write per request", len(tk.touched))
+	waitForTouch(t, tk.touchedCh)
+	if n := tk.touchCount(); n != 1 {
+		t.Fatalf("touched %d times, want 1 — last_used_at must not be a write per request", n)
 	}
 	now = now.Add(2 * time.Minute)
 	m.Identify(r)
-	if len(tk.touched) != 2 {
-		t.Fatalf("touched %d times after the throttle window, want 2", len(tk.touched))
+	waitForTouch(t, tk.touchedCh)
+	if n := tk.touchCount(); n != 2 {
+		t.Fatalf("touched %d times after the throttle window, want 2", n)
 	}
+}
+
+// TestTouchRunsOffRequestGoroutine is a regression test for review item 6:
+// maybeTouch must not call TouchToken synchronously on the request
+// goroutine. It uses a TouchToken that blocks until released, and asserts
+// Identify still returns promptly.
+func TestTouchRunsOffRequestGoroutine(t *testing.T) {
+	plain, hash, _, _ := auth.GenerateToken()
+	tk := &blockingTokens{byHash: map[string]int64{hash: 1}, release: make(chan struct{})}
+	m := auth.New(slog.Default(), tk, time.Now)
+	t.Cleanup(func() { close(tk.release); m.Close() })
+	if err := m.Configure(settings.Auth{Mode: settings.AuthModeToken}); err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	r.Header.Set("Authorization", "Bearer "+plain)
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if _, err := m.Identify(r); err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Identify blocked on TouchToken — the touch must be dispatched to the background worker")
+	}
+}
+
+// TestTouchQueueDropsWhenFull is a regression test for review item 6's
+// bound: once the touch queue (cap 64) is full, further touches must be
+// dropped, never block the caller.
+func TestTouchQueueDropsWhenFull(t *testing.T) {
+	const n = 200
+	tk := &blockingTokens{byHash: map[string]int64{}, release: make(chan struct{})}
+	plains := make([]string, n)
+	for i := 0; i < n; i++ {
+		p := fmt.Sprintf("tok-%d", i)
+		plains[i] = p
+		tk.byHash[auth.HashToken(p)] = int64(i + 1)
+	}
+	m := auth.New(slog.Default(), tk, time.Now)
+	t.Cleanup(func() { close(tk.release); m.Close() })
+	if err := m.Configure(settings.Auth{Mode: settings.AuthModeToken}); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for _, p := range plains {
+			r := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+			r.Header.Set("Authorization", "Bearer "+p)
+			if _, err := m.Identify(r); err != nil {
+				t.Error(err)
+			}
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("distinct-token touches blocked the caller once the queue filled — a full queue must drop, not block")
+	}
+}
+
+// TestCloseStopsWorkerCleanly is a regression test for review item 6: Close
+// must stop the background worker and be safe to call more than once.
+func TestCloseStopsWorkerCleanly(t *testing.T) {
+	m := auth.New(slog.Default(), &fakeTokens{}, time.Now)
+	m.Close()
+	m.Close()
 }
