@@ -2,7 +2,7 @@ import {
   useInfiniteQuery, useMutation, useQuery, useQueryClient,
 } from '@tanstack/react-query';
 import * as api from './api';
-import type { ResultFilters, TargetInput } from './api';
+import type { ResultFilters, ScheduleInput, TargetInput } from './api';
 
 export const queryKeys = {
   targets: ['targets'] as const,
@@ -10,6 +10,10 @@ export const queryKeys = {
   ooklaServers: (q: string) => ['ookla-servers', q] as const,
   tags: ['tags'] as const,
   runs: ['runs'] as const,
+  schedules: ['schedules'] as const,
+  scheduleRuns: (id: number) => ['runs', 'schedule', id] as const,
+  cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
+  targetLatest: (id: number) => ['target-latest', id] as const,
 };
 
 export function useTargets() {
@@ -100,4 +104,72 @@ export function useTags() {
 
 export function useCancelRun() {
   return useMutation({ mutationFn: (id: number) => api.cancelRun(id) });
+}
+
+export function useSchedules() {
+  return useQuery({ queryKey: queryKeys.schedules, queryFn: api.listSchedules });
+}
+
+export function useCreateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (s: ScheduleInput) => api.createSchedule(s),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.schedules }),
+  });
+}
+
+export function useUpdateSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, schedule }: { id: number; schedule: ScheduleInput }) =>
+      api.updateSchedule(id, schedule),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.schedules }),
+  });
+}
+
+export function useDeleteSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteSchedule(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.schedules }),
+  });
+}
+
+export function useRunSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.runSchedule(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.runs }),
+  });
+}
+
+/** useCronPreview previews an expression's next fire times. It is disabled
+ * until an expression exists and never retries: a parse error is an answer,
+ * not a transient failure. */
+export function useCronPreview(cron: string, timezone: string) {
+  return useQuery({
+    queryKey: queryKeys.cronPreview(cron, timezone),
+    queryFn: () => api.validateCron(cron, timezone),
+    enabled: cron.trim().length > 0,
+    retry: false,
+    staleTime: 30_000,
+  });
+}
+
+/** useScheduleRuns backs the "last run" column on the Schedules page. */
+export function useScheduleRuns(id: number) {
+  return useQuery({
+    queryKey: queryKeys.scheduleRuns(id),
+    queryFn: () => api.listRuns(id),
+  });
+}
+
+/** useTargetLatest is the per-target latest result. Live `result` SSE
+ * events patch this cache entry directly (see LiveRunProvider) instead of
+ * forcing a refetch. */
+export function useTargetLatest(id: number) {
+  return useQuery({
+    queryKey: queryKeys.targetLatest(id),
+    queryFn: () => api.targetLatest(id),
+  });
 }

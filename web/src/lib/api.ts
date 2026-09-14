@@ -140,3 +140,71 @@ export const setResultTags = (id: number, tags: string[]) =>
 export const listTags = () => request<{ id: number; name: string }[]>('/tags');
 export const cancelRun = (id: number) =>
   request<{ run_id: number }>(`/runs/${id}`, { method: 'DELETE' });
+
+export interface Schedule {
+  id: number;
+  name: string;
+  cron: string;
+  enabled: boolean;
+  timezone: string;
+  target_ids: number[];
+  next_run: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ScheduleInput {
+  name: string;
+  cron: string;
+  enabled: boolean;
+  timezone: string;
+  target_ids: number[];
+}
+
+/** ScheduleSaved is the create/update response: the saved row plus any
+ * overlap warnings the server computed. */
+export interface ScheduleSaved {
+  schedule: Schedule;
+  warnings: string[];
+}
+
+export interface RunsPage {
+  runs: Run[];
+  next_cursor: string;
+}
+
+export const listSchedules = async () =>
+  (await request<{ schedules: Schedule[] }>('/schedules')).schedules;
+export const createSchedule = (s: ScheduleInput) =>
+  request<ScheduleSaved>('/schedules', { method: 'POST', body: JSON.stringify(s) });
+export const updateSchedule = (id: number, s: ScheduleInput) =>
+  request<ScheduleSaved>(`/schedules/${id}`, { method: 'PUT', body: JSON.stringify(s) });
+export const deleteSchedule = (id: number) =>
+  request<void>(`/schedules/${id}`, { method: 'DELETE' });
+export const runSchedule = (id: number) =>
+  request<{ run_id: number }>(`/schedules/${id}/run`, { method: 'POST' });
+export const scheduleNext = async (id: number) =>
+  (await request<{ next: string[] }>(`/schedules/${id}/next`)).next;
+
+/** validateCron asks the server to parse an expression and preview its
+ * next fire times; an invalid expression throws an ApiError with the
+ * parser's message, which the form shows inline. */
+export const validateCron = async (cron: string, timezone: string) =>
+  (await request<{ ok: boolean; next: string[] }>('/schedules/validate', {
+    method: 'POST',
+    body: JSON.stringify({ cron, timezone }),
+  })).next;
+
+export const listRuns = (scheduleId?: number) =>
+  request<RunsPage>(`/runs${query({ schedule_id: scheduleId, limit: 20 })}`);
+
+/** targetLatest resolves to null when a target has no result yet, so
+ * callers can render an empty state instead of an error. */
+export const targetLatest = async (id: number): Promise<Result | null> => {
+  try {
+    return await request<Result>(`/targets/${id}/latest`);
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return null;
+    throw err;
+  }
+};
