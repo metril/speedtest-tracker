@@ -353,24 +353,30 @@ func TestOoklaServerSearch(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers", nil)
-	var all []ookla.Server
+	var all struct {
+		Servers []ookla.Server `json:"servers"`
+	}
 	json.NewDecoder(rec.Body).Decode(&all)
-	if rec.Code != http.StatusOK || len(all) != 2 {
+	if rec.Code != http.StatusOK || len(all.Servers) != 2 {
 		t.Fatalf("all = %d %+v", rec.Code, all)
 	}
 
 	for _, q := range []string{"frank", "FRANKFURT", "germany", "fra.example"} {
 		rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q="+q, nil)
-		var got []ookla.Server
+		var got struct {
+			Servers []ookla.Server `json:"servers"`
+		}
 		json.NewDecoder(rec.Body).Decode(&got)
-		if len(got) != 1 || got[0].ID != "1" {
+		if len(got.Servers) != 1 || got.Servers[0].ID != "1" {
 			t.Errorf("q=%q -> %+v", q, got)
 		}
 	}
 	rec = do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=nowhere", nil)
-	var none []ookla.Server
+	var none struct {
+		Servers []ookla.Server `json:"servers"`
+	}
 	json.NewDecoder(rec.Body).Decode(&none)
-	if len(none) != 0 {
+	if len(none.Servers) != 0 {
 		t.Errorf("no match = %+v", none)
 	}
 }

@@ -28,12 +28,23 @@ import (
 )
 
 const (
-	defaultSearchBase = "https://www.speedtest.net/api/js/servers"
-	defaultGeoBase    = "https://geocoding-api.open-meteo.com/v1/search"
+	defaultSearchBase    = "https://www.speedtest.net/api/js/servers"
+	defaultGeoBase       = "https://geocoding-api.open-meteo.com/v1/search"
+	defaultNominatimBase = "https://nominatim.openstreetmap.org/search"
+
+	// defaultUserAgent is sent on every Nominatim request. Nominatim's
+	// usage policy requires a real, identifying User-Agent; requests
+	// without one are liable to be blocked.
+	defaultUserAgent = "speedtest-tracker/dev (+https://github.com/metril/speedtest-tracker)"
+
+	// nominatimMinInterval enforces Nominatim's usage policy of at most 1
+	// request/second, independent of the result cache below (which only
+	// helps once a query has already been resolved once).
+	nominatimMinInterval = time.Second
 
 	// perRequestTimeout bounds one outbound HTTP call; overallTimeout
 	// bounds a whole Search call, which can make up to two search
-	// requests plus one geocode request.
+	// requests plus a handful of geocode requests.
 	perRequestTimeout = 5 * time.Second
 	overallTimeout    = 10 * time.Second
 
@@ -57,9 +68,16 @@ const (
 // tests can override them; NewClient wires sane defaults pointed at the
 // real services. The zero Client is not usable — construct with NewClient.
 type Client struct {
-	HTTP    *http.Client
-	Base    string
-	GeoBase string
+	HTTP          *http.Client
+	Base          string
+	GeoBase       string
+	NominatimBase string
+
+	// UserAgent is sent on every Nominatim request (required by its usage
+	// policy). NewClient defaults it to a generic identifying string;
+	// callers that know their build version should override it, e.g.
+	// "speedtest-tracker/1.2.3 (+https://github.com/metril/speedtest-tracker)".
+	UserAgent string
 
 	// Logger, when set, receives debug-level notes about geocode and
 	// geocoded-re-search failures (both are swallowed otherwise — Search
@@ -72,24 +90,74 @@ type Client struct {
 	now   func() time.Time
 
 	sf singleflightGroup
+
+	nomMu    sync.Mutex
+	nomLast  time.Time
+	nomNow   func() time.Time
+	nomSleep func(time.Duration)
 }
 
 type cacheEntry struct {
-	servers []ookla.Server
-	at      time.Time
+	result SearchResult
+	at     time.Time
 }
 
-// NewClient returns a Client pointed at the real speedtest.net search API
-// and Open-Meteo geocoder, with an HTTP client timing out at
+// SearchRequest is Search's input: the raw query, an optional 2-letter
+// lowercase country hint (used to scope postcode geocoding), and a result
+// limit (<= 0 means unbounded).
+type SearchRequest struct {
+	Q       string
+	Country string
+	Limit   int
+}
+
+// SearchResult is Search's output: the merged, possibly distance-sorted
+// server list, plus Near — the resolved place name (first two
+// comma-separated parts of the geocoder's display name), empty when no
+// geocode point was resolved.
+type SearchResult struct {
+	Servers []ookla.Server `json:"servers"`
+	Near    string         `json:"near,omitempty"`
+}
+
+// NewClient returns a Client pointed at the real speedtest.net search API,
+// Nominatim and Open-Meteo geocoders, with an HTTP client timing out at
 // perRequestTimeout.
 func NewClient() *Client {
 	return &Client{
-		HTTP:    &http.Client{Timeout: perRequestTimeout, CheckRedirect: rejectCrossHostRedirect},
-		Base:    defaultSearchBase,
-		GeoBase: defaultGeoBase,
-		cache:   make(map[string]cacheEntry),
-		now:     time.Now,
+		HTTP:          &http.Client{Timeout: perRequestTimeout, CheckRedirect: rejectCrossHostRedirect},
+		Base:          defaultSearchBase,
+		GeoBase:       defaultGeoBase,
+		NominatimBase: defaultNominatimBase,
+		UserAgent:     defaultUserAgent,
+		cache:         make(map[string]cacheEntry),
+		now:           time.Now,
+		nomNow:        time.Now,
+		nomSleep:      time.Sleep,
 	}
+}
+
+// waitNominatim blocks, if necessary, so that no two Nominatim requests
+// from this Client start less than nominatimMinInterval apart — enforced
+// here, independent of the result cache, since the cache only helps once
+// a query has already been resolved once.
+func (c *Client) waitNominatim() {
+	c.nomMu.Lock()
+	defer c.nomMu.Unlock()
+	if c.nomNow == nil {
+		c.nomNow = time.Now
+	}
+	if c.nomSleep == nil {
+		c.nomSleep = time.Sleep
+	}
+	now := c.nomNow()
+	if !c.nomLast.IsZero() {
+		if wait := nominatimMinInterval - now.Sub(c.nomLast); wait > 0 {
+			c.nomSleep(wait)
+			now = c.nomNow()
+		}
+	}
+	c.nomLast = now
 }
 
 // rejectCrossHostRedirect is a http.Client CheckRedirect func that refuses
@@ -127,30 +195,33 @@ type geoPoint struct {
 // a thundering herd of identical searches (e.g. several browser tabs
 // typing the same query) independently of the TTL cache above, which only
 // helps once a result already exists.
-func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Server, error) {
-	q = strings.TrimSpace(q)
+func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResult, error) {
+	q := strings.TrimSpace(req.Q)
 	if q == "" {
-		return nil, nil
+		return SearchResult{Servers: []ookla.Server{}}, nil
 	}
-	key := strings.ToLower(q)
+	country := strings.ToLower(strings.TrimSpace(req.Country))
+	key := strings.ToLower(q) + "|" + country
 
-	if servers, ok := c.cacheGet(key); ok {
-		return capServers(servers, limit), nil
+	if res, ok := c.cacheGet(key); ok {
+		res.Servers = capServers(res.Servers, req.Limit)
+		return res, nil
 	}
 
-	servers, err := c.sf.Do(key, func() ([]ookla.Server, error) {
+	res, err := c.sf.Do(key, func() (SearchResult, error) {
 		// Re-check: a concurrent call for the same key may have already
 		// populated the cache while this call waited to become the
 		// leader (or waited on another leader that has since finished).
-		if servers, ok := c.cacheGet(key); ok {
-			return servers, nil
+		if res, ok := c.cacheGet(key); ok {
+			return res, nil
 		}
-		return c.searchAndCache(q, key)
+		return c.searchAndCache(q, country, key)
 	})
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
-	return capServers(servers, limit), nil
+	res.Servers = capServers(res.Servers, req.Limit)
+	return res, nil
 }
 
 // searchAndCache performs the actual direct-search(+geocode) flow for q
@@ -159,37 +230,64 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 // particular caller's context — a single-flighted call is shared by every
 // concurrent caller, so it must not be cancelable by whichever caller
 // happened to start it; overallTimeout still bounds its total duration.
-func (c *Client) searchAndCache(q, key string) ([]ookla.Server, error) {
+func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 
 	servers, err := c.search(ctx, q)
 	if err != nil {
-		return nil, err
+		return SearchResult{}, err
 	}
 
 	var point *geoPoint
-	if looksLikePostcode(q) || len(servers) < geocodeHitThreshold {
+	if looksLikePostcode(q) {
+		gp, gerr := c.geocodePostcode(ctx, q, country)
+		if gerr != nil {
+			c.logDebug("ooklaweb: nominatim geocode failed", "query", q, "country", country, "error", gerr)
+		} else if gp != nil {
+			point = gp
+		}
+	}
+	if point == nil && len(servers) < geocodeHitThreshold {
 		gp, gerr := c.geocode(ctx, q)
 		if gerr != nil {
 			c.logDebug("ooklaweb: geocode failed", "query", q, "error", gerr)
 		} else if gp != nil {
 			point = gp
-			if more, merr := c.search(ctx, gp.Name); merr != nil {
-				c.logDebug("ooklaweb: geocoded re-search failed", "query", q, "place", gp.Name, "error", merr)
-			} else {
-				servers = mergeServers(servers, more)
-			}
 		}
 	}
 
 	if point != nil {
+		if more, merr := c.search(ctx, point.Name); merr != nil {
+			c.logDebug("ooklaweb: geocoded re-search failed", "query", q, "place", point.Name, "error", merr)
+		} else {
+			servers = mergeServers(servers, more)
+		}
 		applyDistances(servers, *point)
 		sort.SliceStable(servers, func(i, j int) bool { return sortDistance(servers[i]) < sortDistance(servers[j]) })
 	}
 
-	c.cacheSet(key, servers)
-	return servers, nil
+	res := SearchResult{Servers: servers}
+	if point != nil {
+		res.Near = nearName(point.Name)
+	}
+	c.cacheSet(key, res)
+	return res, nil
+}
+
+// nearName trims a geocoder display name down to its first two
+// comma-separated parts (e.g. "Denver, Colorado, United States" ->
+// "Denver, Colorado"), which is plenty to orient a user without repeating
+// the whole administrative hierarchy.
+func nearName(displayName string) string {
+	parts := strings.Split(displayName, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	if len(parts) > 2 {
+		parts = parts[:2]
+	}
+	return strings.Join(parts, ", ")
 }
 
 func applyDistances(servers []ookla.Server, point geoPoint) {
@@ -243,17 +341,17 @@ func mergeServers(a, b []ookla.Server) []ookla.Server {
 	return out
 }
 
-func (c *Client) cacheGet(key string) ([]ookla.Server, bool) {
+func (c *Client) cacheGet(key string) (SearchResult, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.cache[key]
 	if !ok || c.now().Sub(e.at) >= cacheTTL {
-		return nil, false
+		return SearchResult{}, false
 	}
-	return e.servers, true
+	return e.result, true
 }
 
-func (c *Client) cacheSet(key string, servers []ookla.Server) {
+func (c *Client) cacheSet(key string, result SearchResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.cache == nil {
@@ -270,7 +368,7 @@ func (c *Client) cacheSet(key string, servers []ookla.Server) {
 		}
 		delete(c.cache, oldestKey)
 	}
-	c.cache[key] = cacheEntry{servers: servers, at: c.now()}
+	c.cache[key] = cacheEntry{result: result, at: c.now()}
 }
 
 func (c *Client) logDebug(msg string, args ...any) {
@@ -382,6 +480,120 @@ func (c *Client) geocode(ctx context.Context, q string) (*geoPoint, error) {
 	}
 	first := gr.Results[0]
 	return &geoPoint{Name: first.Name, Lat: first.Latitude, Lon: first.Longitude}, nil
+}
+
+// nominatimResult is one hit from Nominatim's jsonv2 search response.
+// lat/lon come back as JSON strings.
+type nominatimResult struct {
+	DisplayName string `json:"display_name"`
+	Lat         string `json:"lat"`
+	Lon         string `json:"lon"`
+}
+
+// geocodePostcode resolves a postcode-shaped query q to a place via
+// Nominatim, trying progressively looser queries: postalcode+countrycodes
+// (when country is set), then postalcode alone, then a free-form q=
+// search (still scoped to country when set). It returns a nil point
+// (with no error) when none of those find a match — the caller falls
+// back to the existing Open-Meteo geocoder in that case.
+func (c *Client) geocodePostcode(ctx context.Context, q, country string) (*geoPoint, error) {
+	if country != "" {
+		gp, err := c.nominatimSearch(ctx, url.Values{"postalcode": {q}, "countrycodes": {country}})
+		if err != nil {
+			return nil, err
+		}
+		if gp != nil {
+			return gp, nil
+		}
+	}
+	gp, err := c.nominatimSearch(ctx, url.Values{"postalcode": {q}})
+	if err != nil {
+		return nil, err
+	}
+	if gp != nil {
+		return gp, nil
+	}
+	params := url.Values{"q": {q}}
+	if country != "" {
+		params.Set("countrycodes", country)
+	}
+	return c.nominatimSearch(ctx, params)
+}
+
+// nominatimSearch performs one rate-limited Nominatim search request with
+// the given query params (format=jsonv2&limit=1 are added automatically),
+// returning the first (best) match, or a nil point when there are none.
+func (c *Client) nominatimSearch(ctx context.Context, params url.Values) (*geoPoint, error) {
+	ctx, cancel := context.WithTimeout(ctx, perRequestTimeout)
+	defer cancel()
+
+	u, err := url.Parse(c.nominatimBase())
+	if err != nil {
+		return nil, fmt.Errorf("parse nominatim base: %w", err)
+	}
+	qs := u.Query()
+	for k, vs := range params {
+		for _, v := range vs {
+			qs.Set(k, v)
+		}
+	}
+	qs.Set("format", "jsonv2")
+	qs.Set("limit", "1")
+	u.RawQuery = qs.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("User-Agent", c.userAgent())
+
+	c.waitNominatim()
+	resp, err := c.httpClient().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("nominatim search: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("nominatim search: status %d", resp.StatusCode)
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read nominatim search response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("nominatim search response exceeds %d bytes", maxResponseBytes)
+	}
+	var results []nominatimResult
+	if err := json.Unmarshal(body, &results); err != nil {
+		return nil, fmt.Errorf("parse nominatim search response: %w", err)
+	}
+	if len(results) == 0 {
+		return nil, nil
+	}
+	first := results[0]
+	lat, err := strconv.ParseFloat(first.Lat, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse nominatim lat %q: %w", first.Lat, err)
+	}
+	lon, err := strconv.ParseFloat(first.Lon, 64)
+	if err != nil {
+		return nil, fmt.Errorf("parse nominatim lon %q: %w", first.Lon, err)
+	}
+	return &geoPoint{Name: first.DisplayName, Lat: lat, Lon: lon}, nil
+}
+
+func (c *Client) nominatimBase() string {
+	if c.NominatimBase != "" {
+		return c.NominatimBase
+	}
+	return defaultNominatimBase
+}
+
+func (c *Client) userAgent() string {
+	if c.UserAgent != "" {
+		return c.UserAgent
+	}
+	return defaultUserAgent
 }
 
 // rawServer is one speedtest.net search hit. id/lat/lon/distance come back

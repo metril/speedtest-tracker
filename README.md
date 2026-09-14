@@ -212,6 +212,24 @@ paths and the Ookla consent flags match whatever the server has configured.
 invocation. The Result JSON goes to stdout; progress events stream to
 stderr as JSON lines.
 
+### Ookla server search
+
+`GET /api/v1/ookla/servers?q=&country=&limit=` merges the local
+`speedtest -L` list with a wider speedtest.net search, returning
+`{"servers": [...], "near": "..."}`. A postcode-shaped `q` (e.g. `80202`,
+`SW1A 1AA`) is geocoded via Nominatim (`postalcode=` scoped by
+`countrycodes=` when `country` is given, falling back to an unscoped
+postcode search, then a free-form `q=` search, then Open-Meteo as a last
+resort) so postcodes resolve correctly instead of falling through to a
+generic name search. `country`, when given, must be a 2-letter code
+(case-insensitive; the server lowercases it) or the request is rejected
+with 400. `near` is the resolved place's name (first two comma-separated
+parts of the geocoder's result), present whenever a geocode point was
+used to widen and sort the results by distance. Nominatim requests are
+capped at 1/second and always carry an identifying `User-Agent`
+(`speedtest-tracker/<version> (+https://github.com/metril/speedtest-tracker)`),
+per its usage policy.
+
 ## Schedules
 
 A schedule is a name, a cron expression, a timezone and an **ordered** list of

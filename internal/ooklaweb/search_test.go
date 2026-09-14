@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -49,6 +50,36 @@ func geoServer(t *testing.T, fixtures map[string]string) *httptest.Server {
 	}))
 }
 
+// nominatimReq records one request Nominatim received, for assertions on
+// which params/headers were sent.
+type nominatimReq struct {
+	postalcode   string
+	q            string
+	countrycodes string
+	userAgent    string
+}
+
+// nominatimServer builds an httptest server answering Nominatim's jsonv2
+// search shape. handle is called for every request and returns the JSON
+// body to send; every request is also recorded in reqs (if non-nil).
+func nominatimServer(t *testing.T, reqs *[]nominatimReq, handle func(url.Values) string) *httptest.Server {
+	t.Helper()
+	var mu sync.Mutex
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if reqs != nil {
+			mu.Lock()
+			*reqs = append(*reqs, nominatimReq{
+				postalcode: q.Get("postalcode"), q: q.Get("q"),
+				countrycodes: q.Get("countrycodes"), userAgent: r.Header.Get("User-Agent"),
+			})
+			mu.Unlock()
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(handle(q)))
+	}))
+}
+
 const denverFixture = `[
   {"id":1,"name":"Denver, CO","country":"United States","cc":"US","sponsor":"Comcast","host":"denver1.example.net:8080","lat":"39.74","lon":"-104.98","distance":"1.2"}
 ]`
@@ -61,29 +92,187 @@ const denverMetroFixture = `[
 
 const geoDenverFixture = `{"results":[{"name":"Denver","latitude":39.7392,"longitude":-104.9903,"country_code":"US","postcodes":["80202"]}]}`
 
-func TestSearchPostcodeGeocodesAndMerges(t *testing.T) {
+const nominatimDenverFixture = `[{"display_name":"Denver, Colorado, United States","lat":"39.7392","lon":"-104.9903"}]`
+
+func TestSearchPostcodeGeocodesViaNominatimAndMerges(t *testing.T) {
 	sp := speedtestServer(t, map[string]string{
-		"80202": `[]`,
-		"Denver": denverMetroFixture,
+		"80202":                          `[]`,
+		"Denver, Colorado, United States": denverMetroFixture,
 	}, nil)
 	defer sp.Close()
+	nom := nominatimServer(t, nil, func(q url.Values) string {
+		if q.Get("postalcode") == "80202" {
+			return nominatimDenverFixture
+		}
+		return `[]`
+	})
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+
+	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Servers) != 3 {
+		t.Fatalf("got %d servers, want 3: %+v", len(res.Servers), res.Servers)
+	}
+	for _, s := range res.Servers {
+		if s.DistanceKm == 0 {
+			t.Errorf("server %+v missing distance_km", s)
+		}
+	}
+	if res.Near != "Denver, Colorado" {
+		t.Errorf("near = %q, want %q (first two comma parts)", res.Near, "Denver, Colorado")
+	}
+}
+
+func TestSearchPostcodeWithCountryUsesCountrycodesThenFallsBackWithoutIt(t *testing.T) {
+	sp := speedtestServer(t, nil, nil)
+	defer sp.Close()
+	var reqs []nominatimReq
+	nom := nominatimServer(t, &reqs, func(q url.Values) string {
+		if q.Get("postalcode") != "" && q.Get("countrycodes") == "us" {
+			return nominatimDenverFixture
+		}
+		return `[]`
+	})
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+
+	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Near == "" {
+		t.Fatal("want a resolved Near place")
+	}
+	if len(reqs) != 1 || reqs[0].countrycodes != "us" || reqs[0].postalcode != "80202" {
+		t.Fatalf("nominatim requests = %+v, want exactly 1 with postalcode=80202&countrycodes=us", reqs)
+	}
+}
+
+func TestSearchPostcodeFallsBackWithoutCountryThenFreeForm(t *testing.T) {
+	sp := speedtestServer(t, nil, nil)
+	defer sp.Close()
+	var reqs []nominatimReq
+	nom := nominatimServer(t, &reqs, func(q url.Values) string {
+		// Only the third, free-form q= attempt (no postalcode) matches.
+		if q.Get("q") != "" && q.Get("postalcode") == "" {
+			return nominatimDenverFixture
+		}
+		return `[]`
+	})
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+
+	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if res.Near == "" {
+		t.Fatal("want a resolved Near place from the free-form fallback")
+	}
+	// postalcode+countrycodes, postalcode alone, then free-form q=.
+	if len(reqs) != 3 {
+		t.Fatalf("nominatim requests = %+v, want exactly 3 (progressively looser)", reqs)
+	}
+	if reqs[0].countrycodes != "us" || reqs[0].postalcode != "80202" {
+		t.Errorf("request 0 = %+v, want postalcode+countrycodes", reqs[0])
+	}
+	if reqs[1].postalcode != "80202" || reqs[1].countrycodes != "" {
+		t.Errorf("request 1 = %+v, want postalcode alone", reqs[1])
+	}
+	if reqs[2].q != "80202" || reqs[2].postalcode != "" {
+		t.Errorf("request 2 = %+v, want free-form q=", reqs[2])
+	}
+}
+
+func TestSearchPostcodeSendsUserAgentToNominatim(t *testing.T) {
+	sp := speedtestServer(t, nil, nil)
+	defer sp.Close()
+	var reqs []nominatimReq
+	nom := nominatimServer(t, &reqs, func(q url.Values) string { return nominatimDenverFixture })
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+	c.UserAgent = "speedtest-tracker/1.2.3 (+https://example.com)"
+
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10}); err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(reqs) == 0 || reqs[0].userAgent != "speedtest-tracker/1.2.3 (+https://example.com)" {
+		t.Fatalf("nominatim requests = %+v, want the configured User-Agent", reqs)
+	}
+}
+
+func TestSearchPostcodeFallsBackToOpenMeteoWhenNominatimEmpty(t *testing.T) {
+	sp := speedtestServer(t, map[string]string{"Denver": denverMetroFixture}, nil)
+	defer sp.Close()
+	nom := nominatimServer(t, nil, func(q url.Values) string { return `[]` })
+	defer nom.Close()
 	geo := geoServer(t, map[string]string{"80202": geoDenverFixture})
 	defer geo.Close()
 
 	c := NewClient()
 	c.Base = sp.URL
+	c.NominatimBase = nom.URL
 	c.GeoBase = geo.URL
 
-	got, err := c.Search(context.Background(), "80202", 10)
+	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(got) != 3 {
-		t.Fatalf("got %d servers, want 3: %+v", len(got), got)
+	if res.Near != "Denver" {
+		t.Errorf("near = %q, want %q (Open-Meteo fallback)", res.Near, "Denver")
 	}
-	for _, s := range got {
-		if s.DistanceKm == 0 {
-			t.Errorf("server %+v missing distance_km", s)
+	if len(res.Servers) != 3 {
+		t.Fatalf("got %d servers, want 3 (merged via Open-Meteo fallback)", len(res.Servers))
+	}
+}
+
+func TestNominatimRateLimitedToOnePerSecond(t *testing.T) {
+	nom := nominatimServer(t, nil, func(q url.Values) string { return `[]` })
+	defer nom.Close()
+	sp := speedtestServer(t, nil, nil)
+	defer sp.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+
+	fixedNow := time.Now()
+	c.nomNow = func() time.Time { return fixedNow }
+	var slept []time.Duration
+	c.nomSleep = func(d time.Duration) {
+		slept = append(slept, d)
+		fixedNow = fixedNow.Add(d)
+	}
+
+	// Two postcode searches for different queries (so they aren't
+	// single-flighted or cache-hit) must still be paced >= 1s apart.
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10}); err != nil {
+		t.Fatalf("Search 1: %v", err)
+	}
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "10001", Limit: 10}); err != nil {
+		t.Fatalf("Search 2: %v", err)
+	}
+	if len(slept) == 0 {
+		t.Fatal("want at least one enforced wait between Nominatim requests")
+	}
+	for _, d := range slept {
+		if d <= 0 || d > nominatimMinInterval {
+			t.Errorf("slept %v, want (0, %v]", d, nominatimMinInterval)
 		}
 	}
 }
@@ -93,8 +282,8 @@ func TestSearchSortsByDistanceFromGeocodedPoint(t *testing.T) {
 	// point (39.7392,-104.9903): Aurora is nearest, then Denver, then
 	// Boulder farthest.
 	sp := speedtestServer(t, map[string]string{
-		"denver":  denverMetroFixture,
-		"Denver":  denverMetroFixture,
+		"denver": denverMetroFixture,
+		"Denver": denverMetroFixture,
 	}, nil)
 	defer sp.Close()
 	geo := geoServer(t, map[string]string{"denver": geoDenverFixture})
@@ -104,10 +293,11 @@ func TestSearchSortsByDistanceFromGeocodedPoint(t *testing.T) {
 	c.Base = sp.URL
 	c.GeoBase = geo.URL
 
-	got, err := c.Search(context.Background(), "denver", 10)
+	res, err := c.Search(context.Background(), SearchRequest{Q: "denver", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
+	got := res.Servers
 	if len(got) != 3 {
 		t.Fatalf("got %d servers, want 3", len(got))
 	}
@@ -142,10 +332,11 @@ func TestSearchSortsCoordinateLessServersLast(t *testing.T) {
 	c.Base = sp.URL
 	c.GeoBase = geo.URL
 
-	got, err := c.Search(context.Background(), "denver", 10)
+	res, err := c.Search(context.Background(), SearchRequest{Q: "denver", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
+	got := res.Servers
 	if len(got) != 4 {
 		t.Fatalf("got %d servers, want 4: %+v", len(got), got)
 	}
@@ -170,7 +361,6 @@ func TestSearchCachesWithinTTL(t *testing.T) {
 
 	c := NewClient()
 	c.Base = sp.URL
-	c.GeoBase = sp.URL // unused; comcast returns 1 hit < 5 would trigger geocode too
 	// avoid geocode branch entirely by stubbing geo to return no results
 	geo := geoServer(t, map[string]string{})
 	defer geo.Close()
@@ -179,7 +369,7 @@ func TestSearchCachesWithinTTL(t *testing.T) {
 	fixedNow := time.Now()
 	c.now = func() time.Time { return fixedNow }
 
-	if _, err := c.Search(context.Background(), "comcast", 10); err != nil {
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "comcast", Limit: 10}); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 	firstReqs := atomic.LoadInt32(&reqs)
@@ -187,7 +377,7 @@ func TestSearchCachesWithinTTL(t *testing.T) {
 		t.Fatal("expected at least one request")
 	}
 
-	if _, err := c.Search(context.Background(), "COMCAST", 10); err != nil {
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "COMCAST", Limit: 10}); err != nil {
 		t.Fatalf("Search (cached): %v", err)
 	}
 	if got := atomic.LoadInt32(&reqs); got != firstReqs {
@@ -196,11 +386,40 @@ func TestSearchCachesWithinTTL(t *testing.T) {
 
 	// Advance past the TTL: cache must be bypassed.
 	c.now = func() time.Time { return fixedNow.Add(16 * time.Minute) }
-	if _, err := c.Search(context.Background(), "comcast", 10); err != nil {
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "comcast", Limit: 10}); err != nil {
 		t.Fatalf("Search (expired): %v", err)
 	}
 	if got := atomic.LoadInt32(&reqs); got <= firstReqs {
 		t.Errorf("expired cache entry was not refetched: reqs=%d", got)
+	}
+}
+
+func TestSearchCacheKeyIncludesCountry(t *testing.T) {
+	var reqs int32
+	sp := speedtestServer(t, nil, &reqs)
+	defer sp.Close()
+	nom := nominatimServer(t, nil, func(q url.Values) string {
+		if q.Get("countrycodes") == "us" {
+			return nominatimDenverFixture
+		}
+		return `[]`
+	})
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+
+	res1, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search (us): %v", err)
+	}
+	res2, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search (no country): %v", err)
+	}
+	if res1.Near == res2.Near {
+		t.Errorf("same-query different-country results were not distinguished: %q == %q", res1.Near, res2.Near)
 	}
 }
 
@@ -216,7 +435,7 @@ func TestSearchTimeoutFallsBackWithError(t *testing.T) {
 	c.GeoBase = slow.URL
 	c.HTTP = &http.Client{Timeout: 50 * time.Millisecond}
 
-	_, err := c.Search(context.Background(), "denver", 10)
+	_, err := c.Search(context.Background(), SearchRequest{Q: "denver", Limit: 10})
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")
 	}
@@ -224,16 +443,30 @@ func TestSearchTimeoutFallsBackWithError(t *testing.T) {
 
 func TestLooksLikePostcode(t *testing.T) {
 	cases := map[string]bool{
-		"80202":     true,
-		"SW1A 1AA":  true,
-		"denver":    false,
-		"comcast":   false,
-		"":          false,
+		"80202":      true,
+		"SW1A 1AA":   true,
+		"denver":     false,
+		"comcast":    false,
+		"":           false,
 		"Denver, CO": false,
 	}
 	for q, want := range cases {
 		if got := looksLikePostcode(q); got != want {
 			t.Errorf("looksLikePostcode(%q) = %v, want %v", q, got, want)
+		}
+	}
+}
+
+func TestNearName(t *testing.T) {
+	cases := map[string]string{
+		"Denver, Colorado, United States": "Denver, Colorado",
+		"Denver":                          "Denver",
+		"Denver, Colorado":                "Denver, Colorado",
+		"":                                "",
+	}
+	for in, want := range cases {
+		if got := nearName(in); got != want {
+			t.Errorf("nearName(%q) = %q, want %q", in, got, want)
 		}
 	}
 }
@@ -282,7 +515,7 @@ func TestSearchSingleFlightsConcurrentIdenticalQueries(t *testing.T) {
 		wg.Add(1)
 		go func(q string) {
 			defer wg.Done()
-			if _, err := c.Search(context.Background(), q, 10); err != nil {
+			if _, err := c.Search(context.Background(), SearchRequest{Q: q, Limit: 10}); err != nil {
 				errs <- err
 			}
 		}(queries[i%len(queries)])
@@ -313,12 +546,12 @@ func TestSearchLimitCaps(t *testing.T) {
 	c.Base = sp.URL
 	c.GeoBase = geo.URL
 
-	got, err := c.Search(context.Background(), "denver", 1)
+	res, err := c.Search(context.Background(), SearchRequest{Q: "denver", Limit: 1})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("got %d servers, want 1 (limit)", len(got))
+	if len(res.Servers) != 1 {
+		t.Fatalf("got %d servers, want 1 (limit)", len(res.Servers))
 	}
 }
 
@@ -339,12 +572,12 @@ func TestSearchLogsGeocodeFailureAtDebug(t *testing.T) {
 	c.GeoBase = geo.URL
 	c.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
-	got, err := c.Search(context.Background(), "comcast", 10)
+	res, err := c.Search(context.Background(), SearchRequest{Q: "comcast", Limit: 10})
 	if err != nil {
 		t.Fatalf("Search: %v", err)
 	}
-	if len(got) != 1 {
-		t.Fatalf("got %d servers, want 1 (direct hit, geocode failure ignored)", len(got))
+	if len(res.Servers) != 1 {
+		t.Fatalf("got %d servers, want 1 (direct hit, geocode failure ignored)", len(res.Servers))
 	}
 	if !strings.Contains(buf.String(), "level=DEBUG") || !strings.Contains(buf.String(), "geocode failed") {
 		t.Errorf("log output = %q, want a DEBUG line about the geocode failure", buf.String())
@@ -394,6 +627,18 @@ func TestGeocodeRejectsOversizedResponse(t *testing.T) {
 	}
 }
 
+func TestNominatimSearchRejectsOversizedResponse(t *testing.T) {
+	srv := oversizedJSONServer(t)
+	defer srv.Close()
+
+	c := NewClient()
+	c.NominatimBase = srv.URL
+
+	if _, err := c.nominatimSearch(context.Background(), url.Values{"q": {"x"}}); err == nil {
+		t.Fatal("nominatimSearch: want error for oversized response, got nil")
+	}
+}
+
 func TestSearchRefusesCrossHostRedirect(t *testing.T) {
 	target := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
 	defer target.Close()
@@ -423,7 +668,7 @@ func TestSearchWithNilLoggerDoesNotPanicOnGeocodeFailure(t *testing.T) {
 	c.Base = sp.URL
 	c.GeoBase = geo.URL
 
-	if _, err := c.Search(context.Background(), "comcast", 10); err != nil {
+	if _, err := c.Search(context.Background(), SearchRequest{Q: "comcast", Limit: 10}); err != nil {
 		t.Fatalf("Search: %v", err)
 	}
 }
