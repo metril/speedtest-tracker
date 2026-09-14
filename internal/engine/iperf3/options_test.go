@@ -65,13 +65,29 @@ func TestParseOptionsValidation(t *testing.T) {
 		`{"host":"h","duration_s":-5}`,
 		`{"host":"h","reverse":true,"bidir":true}`,
 		`{"host":"h",`,
-		`{"host":"h","udp_bitrate":"100M"}`,            // udp_bitrate without protocol udp
-		`{"host":"h","protocol":"udp","bidir":true}`,   // bidir with udp
-		`{"host":"h","password":"x"}`,                  // password without username/rsa key
-		`{"host":"h","password":"x","username":"bob"}`, // password without rsa key
+		`{"host":"h","udp_bitrate":"100M"}`,              // udp_bitrate without protocol udp
+		`{"host":"h","protocol":"udp","bidir":true}`,     // bidir with udp
+		`{"host":"h","password":"x"}`,                    // password without username/rsa key
+		`{"host":"h","password":"x","username":"bob"}`,   // password without rsa key
+		`{"host":"h","port":5201,"port_range_end":5200}`, // port_range_end < port
+		`{"host":"h","port_range_end":70000}`,            // port_range_end out of range
 	} {
 		if _, err := parseOptions(json.RawMessage(raw)); err == nil {
 			t.Errorf("parseOptions(%s) = nil error, want error", raw)
 		}
+	}
+}
+
+func TestParseOptionsPortRangeEndValid(t *testing.T) {
+	o, err := parseOptions(json.RawMessage(`{"host":"h","port":5201,"port_range_end":5205}`))
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.PortRangeEnd != 5205 {
+		t.Errorf("PortRangeEnd = %d, want 5205", o.PortRangeEnd)
+	}
+	// port_range_end == port is fine (a no-op range).
+	if _, err := parseOptions(json.RawMessage(`{"host":"h","port":5201,"port_range_end":5201}`)); err != nil {
+		t.Errorf("parseOptions with port_range_end==port: %v", err)
 	}
 }

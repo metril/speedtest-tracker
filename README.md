@@ -190,7 +190,7 @@ restart to switch back.
 | --- | --- | --- |
 | `ookla` | `speedtest -f jsonl --progress=yes --accept-license --accept-gdpr [-s ID]`; server list from `speedtest -L -f json`, cached | `server_id` |
 | `cloudflare` | native Go against `speed.cloudflare.com` (`/cdn-cgi/trace`, `/__down`, `/__up`), p90 of per-transfer throughput | `download_sizes`, `upload_sizes`, `latency_samples`, `base_url` |
-| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
+| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `port_range_end`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
 | `fake` | deterministic, no I/O; used by tests | `fail`, `download_bps`, `upload_bps` |
 
 Binary paths and the Ookla consent flags live in the Engines settings section
@@ -211,6 +211,14 @@ paths and the Ookla consent flags match whatever the server has configured.
 `--speedtest-bin`/`--iperf3-bin` override just the binary path for that one
 invocation. The Result JSON goes to stdout; progress events stream to
 stderr as JSON lines.
+
+When `port_range_end` is set above `port`, a run that fails because the
+server reports it is busy running another test (`the server is busy
+running a test. try again later`) is retried on the next port up through
+`port_range_end`, capped at 5 attempts total. Any other error, or running
+out of ports, fails the run with that attempt's error. Without
+`port_range_end`, a busy server fails the run outright on the single
+configured port.
 
 ### Ookla server search
 

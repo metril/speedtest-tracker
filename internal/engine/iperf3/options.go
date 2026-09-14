@@ -10,8 +10,13 @@ import (
 
 // Options are the iperf3 engine's per-target options.
 type Options struct {
-	Host             string `json:"host"`
-	Port             int    `json:"port,omitempty"`
+	Host string `json:"host"`
+	Port int    `json:"port,omitempty"`
+	// PortRangeEnd, when greater than Port, makes Run retry on
+	// consecutive ports up to this one (still capped at 5 attempts total)
+	// whenever the server reports it is busy running another test. Zero
+	// (or <= Port) means no retry: a busy server fails the run outright.
+	PortRangeEnd     int    `json:"port_range_end,omitempty"`
 	Protocol         string `json:"protocol,omitempty"` // tcp or udp
 	Reverse          bool   `json:"reverse,omitempty"`
 	Bidir            bool   `json:"bidir,omitempty"`
@@ -39,6 +44,14 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 	}
 	if o.Port < 1 || o.Port > 65535 {
 		return Options{}, errors.New("iperf3 options: port out of range")
+	}
+	if o.PortRangeEnd != 0 {
+		if o.PortRangeEnd < o.Port {
+			return Options{}, errors.New("iperf3 options: port_range_end must be >= port")
+		}
+		if o.PortRangeEnd > 65535 {
+			return Options{}, errors.New("iperf3 options: port_range_end out of range")
+		}
 	}
 	if o.Protocol == "" {
 		o.Protocol = "tcp"
