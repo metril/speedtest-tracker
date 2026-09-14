@@ -233,7 +233,12 @@ generic name search. `country`, when given, must be a 2-letter code
 (case-insensitive; the server lowercases it) or the request is rejected
 with 400. `near` is the resolved place's name (first two comma-separated
 parts of the geocoder's result), present whenever a geocode point was
-used to widen and sort the results by distance. Nominatim requests are
+used to widen and sort the results by distance — the widen step itself
+re-searches speedtest.net by the resolved **coordinates** (`lat=`/`lon=`),
+not the place name, since speedtest.net's text search frequently doesn't
+match a geocoder's display name (a UK postcode, for example, resolves to
+something like "SW1A 1AA, City of Westminster", which never matches).
+Nominatim requests are
 capped at 1/second and always carry an identifying `User-Agent`
 (`speedtest-tracker/<version> (+https://github.com/metril/speedtest-tracker)`),
 per its usage policy.

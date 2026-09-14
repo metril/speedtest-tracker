@@ -1,9 +1,11 @@
 // Package ooklaweb searches speedtest.net's unofficial server-search API to
 // widen the Ookla server picker beyond the ~10 servers the speedtest CLI
 // returns for `-L`. When the query looks like a postcode, or the direct
-// search comes back thin, it also geocodes the query via Open-Meteo and
-// re-searches speedtest.net using the resolved place name, sorting the
-// merged results by distance from that point.
+// search comes back thin, it also geocodes the query (via Nominatim for a
+// postcode, Open-Meteo otherwise) and re-searches speedtest.net by the
+// resolved coordinates (not the place name, which speedtest.net's text
+// search frequently doesn't match), sorting the merged results by
+// distance from that point.
 package ooklaweb
 
 import (
@@ -210,9 +212,10 @@ type geoPoint struct {
 
 // Search queries speedtest.net for q. If q looks like a postcode, or the
 // direct search returns fewer than geocodeHitThreshold hits, it also
-// geocodes q via Open-Meteo and re-searches using the resolved place name;
-// results are merged (deduped by ID) and, when a geocode point was
-// resolved, sorted by distance from it. Results are cached for cacheTTL,
+// geocodes q (via Nominatim for a postcode, Open-Meteo otherwise) and
+// re-searches by the resolved coordinates; results are merged (deduped by
+// ID) and, when a geocode point was resolved, sorted by distance from it.
+// Results are cached for cacheTTL,
 // keyed by the lowercased query, in a cache capped at cacheMaxEntries
 // (oldest evicted first). limit caps the number of servers returned; <= 0
 // means unbounded.
@@ -286,8 +289,15 @@ func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 	}
 
 	if point != nil {
-		if more, merr := c.search(ctx, point.Name); merr != nil {
-			c.logDebug("ooklaweb: geocoded re-search failed", "query", q, "place", point.Name, "error", merr)
+		// Re-search by coordinates, not by the geocoder's place name:
+		// speedtest.net's text search frequently doesn't match a
+		// geocoder's display name (e.g. a UK postcode resolves to
+		// "SW1A 1AA, City of Westminster, Greater London, England",
+		// which speedtest.net's search never matches, silently returning
+		// zero servers even though Near was successfully resolved).
+		// speedtest.net's servers API supports lat=/lon= directly.
+		if more, merr := c.searchNear(ctx, point.Lat, point.Lon); merr != nil {
+			c.logDebug("ooklaweb: geocoded coordinate re-search failed", "query", q, "lat", point.Lat, "lon", point.Lon, "error", merr)
 		} else {
 			servers = mergeServers(servers, more)
 		}
@@ -414,6 +424,25 @@ func (c *Client) httpClient() *http.Client {
 
 // search performs one speedtest.net text search for q.
 func (c *Client) search(ctx context.Context, q string) ([]ookla.Server, error) {
+	return c.doSearch(ctx, func(qs url.Values) { qs.Set("search", q) })
+}
+
+// searchNear performs one speedtest.net coordinate search: the servers
+// nearest (lat, lon), as speedtest.net itself ranks them. Used for the
+// geocoded re-search instead of a name search (see searchAndCache):
+// speedtest.net's text search frequently doesn't match a geocoder's
+// display name, but its servers API accepts lat=/lon= directly.
+func (c *Client) searchNear(ctx context.Context, lat, lon float64) ([]ookla.Server, error) {
+	return c.doSearch(ctx, func(qs url.Values) {
+		qs.Set("lat", strconv.FormatFloat(lat, 'f', -1, 64))
+		qs.Set("lon", strconv.FormatFloat(lon, 'f', -1, 64))
+	})
+}
+
+// doSearch performs one speedtest.net servers API request: setParams adds
+// the query-specific params (search=, or lat=/lon=) on top of the shared
+// engine=js&limit=; the response is parsed identically either way.
+func (c *Client) doSearch(ctx context.Context, setParams func(url.Values)) ([]ookla.Server, error) {
 	ctx, cancel := context.WithTimeout(ctx, perRequestTimeout)
 	defer cancel()
 
@@ -423,8 +452,8 @@ func (c *Client) search(ctx context.Context, q string) ([]ookla.Server, error) {
 	}
 	qs := u.Query()
 	qs.Set("engine", "js")
-	qs.Set("search", q)
 	qs.Set("limit", strconv.Itoa(searchRequestLimit))
+	setParams(qs)
 	u.RawQuery = qs.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)

@@ -4,10 +4,12 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -16,17 +18,27 @@ import (
 )
 
 // speedtestServer builds an httptest server answering speedtest.net's
-// server-search shape, using the fixture that matches the "search" query
-// param, or an empty array otherwise. reqCount, if non-nil, is incremented
-// on every request.
-func speedtestServer(t *testing.T, fixtures map[string]string, reqCount *int32) *httptest.Server {
+// server-search shape. A "search="-bearing request is matched against
+// searchFixtures (text search); a "lat="/"lon="-bearing request is
+// matched against nearFixtures, keyed by "lat,lon" formatted the same way
+// searchNear itself formats them (see nearKey) — this is the coordinate
+// re-search a geocoded query triggers (see searchAndCache). An unmatched
+// or unrecognized request gets an empty array. reqCount, if non-nil, is
+// incremented on every request.
+func speedtestServer(t *testing.T, searchFixtures, nearFixtures map[string]string, reqCount *int32) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if reqCount != nil {
 			atomic.AddInt32(reqCount, 1)
 		}
-		q := r.URL.Query().Get("search")
-		body, ok := fixtures[q]
+		q := r.URL.Query()
+		var body string
+		var ok bool
+		if lat, lon := q.Get("lat"), q.Get("lon"); lat != "" || lon != "" {
+			body, ok = nearFixtures[lat+","+lon]
+		} else {
+			body, ok = searchFixtures[q.Get("search")]
+		}
 		if !ok {
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[]`))
@@ -35,6 +47,12 @@ func speedtestServer(t *testing.T, fixtures map[string]string, reqCount *int32) 
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(body))
 	}))
+}
+
+// nearKey renders (lat, lon) the same way searchNear formats them into
+// query params, for building nearFixtures keys in tests.
+func nearKey(lat, lon float64) string {
+	return strconv.FormatFloat(lat, 'f', -1, 64) + "," + strconv.FormatFloat(lon, 'f', -1, 64)
 }
 
 func geoServer(t *testing.T, fixtures map[string]string) *httptest.Server {
@@ -104,10 +122,10 @@ const nominatimDenverFixture = `[{"display_name":"Denver, Colorado, United State
 func noNominatimSleep(context.Context, time.Duration) error { return nil }
 
 func TestSearchPostcodeGeocodesViaNominatimAndMerges(t *testing.T) {
-	sp := speedtestServer(t, map[string]string{
-		"80202":                          `[]`,
-		"Denver, Colorado, United States": denverMetroFixture,
-	}, nil)
+	sp := speedtestServer(t,
+		map[string]string{"80202": `[]`},
+		map[string]string{nearKey(39.7392, -104.9903): denverMetroFixture},
+		nil)
 	defer sp.Close()
 	nom := nominatimServer(t, nil, func(q url.Values) string {
 		if q.Get("postalcode") == "80202" {
@@ -140,7 +158,7 @@ func TestSearchPostcodeGeocodesViaNominatimAndMerges(t *testing.T) {
 }
 
 func TestSearchPostcodeWithCountryUsesCountrycodesThenFallsBackWithoutIt(t *testing.T) {
-	sp := speedtestServer(t, nil, nil)
+	sp := speedtestServer(t, nil, nil, nil)
 	defer sp.Close()
 	var reqs []nominatimReq
 	nom := nominatimServer(t, &reqs, func(q url.Values) string {
@@ -169,7 +187,7 @@ func TestSearchPostcodeWithCountryUsesCountrycodesThenFallsBackWithoutIt(t *test
 }
 
 func TestSearchPostcodeFallsBackWithoutCountryThenFreeForm(t *testing.T) {
-	sp := speedtestServer(t, nil, nil)
+	sp := speedtestServer(t, nil, nil, nil)
 	defer sp.Close()
 	var reqs []nominatimReq
 	nom := nominatimServer(t, &reqs, func(q url.Values) string {
@@ -209,7 +227,7 @@ func TestSearchPostcodeFallsBackWithoutCountryThenFreeForm(t *testing.T) {
 }
 
 func TestSearchPostcodeSendsUserAgentToNominatim(t *testing.T) {
-	sp := speedtestServer(t, nil, nil)
+	sp := speedtestServer(t, nil, nil, nil)
 	defer sp.Close()
 	var reqs []nominatimReq
 	nom := nominatimServer(t, &reqs, func(q url.Values) string { return nominatimDenverFixture })
@@ -230,7 +248,7 @@ func TestSearchPostcodeSendsUserAgentToNominatim(t *testing.T) {
 }
 
 func TestSearchPostcodeFallsBackToOpenMeteoWhenNominatimEmpty(t *testing.T) {
-	sp := speedtestServer(t, map[string]string{"Denver": denverMetroFixture}, nil)
+	sp := speedtestServer(t, nil, map[string]string{nearKey(39.7392, -104.9903): denverMetroFixture}, nil)
 	defer sp.Close()
 	nom := nominatimServer(t, nil, func(q url.Values) string { return `[]` })
 	defer nom.Close()
@@ -258,7 +276,7 @@ func TestSearchPostcodeFallsBackToOpenMeteoWhenNominatimEmpty(t *testing.T) {
 func TestNominatimRateLimitedToOnePerSecond(t *testing.T) {
 	nom := nominatimServer(t, nil, func(q url.Values) string { return `[]` })
 	defer nom.Close()
-	sp := speedtestServer(t, nil, nil)
+	sp := speedtestServer(t, nil, nil, nil)
 	defer sp.Close()
 	// Nominatim never matches in this test, so Search falls through to the
 	// Open-Meteo geocoder too; stub it locally so the test never touches
@@ -330,10 +348,10 @@ func TestSearchSortsByDistanceFromGeocodedPoint(t *testing.T) {
 	// Denver metro fixture is unsorted by true distance from the geocoded
 	// point (39.7392,-104.9903): Aurora is nearest, then Denver, then
 	// Boulder farthest.
-	sp := speedtestServer(t, map[string]string{
-		"denver": denverMetroFixture,
-		"Denver": denverMetroFixture,
-	}, nil)
+	sp := speedtestServer(t,
+		map[string]string{"denver": denverMetroFixture},
+		map[string]string{nearKey(39.7392, -104.9903): denverMetroFixture},
+		nil)
 	defer sp.Close()
 	geo := geoServer(t, map[string]string{"denver": geoDenverFixture})
 	defer geo.Close()
@@ -369,10 +387,10 @@ const denverMetroWithUnplaceableFixture = `[
 ]`
 
 func TestSearchSortsCoordinateLessServersLast(t *testing.T) {
-	sp := speedtestServer(t, map[string]string{
-		"denver": denverMetroWithUnplaceableFixture,
-		"Denver": denverMetroWithUnplaceableFixture,
-	}, nil)
+	sp := speedtestServer(t,
+		map[string]string{"denver": denverMetroWithUnplaceableFixture},
+		map[string]string{nearKey(39.7392, -104.9903): denverMetroWithUnplaceableFixture},
+		nil)
 	defer sp.Close()
 	geo := geoServer(t, map[string]string{"denver": geoDenverFixture})
 	defer geo.Close()
@@ -403,9 +421,95 @@ func TestSearchSortsCoordinateLessServersLast(t *testing.T) {
 	}
 }
 
+// TestSearchNearSendsLatLonParams is a direct httptest assertion on the
+// exact query params searchNear sends: lat=/lon= (formatted without
+// trailing zeros or scientific notation) and engine=js&limit=, and no
+// search= param at all — the live-bug fix (searching by coordinates
+// instead of the geocoder's place name) hinges on speedtest.net's API
+// actually receiving lat=/lon=, not on any fixture-matching indirection.
+func TestSearchNearSendsLatLonParams(t *testing.T) {
+	var gotQuery url.Values
+	sp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query()
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[]`))
+	}))
+	defer sp.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+
+	// London coordinates, matching the live finding's verified example
+	// (GET .../servers?engine=js&lat=51.5013&lon=-0.1418&limit=N returns
+	// London, UK servers).
+	if _, err := c.searchNear(context.Background(), 51.5013, -0.1418); err != nil {
+		t.Fatalf("searchNear: %v", err)
+	}
+	if got := gotQuery.Get("lat"); got != "51.5013" {
+		t.Errorf("lat = %q, want %q", got, "51.5013")
+	}
+	if got := gotQuery.Get("lon"); got != "-0.1418" {
+		t.Errorf("lon = %q, want %q", got, "-0.1418")
+	}
+	if got := gotQuery.Get("engine"); got != "js" {
+		t.Errorf("engine = %q, want %q", got, "js")
+	}
+	if got := gotQuery.Get("limit"); got != strconv.Itoa(searchRequestLimit) {
+		t.Errorf("limit = %q, want %q", got, strconv.Itoa(searchRequestLimit))
+	}
+	if gotQuery.Has("search") {
+		t.Errorf("search param present (%q), want none for a coordinate search", gotQuery.Get("search"))
+	}
+}
+
+// TestSearchPostcodeReSearchesByCoordinatesNotPlaceName is the live-bug
+// regression test: a UK postcode geocodes (via Nominatim) to a
+// display_name speedtest.net's text search never matches
+// ("SW1A 1AA, City of Westminster, Greater London, England"), so the
+// widen re-search must use the resolved coordinates, not that name — a
+// speedtestServer fixture keyed by the display name (or any substring of
+// it) is deliberately absent here, only a nearFixtures entry keyed by the
+// resolved lat/lon, so the test fails if the code ever regresses to a
+// name-based re-search.
+func TestSearchPostcodeReSearchesByCoordinatesNotPlaceName(t *testing.T) {
+	const ukDisplayName = "SW1A 1AA, City of Westminster, Greater London, England, SW1A 1AA, United Kingdom"
+	const londonFixture = `[
+  {"id":10,"name":"London, UK","country":"United Kingdom","cc":"GB","sponsor":"BT","host":"london1.example.net:8080","lat":"51.50","lon":"-0.14","distance":"0.5"}
+]`
+	sp := speedtestServer(t,
+		map[string]string{"SW1A 1AA": `[]`}, // direct text search: no hits, as in production
+		map[string]string{nearKey(51.5013, -0.1418): londonFixture},
+		nil)
+	defer sp.Close()
+	nom := nominatimServer(t, nil, func(q url.Values) string {
+		if q.Get("postalcode") == "SW1A 1AA" {
+			return fmt.Sprintf(`[{"display_name":%q,"lat":"51.5013","lon":"-0.1418"}]`, ukDisplayName)
+		}
+		return `[]`
+	})
+	defer nom.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
+
+	res, err := c.Search(context.Background(), SearchRequest{Q: "SW1A 1AA", Country: "gb", Limit: 10})
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(res.Servers) != 1 || res.Servers[0].ID != "10" {
+		t.Fatalf("got = %+v, want the London server found via coordinate re-search "+
+			"(a name-based re-search would return zero servers here, reproducing the live bug)", res.Servers)
+	}
+	if res.Near != "SW1A 1AA, City of Westminster" {
+		t.Errorf("near = %q, want %q", res.Near, "SW1A 1AA, City of Westminster")
+	}
+}
+
 func TestSearchCachesWithinTTL(t *testing.T) {
 	var reqs int32
-	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, &reqs)
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil, &reqs)
 	defer sp.Close()
 
 	c := NewClient()
@@ -445,7 +549,7 @@ func TestSearchCachesWithinTTL(t *testing.T) {
 
 func TestSearchCacheKeyIncludesCountry(t *testing.T) {
 	var reqs int32
-	sp := speedtestServer(t, nil, &reqs)
+	sp := speedtestServer(t, nil, nil, &reqs)
 	defer sp.Close()
 	nom := nominatimServer(t, nil, func(q url.Values) string {
 		if q.Get("countrycodes") == "us" {
@@ -592,7 +696,7 @@ func TestSearchSingleFlightsConcurrentIdenticalQueries(t *testing.T) {
 }
 
 func TestSearchLimitCaps(t *testing.T) {
-	sp := speedtestServer(t, map[string]string{"denver": denverMetroFixture}, nil)
+	sp := speedtestServer(t, map[string]string{"denver": denverMetroFixture}, nil, nil)
 	defer sp.Close()
 	geo := geoServer(t, map[string]string{})
 	defer geo.Close()
@@ -614,7 +718,7 @@ func TestSearchLogsGeocodeFailureAtDebug(t *testing.T) {
 	// Fewer than geocodeHitThreshold hits, so a geocode is attempted; the
 	// geo server always answers 500, so gerr != nil and Search must not
 	// fail — it just logs the geocode error and returns the direct hits.
-	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil, nil)
 	defer sp.Close()
 	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -696,7 +800,7 @@ func TestNominatimSearchRejectsOversizedResponse(t *testing.T) {
 }
 
 func TestSearchRefusesCrossHostRedirect(t *testing.T) {
-	target := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	target := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil, nil)
 	defer target.Close()
 
 	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -713,7 +817,7 @@ func TestSearchRefusesCrossHostRedirect(t *testing.T) {
 }
 
 func TestSearchWithNilLoggerDoesNotPanicOnGeocodeFailure(t *testing.T) {
-	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil, nil)
 	defer sp.Close()
 	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
