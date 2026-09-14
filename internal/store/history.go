@@ -60,7 +60,8 @@ const epochExpr = `CAST(strftime('%s', replace(started_at,'Z','')) AS INTEGER)`
 // HistoryBuckets returns per-bucket aggregates for one target between from
 // and to (inclusive, TimeFormat strings), grouped in SQL so a 30-day chart
 // still returns a few hundred rows. Buckets with no results are omitted;
-// the caller draws the gap.
+// the caller draws the gap. The target_id/started_at filter is satisfied by
+// the idx_results_target_started index already created in 0001_init.sql.
 func (s *Store) HistoryBuckets(ctx context.Context, targetID int64, from, to string, bucketSeconds int) ([]HistoryPoint, error) {
 	if bucketSeconds <= 0 {
 		bucketSeconds = bucketSteps[0]

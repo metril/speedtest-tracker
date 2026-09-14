@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -46,6 +47,35 @@ func TestHistoryBucketsExcludesOtherTargetsAndRange(t *testing.T) {
 	}
 	if len(pts) != 1 || pts[0].Count != 1 {
 		t.Fatalf("pts = %+v", pts)
+	}
+}
+
+func TestHistoryBucketsExcludesFailedRowFromAvgButCountsIt(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z")
+	// A failed row with zero metrics: should count toward Count/FailCount
+	// but not drag the averages to zero.
+	if _, err := s.InsertResult(ctx, &Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "failed",
+		StartedAt: "2026-09-13T10:10:00.000Z", DurationMs: 0,
+		OptionsSnapshot: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatalf("InsertResult: %v", err)
+	}
+
+	pts, err := s.HistoryBuckets(ctx, tid, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", 3600)
+	if err != nil {
+		t.Fatalf("HistoryBuckets: %v", err)
+	}
+	if len(pts) != 1 {
+		t.Fatalf("buckets = %d, want 1 (%+v)", len(pts), pts)
+	}
+	if pts[0].Count != 2 || pts[0].FailCount != 1 {
+		t.Fatalf("bucket = %+v, want Count=2 FailCount=1", pts[0])
+	}
+	if pts[0].AvgDownloadBps != 100e6 {
+		t.Errorf("AvgDownloadBps = %v, want 100e6 (failed row's zero should be excluded)", pts[0].AvgDownloadBps)
 	}
 }
 
