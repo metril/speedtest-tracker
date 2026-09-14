@@ -1,17 +1,42 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// jsonRequest builds a JSON request without sending it, so a test can set
+// fields (RemoteAddr, headers) before serving it.
+func jsonRequest(t *testing.T, method, path string, body any) *http.Request {
+	t.Helper()
+	buf, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(method, path, bytes.NewReader(buf))
+	req.Header.Set("Content-Type", "application/json")
+	return req
+}
+
+// withEnv seeds the settings store from kv ("KEY=value" pairs) via
+// SeedFromEnv, exactly as the process does at boot.
+func withEnv(kv ...string) settingsAPIOption {
+	return func(d *Deps) {
+		if _, err := d.Settings.SeedFromEnv(context.Background(), kv); err != nil {
+			panic(err)
+		}
+	}
+}
 
 // newTestAPIWithSettings is newTestAPI with a settings.Store wired into
 // Deps.Settings so the /api/v1/settings routes are mounted.
@@ -472,5 +497,101 @@ func TestTestUnknownTargetStillRejected(t *testing.T) {
 	h, _ := newSettingsAPI(t)
 	if rec := do(t, h, http.MethodPost, "/api/v1/settings/test/notify", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("POST /settings/test/notify = %d, want 404 (it is not a test target)", rec.Code)
+	}
+}
+
+func TestGetSettingsIncludesAuthAndLockedKeys(t *testing.T) {
+	h, st := newSettingsAPI(t, withEnv("ST_LOCK_ENV=true", "ST_AUTH_MODE=open"))
+	_ = st
+	var body struct {
+		Auth   settings.Auth `json:"auth"`
+		Locked []string      `json:"locked"`
+	}
+	doJSON(t, h, http.MethodGet, "/api/v1/settings", nil, &body)
+	if body.Auth.Mode != settings.AuthModeOpen || body.Auth.TrustedProxies == nil {
+		t.Fatalf("auth = %+v", body.Auth)
+	}
+	if !slices.Contains(body.Locked, settings.KeyAuthMode) {
+		t.Fatalf("locked = %v, want auth.mode", body.Locked)
+	}
+}
+
+func TestPutRejectsLockedKeys(t *testing.T) {
+	h, _ := newSettingsAPI(t, withEnv("ST_LOCK_ENV=true", "ST_AUTH_MODE=open"))
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": "token"}}, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "environment") {
+		t.Fatalf("= %d %s, want 400 saying the key is set by the environment", rec.Code, rec.Body)
+	}
+	// An unlocked key in the same section still saves.
+	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"admin_group": "admins"}}, nil); rec.Code != http.StatusOK {
+		t.Fatalf("unlocked key = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestPutAuthValidation(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	for _, tc := range []struct {
+		name, want string
+		body       map[string]any
+	}{
+		{"bad mode", "mode", map[string]any{"mode": "openish"}},
+		{"bad cidr", "trusted_proxies", map[string]any{"trusted_proxies": []string{"10.0.0.0/33"}}},
+		{"bad header name", "user_header", map[string]any{"user_header": "Remote User"}},
+		{"empty separator", "groups_separator", map[string]any{"groups_separator": ""}},
+	} {
+		rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", map[string]any{"auth": tc.body}, nil)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s, want 400 mentioning %q", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+}
+
+func TestSwitchToForwardAuthLockoutGuard(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	body := map[string]any{"auth": map[string]any{"mode": settings.AuthModeForward,
+		"user_header": "Remote-User", "trusted_proxies": []string{}}}
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", body, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "trusted_proxies") {
+		t.Fatalf("no proxies = %d %s, want 400", rec.Code, rec.Body)
+	}
+
+	body["auth"].(map[string]any)["trusted_proxies"] = []string{"192.0.2.0/24"}
+	rec = doJSON(t, h, http.MethodPut, "/api/v1/settings", body, nil) // request carries no header
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "Remote-User") {
+		t.Fatalf("no header on the switching request = %d %s, want 400 naming the header", rec.Code, rec.Body)
+	}
+
+	req := jsonRequest(t, http.MethodPut, "/api/v1/settings", body)
+	req.RemoteAddr = "192.0.2.5:1"
+	req.Header.Set("Remote-User", "alice")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	if out.Code != http.StatusOK {
+		t.Fatalf("valid switch = %d %s", out.Code, out.Body)
+	}
+}
+
+func TestSwitchToTokenModeRequiresAToken(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": settings.AuthModeToken}}, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "token") {
+		t.Fatalf("= %d %s, want 400 — switching to token mode with no token issued locks everyone out", rec.Code, rec.Body)
+	}
+	doJSON(t, h, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "a"}, nil)
+	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": settings.AuthModeToken}}, nil); rec.Code != http.StatusOK {
+		t.Fatalf("with a token issued = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSwitchingAwayFromForwardAuthIsAlwaysAllowed(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	st.Set(context.Background(), settings.KeyAuthMode, settings.AuthModeForward)
+	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": settings.AuthModeOpen}}, nil); rec.Code != http.StatusOK {
+		t.Fatalf("= %d %s, want the escape hatch to always work", rec.Code, rec.Body)
 	}
 }

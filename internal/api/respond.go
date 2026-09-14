@@ -47,6 +47,12 @@ func errNotFound(w http.ResponseWriter, message string) {
 	writeError(w, http.StatusNotFound, "not_found", message)
 }
 
+// errForbidden reports that the caller's identity is not permitted to
+// perform the request.
+func errForbidden(w http.ResponseWriter, message string) {
+	writeError(w, http.StatusForbidden, "forbidden", message)
+}
+
 // internalError logs err and reports a generic failure, never leaking the
 // underlying message to the client.
 func internalError(w http.ResponseWriter, logger *slog.Logger, msg string, err error) {

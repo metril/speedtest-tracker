@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/netip"
+	"net/textproto"
 	"net/url"
 	"regexp"
 	"slices"
@@ -13,6 +15,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
@@ -80,6 +83,17 @@ type notificationsBody struct {
 	NotifyRecovery    *bool                `json:"notify_recovery"`
 }
 
+// authBody is the partial PUT document for the Auth section.
+type authBody struct {
+	Mode            *string   `json:"mode"`
+	UserHeader      *string   `json:"user_header"`
+	GroupsHeader    *string   `json:"groups_header"`
+	GroupsSeparator *string   `json:"groups_separator"`
+	TrustedProxies  *[]string `json:"trusted_proxies"`
+	AdminGroup      *string   `json:"admin_group"`
+	AllowTokens     *bool     `json:"allow_tokens"`
+}
+
 // settingsBody is the partial PUT document. Every field is a pointer: a
 // nil field is left alone, a non-nil one is written — which is what makes
 // clearing a secret (explicit "") different from omitting it.
@@ -96,6 +110,7 @@ type settingsBody struct {
 	Engines       *enginesBody       `json:"engines"`
 	Integrations  *integrationsBody  `json:"integrations"`
 	Notifications *notificationsBody `json:"notifications"`
+	Auth          *authBody          `json:"auth"`
 }
 
 // getSettings returns the full sectioned settings document, masking the
@@ -124,11 +139,22 @@ func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maskChannelTokens(&n)
+	a, err := d.Settings.Auth(ctx)
+	if err != nil {
+		internalError(w, d.Logger, "load auth settings", err)
+		return
+	}
+	locked := d.Settings.LockedKeys()
+	if locked == nil {
+		locked = []string{}
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"general":       g,
 		"engines":       e,
 		"integrations":  i,
 		"notifications": n,
+		"auth":          a,
+		"locked":        locked,
 	})
 }
 
@@ -175,6 +201,24 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Locked-key enforcement runs first, generically, over the whole
+	// document — before any per-section validation — so a future section
+	// gets it for free and a locked write is rejected without ever
+	// touching the store.
+	if locked := lockedKeysIn(d, body); len(locked) > 0 {
+		errBadRequest(w, strings.Join(locked, ", ")+" set by the environment and cannot be changed here")
+		return
+	}
+
+	// Auth section changes are admin-only. IsAdmin already accounts for
+	// whether an admin group is configured: it is true in open/token mode
+	// and, in forward_auth, only for members of the configured group (or
+	// everyone, if no group is configured).
+	if body.Auth != nil && !requestIsAdmin(r) {
+		errForbidden(w, "admin access required to change auth settings")
+		return
+	}
+
 	current, err := d.Settings.Integrations(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "load integrations settings", err)
@@ -188,6 +232,27 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err := validateSettings(body, current); err != nil {
 		errBadRequest(w, err.Error())
 		return
+	}
+	if err := validateAuthBody(body.Auth); err != nil {
+		errBadRequest(w, err.Error())
+		return
+	}
+
+	// The lockout guard: computed only when the request actually touches
+	// the Auth section, so an unrelated PUT (say, to General) is never
+	// gated behind the caller already satisfying whatever auth mode
+	// happens to be configured.
+	if body.Auth != nil {
+		currentAuth, err := d.Settings.Auth(ctx)
+		if err != nil {
+			internalError(w, d.Logger, "load auth settings", err)
+			return
+		}
+		resultingAuth := mergeAuth(currentAuth, body.Auth)
+		if err := d.checkAuthLockout(r, currentAuth, resultingAuth); err != nil {
+			errBadRequest(w, err.Error())
+			return
+		}
 	}
 
 	// Merged up front, alongside validation, so a channel whose masked
@@ -303,7 +368,320 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if a := body.Auth; a != nil {
+		writes := []func() error{
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthMode, a.Mode) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthUserHeader, a.UserHeader) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthGroupsHeader, a.GroupsHeader) },
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthGroupsSeparator, a.GroupsSeparator)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthTrustedProxies, a.TrustedProxies)
+			},
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAdminGroup, a.AdminGroup) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAllowTokens, a.AllowTokens) },
+		}
+		for _, w2 := range writes {
+			if err := w2(); err != nil {
+				internalError(w, d.Logger, "write auth settings", err)
+				return
+			}
+		}
+	}
+
 	d.getSettings(w, r)
+}
+
+// requestIsAdmin reports whether the caller may change admin-only
+// settings. A zero-value identity means no auth middleware is mounted
+// (Deps.Auth nil), which is treated as open access, matching GET
+// /api/v1/me's convention.
+func requestIsAdmin(r *http.Request) bool {
+	id := auth.FromContext(r.Context())
+	return id.Mode == "" || id.IsAdmin
+}
+
+// lockedKeysIn returns the settings keys body would write that are
+// currently locked by ST_LOCK_ENV, across every section — not just Auth —
+// so a future section is covered by this check for free.
+func lockedKeysIn(d Deps, body settingsBody) []string {
+	var locked []string
+	for _, key := range setKeys(body) {
+		if d.Settings.IsLocked(key) {
+			locked = append(locked, key)
+		}
+	}
+	return locked
+}
+
+// setKeys returns the settings keys body would write.
+func setKeys(body settingsBody) []string {
+	var keys []string
+	if g := body.General; g != nil {
+		if g.BaseURL != nil {
+			keys = append(keys, settings.KeyBaseURL)
+		}
+		if g.Timezone != nil {
+			keys = append(keys, settings.KeyTimezone)
+		}
+		if g.Units != nil {
+			keys = append(keys, settings.KeyUnits)
+		}
+		if g.LogLevel != nil {
+			keys = append(keys, settings.KeyLogLevel)
+		}
+		if g.RetentionDaysResults != nil {
+			keys = append(keys, settings.KeyRetentionDaysResults)
+		}
+		if g.RetentionDaysRuns != nil {
+			keys = append(keys, settings.KeyRetentionDaysRuns)
+		}
+		if g.RetentionPruneIntervalMinutes != nil {
+			keys = append(keys, settings.KeyRetentionPruneIntervalMinutes)
+		}
+	}
+	if e := body.Engines; e != nil {
+		if e.SpeedtestBin != nil {
+			keys = append(keys, settings.KeySpeedtestBin)
+		}
+		if e.Iperf3Bin != nil {
+			keys = append(keys, settings.KeyIperf3Bin)
+		}
+		if e.OoklaAcceptLicense != nil {
+			keys = append(keys, settings.KeyOoklaAcceptLicense)
+		}
+		if e.OoklaAcceptGDPR != nil {
+			keys = append(keys, settings.KeyOoklaAcceptGDPR)
+		}
+		if e.ServerListTTLSeconds != nil {
+			keys = append(keys, settings.KeyServerListTTLSeconds)
+		}
+		if e.DefaultOoklaOptions != nil {
+			keys = append(keys, settings.KeyDefaultOoklaOptions)
+		}
+		if e.DefaultCloudflareOptions != nil {
+			keys = append(keys, settings.KeyDefaultCloudflareOptions)
+		}
+		if e.DefaultIperf3Options != nil {
+			keys = append(keys, settings.KeyDefaultIperf3Options)
+		}
+	}
+	if i := body.Integrations; i != nil {
+		if i.VMEnabled != nil {
+			keys = append(keys, settings.KeyVMEnabled)
+		}
+		if i.VMURL != nil {
+			keys = append(keys, settings.KeyVMURL)
+		}
+		if i.VMAuthHeader != nil {
+			keys = append(keys, settings.KeyVMAuthHeader)
+		}
+		if i.VMExtraLabels != nil {
+			keys = append(keys, settings.KeyVMExtraLabels)
+		}
+		if i.VLEnabled != nil {
+			keys = append(keys, settings.KeyVLEnabled)
+		}
+		if i.VLURL != nil {
+			keys = append(keys, settings.KeyVLURL)
+		}
+		if i.VLAuthHeader != nil {
+			keys = append(keys, settings.KeyVLAuthHeader)
+		}
+		if i.VLStreamFields != nil {
+			keys = append(keys, settings.KeyVLStreamFields)
+		}
+		if i.MetricsEnabled != nil {
+			keys = append(keys, settings.KeyMetricsEnabled)
+		}
+	}
+	if n := body.Notifications; n != nil {
+		if n.Enabled != nil {
+			keys = append(keys, settings.KeyNotifyEnabled)
+		}
+		if n.Channels != nil {
+			keys = append(keys, settings.KeyNotifyChannels)
+		}
+		if n.DefaultThresholds != nil {
+			keys = append(keys, settings.KeyNotifyDefaultThresholds)
+		}
+		if n.CooldownMinutes != nil {
+			keys = append(keys, settings.KeyNotifyCooldownMinutes)
+		}
+		if n.QuietHoursStart != nil {
+			keys = append(keys, settings.KeyNotifyQuietStart)
+		}
+		if n.QuietHoursEnd != nil {
+			keys = append(keys, settings.KeyNotifyQuietEnd)
+		}
+		if n.NotifyRecovery != nil {
+			keys = append(keys, settings.KeyNotifyRecovery)
+		}
+	}
+	if a := body.Auth; a != nil {
+		if a.Mode != nil {
+			keys = append(keys, settings.KeyAuthMode)
+		}
+		if a.UserHeader != nil {
+			keys = append(keys, settings.KeyAuthUserHeader)
+		}
+		if a.GroupsHeader != nil {
+			keys = append(keys, settings.KeyAuthGroupsHeader)
+		}
+		if a.GroupsSeparator != nil {
+			keys = append(keys, settings.KeyAuthGroupsSeparator)
+		}
+		if a.TrustedProxies != nil {
+			keys = append(keys, settings.KeyAuthTrustedProxies)
+		}
+		if a.AdminGroup != nil {
+			keys = append(keys, settings.KeyAuthAdminGroup)
+		}
+		if a.AllowTokens != nil {
+			keys = append(keys, settings.KeyAuthAllowTokens)
+		}
+	}
+	return keys
+}
+
+// mergeAuth applies body onto current, leaving nil fields untouched.
+func mergeAuth(current settings.Auth, body *authBody) settings.Auth {
+	out := current
+	if body == nil {
+		return out
+	}
+	if body.Mode != nil {
+		out.Mode = *body.Mode
+	}
+	if body.UserHeader != nil {
+		out.UserHeader = *body.UserHeader
+	}
+	if body.GroupsHeader != nil {
+		out.GroupsHeader = *body.GroupsHeader
+	}
+	if body.GroupsSeparator != nil {
+		out.GroupsSeparator = *body.GroupsSeparator
+	}
+	if body.TrustedProxies != nil {
+		out.TrustedProxies = *body.TrustedProxies
+	}
+	if body.AdminGroup != nil {
+		out.AdminGroup = *body.AdminGroup
+	}
+	if body.AllowTokens != nil {
+		out.AllowTokens = *body.AllowTokens
+	}
+	return out
+}
+
+// isValidHTTPHeaderName reports whether s is a syntactically valid HTTP
+// header field name (mirrors notify.isValidHTTPToken).
+func isValidHTTPHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	return textproto.TrimString(s) == s && http.CanonicalHeaderKey(s) != "" && !strings.ContainsAny(s, " \t\r\n:")
+}
+
+// validateAuthBody checks the Auth partial document's own fields, with no
+// dependency on the currently stored config.
+func validateAuthBody(a *authBody) error {
+	if a == nil {
+		return nil
+	}
+	if a.Mode != nil {
+		switch *a.Mode {
+		case settings.AuthModeOpen, settings.AuthModeForward, settings.AuthModeToken:
+		default:
+			return fmt.Errorf("mode must be one of open, forward_auth, token")
+		}
+	}
+	if a.UserHeader != nil && !isValidHTTPHeaderName(*a.UserHeader) {
+		return fmt.Errorf("user_header is not a valid HTTP header name")
+	}
+	if a.GroupsHeader != nil && !isValidHTTPHeaderName(*a.GroupsHeader) {
+		return fmt.Errorf("groups_header is not a valid HTTP header name")
+	}
+	if a.GroupsSeparator != nil {
+		if *a.GroupsSeparator == "" || len(*a.GroupsSeparator) > 4 {
+			return fmt.Errorf("groups_separator must be 1-4 bytes")
+		}
+	}
+	if a.TrustedProxies != nil {
+		for _, raw := range *a.TrustedProxies {
+			if _, err := netip.ParsePrefix(raw); err != nil {
+				return fmt.Errorf("trusted_proxies: invalid CIDR %q", raw)
+			}
+		}
+	}
+	return nil
+}
+
+// checkAuthLockout is the "so you cannot lock yourself out" guard. It is
+// evaluated against the resulting auth config — current merged with the
+// patch — whenever a PUT touches the Auth section, whether or not the
+// mode itself changed: forward_auth and token are inherently restrictive,
+// so their invariants (a non-empty trusted_proxies, at least one issued
+// token) must hold any time the section is written, not only on switch.
+func (d Deps) checkAuthLockout(r *http.Request, current, resulting settings.Auth) error {
+	switch resulting.Mode {
+	case settings.AuthModeOpen:
+		// Always allowed: this is the deliberate escape hatch — a
+		// locked-out operator can always fall back via ST_AUTH_MODE=open.
+		return nil
+
+	case settings.AuthModeForward:
+		if len(resulting.TrustedProxies) == 0 {
+			return fmt.Errorf("trusted_proxies must not be empty")
+		}
+		if resulting.Mode == current.Mode {
+			return nil
+		}
+		// An actual switch into forward_auth: the request performing it
+		// must itself satisfy the resulting config, or the operator locks
+		// themselves out immediately.
+		addrPort, err := netip.ParseAddrPort(r.RemoteAddr)
+		if err != nil {
+			return fmt.Errorf("cannot verify this request satisfies trusted_proxies")
+		}
+		addr := addrPort.Addr().Unmap()
+		trusted := false
+		for _, raw := range resulting.TrustedProxies {
+			p, err := netip.ParsePrefix(raw)
+			if err != nil {
+				continue
+			}
+			if p.Contains(addr) {
+				trusted = true
+				break
+			}
+		}
+		if !trusted {
+			return fmt.Errorf("this request does not originate from a trusted proxy in trusted_proxies")
+		}
+		header := resulting.UserHeader
+		if header == "" {
+			header = "Remote-User"
+		}
+		if r.Header.Get(header) == "" {
+			return fmt.Errorf("this request does not carry the %s header from a trusted proxy", header)
+		}
+		return nil
+
+	case settings.AuthModeToken:
+		n, err := d.Store.CountAPITokens(r.Context())
+		if err != nil {
+			return fmt.Errorf("count api tokens: %w", err)
+		}
+		if n == 0 {
+			return fmt.Errorf("create an API token before switching to token mode")
+		}
+		return nil
+
+	default:
+		return nil
+	}
 }
 
 // setPtr writes *v under key when v is non-nil; a nil v is a no-op.
