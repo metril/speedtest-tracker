@@ -1,6 +1,6 @@
 // Package settings is a typed accessor over the settings table, with
-// General, Engines, Integrations and Notifications sections implemented
-// and Auth arriving in a later milestone.
+// General, Engines, Integrations, Notifications and Auth sections
+// implemented.
 package settings
 
 import (
@@ -79,6 +79,14 @@ var defaults = map[string]any{
 	KeyNotifyQuietStart:        "",
 	KeyNotifyQuietEnd:          "",
 	KeyNotifyRecovery:          true,
+
+	KeyAuthMode:            AuthModeOpen,
+	KeyAuthUserHeader:      "Remote-User",
+	KeyAuthGroupsHeader:    "Remote-Groups",
+	KeyAuthGroupsSeparator: ",",
+	KeyAuthTrustedProxies:  []string{},
+	KeyAuthAdminGroup:      "",
+	KeyAuthAllowTokens:     false,
 }
 
 // Integrations is the Integrations settings section: the VictoriaMetrics
@@ -182,6 +190,40 @@ const (
 	KeyNotifyQuietStart        = "notifications.quiet_hours_start"
 	KeyNotifyQuietEnd          = "notifications.quiet_hours_end"
 	KeyNotifyRecovery          = "notifications.notify_recovery"
+)
+
+// Auth is the Auth settings section. Mode open means every request is
+// allowed; forward_auth trusts identity headers, but only from a peer
+// inside TrustedProxies; token requires a bearer API token. AllowTokens
+// additionally accepts bearer tokens while in forward_auth mode, which is
+// how scripts and Home Assistant talk to an SSO-protected instance.
+type Auth struct {
+	Mode            string   `json:"mode"`
+	UserHeader      string   `json:"user_header"`
+	GroupsHeader    string   `json:"groups_header"`
+	GroupsSeparator string   `json:"groups_separator"`
+	TrustedProxies  []string `json:"trusted_proxies"`
+	AdminGroup      string   `json:"admin_group"`
+	AllowTokens     bool     `json:"allow_tokens"`
+}
+
+// Auth modes. The values are persisted in the settings table, so do not
+// rename them without a migration.
+const (
+	AuthModeOpen    = "open"
+	AuthModeForward = "forward_auth"
+	AuthModeToken   = "token"
+)
+
+// Keys of the Auth section.
+const (
+	KeyAuthMode            = "auth.mode"
+	KeyAuthUserHeader      = "auth.user_header"
+	KeyAuthGroupsHeader    = "auth.groups_header"
+	KeyAuthGroupsSeparator = "auth.groups_separator"
+	KeyAuthTrustedProxies  = "auth.trusted_proxies"
+	KeyAuthAdminGroup      = "auth.admin_group"
+	KeyAuthAllowTokens     = "auth.allow_tokens"
 )
 
 // Store reads and writes settings and notifies subscribers on change.
@@ -391,6 +433,46 @@ func (s *Store) Notifications(ctx context.Context) (Notifications, error) {
 		n.CooldownMinutes = 1
 	}
 	return n, nil
+}
+
+// Auth returns the Auth section, falling back to the seeded defaults for
+// any key that is missing.
+func (s *Store) Auth(ctx context.Context) (Auth, error) {
+	var a Auth
+	for _, f := range []struct {
+		key string
+		dst any
+	}{
+		{KeyAuthMode, &a.Mode},
+		{KeyAuthUserHeader, &a.UserHeader},
+		{KeyAuthGroupsHeader, &a.GroupsHeader},
+		{KeyAuthGroupsSeparator, &a.GroupsSeparator},
+		{KeyAuthTrustedProxies, &a.TrustedProxies},
+		{KeyAuthAdminGroup, &a.AdminGroup},
+		{KeyAuthAllowTokens, &a.AllowTokens},
+	} {
+		raw, ok, err := s.Get(ctx, f.key)
+		if err != nil {
+			return Auth{}, err
+		}
+		if !ok {
+			encoded, err := json.Marshal(defaults[f.key])
+			if err != nil {
+				return Auth{}, err
+			}
+			raw = encoded
+		}
+		if err := json.Unmarshal(raw, f.dst); err != nil {
+			return Auth{}, fmt.Errorf("decode %s: %w", f.key, err)
+		}
+	}
+	if a.TrustedProxies == nil {
+		a.TrustedProxies = []string{}
+	}
+	if a.GroupsSeparator == "" {
+		a.GroupsSeparator = ","
+	}
+	return a, nil
 }
 
 // Subscribe returns a channel of changed keys and a cancel function. Sends

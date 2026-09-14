@@ -12,16 +12,24 @@ import (
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
-	st, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
+	s, _ := newTestSettings(t)
+	return s
+}
+
+// newTestSettings returns a Store plus the underlying db.Store, for tests
+// that need to reach into the raw table (e.g. deleting a row).
+func newTestSettings(t *testing.T) (*Store, *store.Store) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "s.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)
 	}
-	t.Cleanup(func() { st.Close() })
-	s, err := New(context.Background(), st)
+	t.Cleanup(func() { db.Close() })
+	s, err := New(context.Background(), db)
 	if err != nil {
 		t.Fatalf("settings.New: %v", err)
 	}
-	return s
+	return s, db
 }
 
 func TestNewSeedsGeneralDefaults(t *testing.T) {
@@ -301,5 +309,50 @@ func TestNotificationsCooldownClampedToOne(t *testing.T) {
 	}
 	if got.CooldownMinutes != 1 {
 		t.Fatalf("cooldown = %d, want clamped to 1", got.CooldownMinutes)
+	}
+}
+
+func TestAuthDefaults(t *testing.T) {
+	st, _ := newTestSettings(t)
+	got, err := st.Auth(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != AuthModeOpen {
+		t.Fatalf("mode = %q, want open — a fresh install must not lock anyone out", got.Mode)
+	}
+	if got.UserHeader != "Remote-User" || got.GroupsHeader != "Remote-Groups" || got.GroupsSeparator != "," {
+		t.Fatalf("header defaults = %+v", got)
+	}
+	if got.TrustedProxies == nil || len(got.TrustedProxies) != 0 {
+		t.Fatalf("trusted proxies = %v, want empty non-nil slice", got.TrustedProxies)
+	}
+	if got.AllowTokens {
+		t.Fatal("allow_tokens defaults to false")
+	}
+}
+
+func TestAuthRoundTrip(t *testing.T) {
+	st, _ := newTestSettings(t)
+	ctx := context.Background()
+	for key, val := range map[string]any{
+		KeyAuthMode:           AuthModeForward,
+		KeyAuthUserHeader:     "X-Forwarded-User",
+		KeyAuthGroupsHeader:   "X-Forwarded-Groups",
+		KeyAuthTrustedProxies: []string{"10.0.0.0/8", "192.168.1.5/32"},
+		KeyAuthAdminGroup:     "admins",
+		KeyAuthAllowTokens:    true,
+	} {
+		if err := st.Set(ctx, key, val); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := st.Auth(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Mode != AuthModeForward || got.UserHeader != "X-Forwarded-User" ||
+		got.AdminGroup != "admins" || !got.AllowTokens || len(got.TrustedProxies) != 2 {
+		t.Fatalf("round trip = %+v", got)
 	}
 }
