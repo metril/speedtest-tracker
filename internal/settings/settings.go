@@ -1,6 +1,6 @@
 // Package settings is a typed accessor over the settings table, with
-// General, Engines and Integrations sections implemented and Auth and
-// Notifications arriving in later milestones.
+// General, Engines, Integrations and Notifications sections implemented
+// and Auth arriving in a later milestone.
 package settings
 
 import (
@@ -71,6 +71,14 @@ var defaults = map[string]any{
 	KeyVLAuthHeader:   "",
 	KeyVLStreamFields: map[string]string{},
 	KeyMetricsEnabled: false,
+
+	KeyNotifyEnabled:           false,
+	KeyNotifyChannels:          []Channel{},
+	KeyNotifyDefaultThresholds: Thresholds{},
+	KeyNotifyCooldownMinutes:   60,
+	KeyNotifyQuietStart:        "",
+	KeyNotifyQuietEnd:          "",
+	KeyNotifyRecovery:          true,
 }
 
 // Integrations is the Integrations settings section: the VictoriaMetrics
@@ -123,6 +131,57 @@ const (
 	KeyDefaultOoklaOptions      = "engines.default_ookla_options"
 	KeyDefaultCloudflareOptions = "engines.default_cloudflare_options"
 	KeyDefaultIperf3Options     = "engines.default_iperf3_options"
+)
+
+// Thresholds is one set of alerting limits. Every field is a pointer so a
+// per-target document can leave a field unset and inherit the global
+// default rather than meaning "zero".
+type Thresholds struct {
+	DownloadMbpsMin *float64 `json:"download_mbps_min,omitempty"`
+	UploadMbpsMin   *float64 `json:"upload_mbps_min,omitempty"`
+	PingMsMax       *float64 `json:"ping_ms_max,omitempty"`
+	JitterMsMax     *float64 `json:"jitter_ms_max,omitempty"`
+	LossPctMax      *float64 `json:"loss_pct_max,omitempty"`
+	NotifyOnFailure *bool    `json:"notify_on_failure,omitempty"`
+}
+
+// Channel is one notification destination. Which fields matter depends on
+// Type: "webhook" uses URL and Headers, "ntfy" uses URL (the full topic
+// URL), Token, Priority and Tags, "apprise" uses URL (the Apprise API
+// notify endpoint), Tags and URLs.
+type Channel struct {
+	ID       string            `json:"id"`
+	Type     string            `json:"type"`
+	Name     string            `json:"name"`
+	Enabled  bool              `json:"enabled"`
+	URL      string            `json:"url"`
+	Token    string            `json:"token,omitempty"`
+	Headers  map[string]string `json:"headers,omitempty"`
+	Priority string            `json:"priority,omitempty"`
+	Tags     []string          `json:"tags,omitempty"`
+	URLs     []string          `json:"urls,omitempty"`
+}
+
+// Notifications is the Notifications settings section.
+type Notifications struct {
+	Enabled           bool       `json:"enabled"`
+	Channels          []Channel  `json:"channels"`
+	DefaultThresholds Thresholds `json:"default_thresholds"`
+	CooldownMinutes   int        `json:"cooldown_minutes"`
+	QuietHoursStart   string     `json:"quiet_hours_start"`
+	QuietHoursEnd     string     `json:"quiet_hours_end"`
+	NotifyRecovery    bool       `json:"notify_recovery"`
+}
+
+// Keys of the Notifications section.
+const (
+	KeyNotifyEnabled           = "notifications.enabled"
+	KeyNotifyChannels          = "notifications.channels"
+	KeyNotifyDefaultThresholds = "notifications.default_thresholds"
+	KeyNotifyCooldownMinutes   = "notifications.cooldown_minutes"
+	KeyNotifyQuietStart        = "notifications.quiet_hours_start"
+	KeyNotifyQuietEnd          = "notifications.quiet_hours_end"
+	KeyNotifyRecovery          = "notifications.notify_recovery"
 )
 
 // Store reads and writes settings and notifies subscribers on change.
@@ -289,6 +348,49 @@ func (s *Store) Integrations(ctx context.Context) (Integrations, error) {
 		i.VLStreamFields = map[string]string{}
 	}
 	return i, nil
+}
+
+// Notifications returns the Notifications section, falling back to the
+// seeded defaults for any key that is missing. New seeds keys with
+// ON CONFLICT DO NOTHING, so these defaults only apply to databases that
+// have not seen the keys before; existing installs keep whatever value
+// they already had.
+func (s *Store) Notifications(ctx context.Context) (Notifications, error) {
+	var n Notifications
+	for _, f := range []struct {
+		key string
+		dst any
+	}{
+		{KeyNotifyEnabled, &n.Enabled},
+		{KeyNotifyChannels, &n.Channels},
+		{KeyNotifyDefaultThresholds, &n.DefaultThresholds},
+		{KeyNotifyCooldownMinutes, &n.CooldownMinutes},
+		{KeyNotifyQuietStart, &n.QuietHoursStart},
+		{KeyNotifyQuietEnd, &n.QuietHoursEnd},
+		{KeyNotifyRecovery, &n.NotifyRecovery},
+	} {
+		raw, ok, err := s.Get(ctx, f.key)
+		if err != nil {
+			return Notifications{}, err
+		}
+		if !ok {
+			encoded, err := json.Marshal(defaults[f.key])
+			if err != nil {
+				return Notifications{}, err
+			}
+			raw = encoded
+		}
+		if err := json.Unmarshal(raw, f.dst); err != nil {
+			return Notifications{}, fmt.Errorf("decode %s: %w", f.key, err)
+		}
+	}
+	if n.Channels == nil {
+		n.Channels = []Channel{}
+	}
+	if n.CooldownMinutes < 1 {
+		n.CooldownMinutes = 1
+	}
+	return n, nil
 }
 
 // Subscribe returns a channel of changed keys and a cancel function. Sends

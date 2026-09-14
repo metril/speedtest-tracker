@@ -227,3 +227,79 @@ func TestEnginesReflectsOverride(t *testing.T) {
 		t.Errorf("SpeedtestBin = %q", got.SpeedtestBin)
 	}
 }
+
+func TestNotificationsDefaults(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.Notifications(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Enabled {
+		t.Fatalf("notifications default to disabled, got %+v", got)
+	}
+	if got.Channels == nil || len(got.Channels) != 0 {
+		t.Fatalf("channels = %v, want empty non-nil slice", got.Channels)
+	}
+	if got.CooldownMinutes != 60 {
+		t.Fatalf("cooldown = %d, want 60", got.CooldownMinutes)
+	}
+	if !got.NotifyRecovery {
+		t.Fatal("notify_recovery defaults to true")
+	}
+	if got.QuietHoursStart != "" || got.QuietHoursEnd != "" {
+		t.Fatalf("quiet hours default to empty, got %q-%q", got.QuietHoursStart, got.QuietHoursEnd)
+	}
+	if got.DefaultThresholds.DownloadMbpsMin != nil {
+		t.Fatalf("default thresholds start unset, got %+v", got.DefaultThresholds)
+	}
+}
+
+func TestNotificationsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	chans := []Channel{{
+		ID: "c1", Type: "ntfy", Name: "phone", Enabled: true,
+		URL: "https://ntfy.sh/speedtest", Token: "tk_1", Priority: "high", Tags: []string{"warning"},
+	}}
+	min := 100.0
+	for key, val := range map[string]any{
+		KeyNotifyEnabled:           true,
+		KeyNotifyChannels:          chans,
+		KeyNotifyDefaultThresholds: Thresholds{DownloadMbpsMin: &min},
+		KeyNotifyCooldownMinutes:   15,
+		KeyNotifyQuietStart:        "22:00",
+		KeyNotifyQuietEnd:          "07:00",
+	} {
+		if err := s.Set(ctx, key, val); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Notifications(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Enabled || got.CooldownMinutes != 15 || got.QuietHoursStart != "22:00" {
+		t.Fatalf("round trip = %+v", got)
+	}
+	if len(got.Channels) != 1 || got.Channels[0].Token != "tk_1" || got.Channels[0].Tags[0] != "warning" {
+		t.Fatalf("channels = %+v", got.Channels)
+	}
+	if got.DefaultThresholds.DownloadMbpsMin == nil || *got.DefaultThresholds.DownloadMbpsMin != 100 {
+		t.Fatalf("default thresholds = %+v", got.DefaultThresholds)
+	}
+}
+
+func TestNotificationsCooldownClampedToOne(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.Set(ctx, KeyNotifyCooldownMinutes, 0); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Notifications(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.CooldownMinutes != 1 {
+		t.Fatalf("cooldown = %d, want clamped to 1", got.CooldownMinutes)
+	}
+}
