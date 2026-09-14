@@ -1,5 +1,32 @@
 # Changelog
 
+## [0.3.0](https://github.com/metril/speedtest-tracker/compare/v0.2.0...v0.3.0) (2026-09-14)
+
+
+### Features
+
+* **api:** rate-limit ookla search, configurable iperf3 list URL, escape LIKE ([3ec64de](https://github.com/metril/speedtest-tracker/commit/3ec64de728c1fa551cba2c9e9945da61a6b5b84a))
+* **api:** summary offset for previous-period comparison ([cd31114](https://github.com/metril/speedtest-tracker/commit/cd31114dd41e4d0b82f84447849a161ecde18546))
+* **iperf3:** import the public iperf3 server list with a picker and daily refresh ([2f29ec8](https://github.com/metril/speedtest-tracker/commit/2f29ec84a1d523533e3f47a4ed0e38ea56c79ca1))
+* **ookla:** search speedtest.net and geocode postcodes for server picker ([3a58e3b](https://github.com/metril/speedtest-tracker/commit/3a58e3bb353e502fa6eeb69f0bc55df2e175c9b9))
+* **targets:** keep a revision history with revert and restore ([dfbf631](https://github.com/metril/speedtest-tracker/commit/dfbf631966d606f22e85ba037d0a4a0a00ca7073))
+* **web:** add shadcn/ui primitives on existing theme tokens ([a03f0ca](https://github.com/metril/speedtest-tracker/commit/a03f0caee0759b367fcd87ca588444c9b6aca8ba))
+* **web:** searchable, sortable target picker for schedules ([8e91155](https://github.com/metril/speedtest-tracker/commit/8e9115509f093e847917a30f37724243f8d2b1d1))
+* **web:** sidebar layout and redesigned dashboard ([d388a93](https://github.com/metril/speedtest-tracker/commit/d388a93a5d10deac1c7ef7b007e89058a1736777))
+
+
+### Bug Fixes
+
+* **api,web:** decouple ookla local/remote search, unstick the picker ([c2ff761](https://github.com/metril/speedtest-tracker/commit/c2ff7612a22a954ccb7984f6a1c1384324e4b333))
+* **api:** kick iperf3 refresher live on settings change, recover singleflight panics ([ddcd2a2](https://github.com/metril/speedtest-tracker/commit/ddcd2a22aa5114f75e220bddfe11959beadaa6c1))
+* **api:** make previous-period summary window half-open at the boundary ([680f61b](https://github.com/metril/speedtest-tracker/commit/680f61b835e28495f6bde34344ba6f8dca17fa38))
+* cap outbound response bodies and tighten dashboard/restore details ([49d36af](https://github.com/metril/speedtest-tracker/commit/49d36afd36b435f99a8c6ab556b67d5da0b7f17e))
+* **ooklaweb:** sort coordinate-less servers last, log geocode failures ([3847200](https://github.com/metril/speedtest-tracker/commit/3847200069f8c9dbc18450437e8e17589e0f2cbe))
+* **targets:** invalidate deleted-targets on delete, keep restore's created_at ([058ec7a](https://github.com/metril/speedtest-tracker/commit/058ec7a371f374adaf6a106a476ba0294efef1d2))
+* **web:** position virtualized rows with top so drag commits, finish Settings ui migration ([130ba83](https://github.com/metril/speedtest-tracker/commit/130ba8397f07a301b3dd20e2b221d04b10f3f8eb))
+* **web:** stop shadcn surface tokens from shadowing text-accent/text-muted ([f3e1afc](https://github.com/metril/speedtest-tracker/commit/f3e1afcfd1460cadc63d54f3d61531ac39b6890f))
+* **web:** virtualize SortableTargetList as li&gt;ol with drag, gate iperf3 picker query ([5f146c9](https://github.com/metril/speedtest-tracker/commit/5f146c9295020d12d762d8e3a5876d1b7beec37c))
+
 ## [0.2.0](https://github.com/metril/speedtest-tracker/compare/v0.1.0...v0.2.0) (2026-09-14)
 
 
