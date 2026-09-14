@@ -45,6 +45,15 @@ function settingsFixture(integrationOverrides: Partial<SettingsType['integration
       metrics_enabled: true,
       ...integrationOverrides,
     },
+    notifications: {
+      enabled: false,
+      channels: [],
+      default_thresholds: {},
+      cooldown_minutes: 30,
+      quiet_hours_start: '',
+      quiet_hours_end: '',
+      notify_recovery: true,
+    },
   };
 }
 

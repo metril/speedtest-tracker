@@ -75,6 +75,7 @@ describe('useUpdateSettings', () => {
       general: {} as api.GeneralSettings,
       engines: {} as api.EngineSettings,
       integrations: {} as api.IntegrationSettings,
+      notifications: {} as api.NotificationSettings,
     });
     const client = new QueryClient();
     const spy = vi.spyOn(client, 'invalidateQueries');

@@ -330,16 +330,52 @@ export interface IntegrationSettings {
   metrics_enabled: boolean;
 }
 
+export interface ThresholdSet {
+  download_mbps_min?: number | null;
+  upload_mbps_min?: number | null;
+  ping_ms_max?: number | null;
+  jitter_ms_max?: number | null;
+  loss_pct_max?: number | null;
+  notify_on_failure?: boolean | null;
+}
+
+export type NotifyChannelType = 'webhook' | 'ntfy' | 'apprise';
+
+export interface NotifyChannel {
+  id: string;
+  type: NotifyChannelType;
+  name: string;
+  enabled: boolean;
+  url: string;
+  token?: string;
+  headers?: Record<string, string>;
+  priority?: string;
+  tags?: string[];
+  urls?: string[];
+}
+
+export interface NotificationSettings {
+  enabled: boolean;
+  channels: NotifyChannel[];
+  default_thresholds: ThresholdSet;
+  cooldown_minutes: number;
+  quiet_hours_start: string;
+  quiet_hours_end: string;
+  notify_recovery: boolean;
+}
+
 export interface Settings {
   general: GeneralSettings;
   engines: EngineSettings;
   integrations: IntegrationSettings;
+  notifications: NotificationSettings;
 }
 
 export type SettingsPatch = {
   general?: Partial<GeneralSettings>;
   engines?: Partial<EngineSettings>;
   integrations?: Partial<IntegrationSettings>;
+  notifications?: Partial<NotificationSettings>;
 };
 
 export interface ConnectionTest {
@@ -354,3 +390,5 @@ export const updateSettings = (patch: SettingsPatch) =>
   request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) });
 export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth_header?: string }) =>
   request<ConnectionTest>(`/settings/test/${target}`, { method: 'POST', body: JSON.stringify(body) });
+export const testNotifyChannel = (channelId: string) =>
+  request<ConnectionTest>(`/settings/test/notify/${encodeURIComponent(channelId)}`, { method: 'POST' });

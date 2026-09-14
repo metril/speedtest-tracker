@@ -125,4 +125,13 @@ describe('settings client', () => {
     expect(JSON.parse(String((init as RequestInit).body))).toEqual({ url: 'http://vl:9428' });
     expect(res.ok).toBe(true);
   });
+
+  it('posts to the channel test endpoint', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(JSON.stringify({ ok: true, latency_ms: 12 }), { status: 200 }),
+    );
+    await expect(api.testNotifyChannel('c1')).resolves.toEqual({ ok: true, latency_ms: 12 });
+    expect(fetchMock.mock.calls[0][0]).toContain('/settings/test/notify/c1');
+    expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
+  });
 });

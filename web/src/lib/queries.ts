@@ -241,3 +241,7 @@ export function useTestIntegration() {
       api.testIntegration(target, body),
   });
 }
+
+export function useTestNotifyChannel() {
+  return useMutation({ mutationFn: (channelId: string) => api.testNotifyChannel(channelId) });
+}
