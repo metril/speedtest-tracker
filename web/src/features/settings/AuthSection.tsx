@@ -1,7 +1,9 @@
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { SwitchField } from '../../components/SwitchField';
 import type { AuthMode, AuthSettings } from '../../lib/api';
 import { LockedBadge } from './LockedBadge';
-import { fieldClass, inputClass, labelClass } from './styles';
+import { inputClass } from './styles';
 
 interface Props {
   value: AuthSettings;
@@ -38,7 +40,7 @@ function FieldLabel({
 }: { htmlFor: string; text: string; lockKey: string; locked: string[] }) {
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor={htmlFor} className={labelClass}>{text}</label>
+      <Label htmlFor={htmlFor}>{text}</Label>
       {locked.includes(lockKey) && <LockedBadge />}
     </div>
   );
@@ -52,7 +54,7 @@ export function AuthSection({ value, locked, onChange }: Props) {
 
   return (
     <>
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-mode" text="Auth mode" lockKey="auth.mode" locked={locked} />
         <select id="auth-mode" className={inputClass} value={value.mode} disabled={isLocked('auth.mode')}
           onChange={(e) => onChange({ ...value, mode: e.target.value as AuthMode })}>
@@ -63,35 +65,35 @@ export function AuthSection({ value, locked, onChange }: Props) {
         <p className="text-sm text-faint">{MODE_HELP[value.mode]}</p>
       </div>
 
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-user-header" text="User header" lockKey="auth.user_header" locked={locked} />
-        <input id="auth-user-header" className={inputClass} value={value.user_header}
+        <Input id="auth-user-header" value={value.user_header}
           disabled={isLocked('auth.user_header')}
           onChange={(e) => onChange({ ...value, user_header: e.target.value })} />
       </div>
 
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-groups-header" text="Groups header" lockKey="auth.groups_header" locked={locked} />
-        <input id="auth-groups-header" className={inputClass} value={value.groups_header}
+        <Input id="auth-groups-header" value={value.groups_header}
           disabled={isLocked('auth.groups_header')}
           onChange={(e) => onChange({ ...value, groups_header: e.target.value })} />
       </div>
 
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-groups-separator" text="Groups separator" lockKey="auth.groups_separator" locked={locked} />
-        <input id="auth-groups-separator" className={inputClass} value={value.groups_separator}
+        <Input id="auth-groups-separator" value={value.groups_separator}
           disabled={isLocked('auth.groups_separator')}
           onChange={(e) => onChange({ ...value, groups_separator: e.target.value })} />
       </div>
 
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-admin-group" text="Admin group" lockKey="auth.admin_group" locked={locked} />
-        <input id="auth-admin-group" className={inputClass} value={value.admin_group}
+        <Input id="auth-admin-group" value={value.admin_group}
           disabled={isLocked('auth.admin_group')}
           onChange={(e) => onChange({ ...value, admin_group: e.target.value })} />
       </div>
 
-      <div className={fieldClass}>
+      <div className="grid gap-1">
         <FieldLabel htmlFor="auth-trusted-proxies" text="Trusted proxy CIDRs" lockKey="auth.trusted_proxies" locked={locked} />
         <textarea id="auth-trusted-proxies" className={inputClass} rows={3}
           disabled={isLocked('auth.trusted_proxies')}

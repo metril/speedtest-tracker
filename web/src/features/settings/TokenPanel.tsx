@@ -1,11 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import type { CreatedToken } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useCreateToken, useDeleteToken, useTokens } from '../../lib/queries';
-import { fieldClass, labelClass } from './styles';
 
 function message(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Request failed.';
@@ -81,7 +81,7 @@ export function TokenPanel() {
       {error && <p role="alert" className="text-sm text-bad">{error}</p>}
 
       {created ? (
-        <div className="grid gap-2 rounded border border-line bg-raised p-3">
+        <div className="grid gap-2 rounded-md border border-line bg-raised p-3">
           <p ref={tokenTextRef} className="break-all font-mono text-sm text-fg">{created.token}</p>
           <div className="flex items-center gap-3">
             <Button type="button" onClick={copy}>Copy</Button>
@@ -96,11 +96,10 @@ export function TokenPanel() {
         </div>
       ) : (
         <div className="flex items-end gap-3">
-          <div className={fieldClass}>
-            <label htmlFor="token-name" className={labelClass}>Token name</label>
+          <FormField id="token-name" label="Token name">
             <Input id="token-name" value={name}
               onChange={(e) => setName(e.target.value)} />
-          </div>
+          </FormField>
           <Button type="button" disabled={create.isPending || !name.trim()}
             onClick={submit}>
             Create token
@@ -110,7 +109,7 @@ export function TokenPanel() {
 
       <div className="grid gap-2">
         {(tokens.data ?? []).map((t) => (
-          <div key={t.id} className="flex items-center justify-between gap-3 rounded border border-line p-2 text-sm">
+          <div key={t.id} className="flex items-center justify-between gap-3 rounded-md border border-line p-2 text-sm">
             <div className="grid gap-0.5">
               <span className="text-fg">{t.name}</span>
               <span className="text-faint">

@@ -1,10 +1,11 @@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
 import { SwitchField } from '../../components/SwitchField';
 import type { NotifyChannel, NotifyChannelType } from '../../lib/api';
-import { fieldClass, inputClass, labelClass } from './styles';
+import { inputClass } from './styles';
 
 interface Props {
   value: NotifyChannel;
@@ -32,7 +33,7 @@ export function ChannelEditor({
   };
 
   return (
-    <div className="grid gap-3 rounded border border-line p-3">
+    <div className="grid gap-3 rounded-md border border-line p-3">
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="uppercase">{value.type}</Badge>
@@ -45,27 +46,24 @@ export function ChannelEditor({
         />
       </div>
 
-      <div className={fieldClass}>
-        <label htmlFor={`channel-${id}-name`} className={labelClass}>Name</label>
+      <FormField id={`channel-${id}-name`} label="Name">
         <Input id={`channel-${id}-name`} value={value.name}
           onChange={(e) => onChange({ ...value, name: e.target.value })} />
-      </div>
+      </FormField>
 
-      <div className={fieldClass}>
-        <label htmlFor={`channel-${id}-type`} className={labelClass}>Type</label>
+      <FormField id={`channel-${id}-type`} label="Type">
         <select id={`channel-${id}-type`} className={inputClass} value={value.type}
           onChange={(e) => changeType(e.target.value as NotifyChannelType)}>
           <option value="webhook">webhook</option>
           <option value="ntfy">ntfy</option>
           <option value="apprise">apprise</option>
         </select>
-      </div>
+      </FormField>
 
-      <div className={fieldClass}>
-        <label htmlFor={`channel-${id}-url`} className={labelClass}>URL</label>
+      <FormField id={`channel-${id}-url`} label="URL">
         <Input id={`channel-${id}-url`} value={value.url}
           onChange={(e) => onChange({ ...value, url: e.target.value })} />
-      </div>
+      </FormField>
 
       {value.type === 'webhook' && (
         <div aria-label="Headers">
@@ -78,16 +76,14 @@ export function ChannelEditor({
       )}
 
       {(value.type === 'ntfy' || value.type === 'apprise') && (
-        <div className={fieldClass}>
-          <label htmlFor={`channel-${id}-token`} className={labelClass}>Token</label>
+        <FormField id={`channel-${id}-token`} label="Token">
           <Input id={`channel-${id}-token`} type="password" placeholder="leave unchanged"
             value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} />
-        </div>
+        </FormField>
       )}
 
       {value.type === 'ntfy' && (
-        <div className={fieldClass}>
-          <label htmlFor={`channel-${id}-priority`} className={labelClass}>Priority</label>
+        <FormField id={`channel-${id}-priority`} label="Priority">
           <select id={`channel-${id}-priority`} className={inputClass} value={value.priority ?? 'default'}
             onChange={(e) => onChange({ ...value, priority: e.target.value })}>
             <option value="min">min</option>
@@ -96,28 +92,26 @@ export function ChannelEditor({
             <option value="high">high</option>
             <option value="max">max</option>
           </select>
-        </div>
+        </FormField>
       )}
 
       {(value.type === 'ntfy' || value.type === 'apprise') && (
-        <div className={fieldClass}>
-          <label htmlFor={`channel-${id}-tags`} className={labelClass}>Tags</label>
+        <FormField id={`channel-${id}-tags`} label="Tags">
           <Input id={`channel-${id}-tags`}
             value={(value.tags ?? []).join(', ')}
             onChange={(e) => onChange({
               ...value,
               tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
             })} />
-        </div>
+        </FormField>
       )}
 
       {value.type === 'apprise' && (
-        <div className={fieldClass}>
-          <label htmlFor={`channel-${id}-urls`} className={labelClass}>Apprise URLs</label>
+        <FormField id={`channel-${id}-urls`} label="Apprise URLs">
           <textarea id={`channel-${id}-urls`} className={inputClass}
             value={(value.urls ?? []).join('\n')}
             onChange={(e) => onChange({ ...value, urls: e.target.value.split('\n') })} />
-        </div>
+        </FormField>
       )}
 
       <div className="flex items-center gap-3">

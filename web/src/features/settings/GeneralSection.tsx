@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import { TimezoneSelect } from '../../components/TimezoneSelect';
-import { fieldClass, inputClass, labelClass } from './styles';
+import { inputClass } from './styles';
 import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
@@ -42,26 +43,22 @@ export function GeneralSection() {
       error={error} saved={saved}
       onSave={() => save('general', { general })}
     >
-      <div className={fieldClass}>
-        <label htmlFor="general-base-url" className={labelClass}>Base URL</label>
+      <FormField id="general-base-url" label="Base URL">
         <Input id="general-base-url" value={general.base_url}
           onChange={(e) => setGeneral({ ...general, base_url: e.target.value })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-timezone" className={labelClass}>Timezone</label>
+      </FormField>
+      <FormField id="general-timezone" label="Timezone">
         <TimezoneSelect id="general-timezone" value={general.timezone}
           onChange={(tz) => setGeneral({ ...general, timezone: tz })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-units" className={labelClass}>Units</label>
+      </FormField>
+      <FormField id="general-units" label="Units">
         <select id="general-units" className={inputClass} value={general.units}
           onChange={(e) => setGeneral({ ...general, units: e.target.value })}>
           <option value="Mbps">Mbps</option>
           <option value="MB/s">MB/s</option>
         </select>
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-log-level" className={labelClass}>Log level</label>
+      </FormField>
+      <FormField id="general-log-level" label="Log level">
         <select id="general-log-level" className={inputClass} value={general.log_level}
           onChange={(e) => setGeneral({ ...general, log_level: e.target.value })}>
           <option value="debug">debug</option>
@@ -69,25 +66,22 @@ export function GeneralSection() {
           <option value="warn">warn</option>
           <option value="error">error</option>
         </select>
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-retention-results" className={labelClass}>Results retention (days)</label>
+      </FormField>
+      <FormField id="general-retention-results" label="Results retention (days)">
         <Input id="general-retention-results" type="number" min={1}
           value={general.retention_days_results}
           onChange={(e) => setGeneral({ ...general, retention_days_results: Number(e.target.value) })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-retention-runs" className={labelClass}>Runs retention (days)</label>
+      </FormField>
+      <FormField id="general-retention-runs" label="Runs retention (days)">
         <Input id="general-retention-runs" type="number" min={1}
           value={general.retention_days_runs}
           onChange={(e) => setGeneral({ ...general, retention_days_runs: Number(e.target.value) })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="general-prune-interval" className={labelClass}>Prune interval (minutes)</label>
+      </FormField>
+      <FormField id="general-prune-interval" label="Prune interval (minutes)">
         <Input id="general-prune-interval" type="number" min={1}
           value={general.retention_prune_interval_minutes}
           onChange={(e) => setGeneral({ ...general, retention_prune_interval_minutes: Number(e.target.value) })} />
-      </div>
+      </FormField>
 
       <div className="col-span-full grid gap-3 border-t border-line pt-4">
         <div>
@@ -98,8 +92,7 @@ export function GeneralSection() {
           </p>
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className={fieldClass}>
-            <label htmlFor="general-sla-download" className={labelClass}>Plan download (Mbps)</label>
+          <FormField id="general-sla-download" label="Plan download (Mbps)">
             <div className="flex gap-2">
               <Input id="general-sla-download" type="number" min={0}
                 value={raw.sla_download_mbps}
@@ -109,9 +102,8 @@ export function GeneralSection() {
                 Clear
               </Button>
             </div>
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-sla-upload" className={labelClass}>Plan upload (Mbps)</label>
+          </FormField>
+          <FormField id="general-sla-upload" label="Plan upload (Mbps)">
             <div className="flex gap-2">
               <Input id="general-sla-upload" type="number" min={0}
                 value={raw.sla_upload_mbps}
@@ -121,7 +113,7 @@ export function GeneralSection() {
                 Clear
               </Button>
             </div>
-          </div>
+          </FormField>
         </div>
       </div>
     </Section>

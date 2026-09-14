@@ -1,8 +1,8 @@
 import { Button } from '@/components/ui/button';
+import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
 import { SwitchField } from '../../components/SwitchField';
-import { fieldClass, labelClass } from './styles';
 import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
@@ -22,17 +22,15 @@ export function IntegrationsSection() {
         checked={integrations.vm_enabled}
         onCheckedChange={(checked) => setIntegrations({ ...integrations, vm_enabled: checked })}
       />
-      <div className={fieldClass}>
-        <label htmlFor="vm-url" className={labelClass}>VictoriaMetrics URL</label>
+      <FormField id="vm-url" label="VictoriaMetrics URL">
         <Input id="vm-url" value={integrations.vm_url}
           onChange={(e) => setIntegrations({ ...integrations, vm_url: e.target.value })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="vm-auth" className={labelClass}>VictoriaMetrics auth header</label>
+      </FormField>
+      <FormField id="vm-auth" label="VictoriaMetrics auth header">
         <Input id="vm-auth" type="password" placeholder="leave unchanged"
           value={integrations.vm_auth_header}
           onChange={(e) => setIntegrations({ ...integrations, vm_auth_header: e.target.value })} />
-      </div>
+      </FormField>
       <LabelsEditor
         label="VictoriaMetrics extra labels"
         value={integrations.vm_extra_labels}
@@ -53,17 +51,15 @@ export function IntegrationsSection() {
         checked={integrations.vl_enabled}
         onCheckedChange={(checked) => setIntegrations({ ...integrations, vl_enabled: checked })}
       />
-      <div className={fieldClass}>
-        <label htmlFor="vl-url" className={labelClass}>VictoriaLogs URL</label>
+      <FormField id="vl-url" label="VictoriaLogs URL">
         <Input id="vl-url" value={integrations.vl_url}
           onChange={(e) => setIntegrations({ ...integrations, vl_url: e.target.value })} />
-      </div>
-      <div className={fieldClass}>
-        <label htmlFor="vl-auth" className={labelClass}>VictoriaLogs auth header</label>
+      </FormField>
+      <FormField id="vl-auth" label="VictoriaLogs auth header">
         <Input id="vl-auth" type="password" placeholder="leave unchanged"
           value={integrations.vl_auth_header}
           onChange={(e) => setIntegrations({ ...integrations, vl_auth_header: e.target.value })} />
-      </div>
+      </FormField>
       <LabelsEditor
         label="Extra stream fields"
         value={integrations.vl_stream_fields}
