@@ -36,8 +36,10 @@ func timeQuery(w http.ResponseWriter, r *http.Request, name string) (string, boo
 	return t.UTC().Format(dbTimeFormat), true
 }
 
-// listResults answers GET /results with filters and a keyset cursor.
-func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
+// resultFilterFromQuery parses the filter parameters shared by
+// GET /results and GET /results.csv (engine/status/tag/from/to/target_id).
+// Limit/Cursor are left zero; listResults fills them in on top.
+func (d Deps) resultFilterFromQuery(w http.ResponseWriter, r *http.Request) (store.ResultFilter, bool) {
 	q := r.URL.Query()
 	f := store.ResultFilter{
 		Engine: q.Get("engine"),
@@ -46,20 +48,29 @@ func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
 	}
 	from, ok := timeQuery(w, r, "from")
 	if !ok {
-		return
+		return store.ResultFilter{}, false
 	}
 	f.From = from
 	to, ok := timeQuery(w, r, "to")
 	if !ok {
-		return
+		return store.ResultFilter{}, false
 	}
 	f.To = to
 	if raw := q.Get("target_id"); raw != "" {
 		id, ok := int64Query(w, r, "target_id", 0)
 		if !ok {
-			return
+			return store.ResultFilter{}, false
 		}
 		f.TargetID = &id
+	}
+	return f, true
+}
+
+// listResults answers GET /results with filters and a keyset cursor.
+func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
+	f, ok := d.resultFilterFromQuery(w, r)
+	if !ok {
+		return
 	}
 	limit, ok := intQuery(w, r, "limit", 50)
 	if !ok {

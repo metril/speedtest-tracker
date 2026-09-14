@@ -82,11 +82,15 @@ func do(t *testing.T, h http.Handler, method, path string, body any) *httptest.R
 	t.Helper()
 	var rdr io.Reader
 	if body != nil {
-		buf, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
+		if r, ok := body.(io.Reader); ok {
+			rdr = r
+		} else {
+			buf, err := json.Marshal(body)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rdr = bytes.NewReader(buf)
 		}
-		rdr = bytes.NewReader(buf)
 	}
 	req := httptest.NewRequest(method, path, rdr)
 	if body != nil {
