@@ -292,3 +292,65 @@ export const targetLatest = async (id: number): Promise<Result | null> => {
     throw err;
   }
 };
+
+/** MASKED_SECRET is what the server sends instead of a stored secret, and
+ * what a form sends back to mean "leave the stored value alone". */
+export const MASKED_SECRET = '***';
+
+export interface GeneralSettings {
+  base_url: string;
+  timezone: string;
+  units: string;
+  log_level: string;
+  retention_days_results: number;
+  retention_days_runs: number;
+  retention_prune_interval_minutes: number;
+}
+
+export interface EngineSettings {
+  speedtest_bin: string;
+  iperf3_bin: string;
+  ookla_accept_license: boolean;
+  ookla_accept_gdpr: boolean;
+  server_list_ttl_seconds: number;
+  default_ookla_options: Record<string, unknown>;
+  default_cloudflare_options: Record<string, unknown>;
+  default_iperf3_options: Record<string, unknown>;
+}
+
+export interface IntegrationSettings {
+  vm_enabled: boolean;
+  vm_url: string;
+  vm_auth_header: string;
+  vm_extra_labels: Record<string, string>;
+  vl_enabled: boolean;
+  vl_url: string;
+  vl_auth_header: string;
+  vl_stream_fields: Record<string, string>;
+  metrics_enabled: boolean;
+}
+
+export interface Settings {
+  general: GeneralSettings;
+  engines: EngineSettings;
+  integrations: IntegrationSettings;
+}
+
+export type SettingsPatch = {
+  general?: Partial<GeneralSettings>;
+  engines?: Partial<EngineSettings>;
+  integrations?: Partial<IntegrationSettings>;
+};
+
+export interface ConnectionTest {
+  ok: boolean;
+  status?: number;
+  latency_ms?: number;
+  error?: string;
+}
+
+export const getSettings = () => request<Settings>('/settings');
+export const updateSettings = (patch: SettingsPatch) =>
+  request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) });
+export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth_header?: string }) =>
+  request<ConnectionTest>(`/settings/test/${target}`, { method: 'POST', body: JSON.stringify(body) });

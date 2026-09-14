@@ -3,7 +3,9 @@ import { renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as api from './api';
-import { useCronPreview, useReexecute, useRunTarget } from './queries';
+import {
+  queryKeys, useCronPreview, useReexecute, useRunTarget, useUpdateSettings,
+} from './queries';
 
 function wrapper(client: QueryClient) {
   return ({ children }: { children: ReactNode }) => (
@@ -64,5 +66,23 @@ describe('useCronPreview', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, next: ['2026-09-13T03:00:00Z'] })));
     const { result } = renderHook(() => useCronPreview('0 3 * * *', 'UTC'), { wrapper: wrapper(new QueryClient()) });
     await waitFor(() => expect(result.current.data).toEqual(['2026-09-13T03:00:00Z']));
+  });
+});
+
+describe('useUpdateSettings', () => {
+  it('invalidates the settings query after a successful save', async () => {
+    vi.spyOn(api, 'updateSettings').mockResolvedValue({
+      general: {} as api.GeneralSettings,
+      engines: {} as api.EngineSettings,
+      integrations: {} as api.IntegrationSettings,
+    });
+    const client = new QueryClient();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+
+    const { result } = renderHook(() => useUpdateSettings(), { wrapper: wrapper(client) });
+    result.current.mutate({ general: { units: 'metric' } });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.settings });
   });
 });

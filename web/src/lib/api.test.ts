@@ -90,3 +90,39 @@ describe('schedules client', () => {
     await expect(api.targetLatest(3)).resolves.toBeNull();
   });
 });
+
+describe('settings client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('fetches settings from the settings endpoint', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ general: {}, engines: {}, integrations: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.getSettings();
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/settings');
+  });
+
+  it('sends only the provided sections on update', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ general: {}, engines: {}, integrations: {} }));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.updateSettings({ integrations: { vm_enabled: true, vm_url: 'http://vm:8428' } });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('/api/v1/settings');
+    expect((init as RequestInit).method).toBe('PUT');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({
+      integrations: { vm_enabled: true, vm_url: 'http://vm:8428' },
+    });
+  });
+
+  it('posts a connection test to the target endpoint', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({ ok: true, status: 200, latency_ms: 3 }));
+    vi.stubGlobal('fetch', fetchMock);
+    const res = await api.testIntegration('vl', { url: 'http://vl:9428' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('/api/v1/settings/test/vl');
+    expect((init as RequestInit).method).toBe('POST');
+    expect(JSON.parse(String((init as RequestInit).body))).toEqual({ url: 'http://vl:9428' });
+    expect(res.ok).toBe(true);
+  });
+});

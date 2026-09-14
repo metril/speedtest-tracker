@@ -18,6 +18,7 @@ export const queryKeys = {
   history: (id: number, range: Range) => ['history', id, range] as const,
   summary: (range: Range) => ['summary', range] as const,
   outages: (range: Range) => ['outages', range] as const,
+  settings: ['settings'] as const,
 };
 
 export function useTargets() {
@@ -215,5 +216,24 @@ export function useDeleteTag() {
       qc.invalidateQueries({ queryKey: queryKeys.tags });
       qc.invalidateQueries({ queryKey: ['results'] });
     },
+  });
+}
+
+export function useSettings() {
+  return useQuery({ queryKey: queryKeys.settings, queryFn: api.getSettings, staleTime: 0 });
+}
+
+export function useUpdateSettings() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (patch: api.SettingsPatch) => api.updateSettings(patch),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.settings }),
+  });
+}
+
+export function useTestIntegration() {
+  return useMutation({
+    mutationFn: ({ target, body }: { target: 'vm' | 'vl'; body: { url?: string; auth_header?: string } }) =>
+      api.testIntegration(target, body),
   });
 }
