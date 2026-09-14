@@ -11,16 +11,23 @@ import (
 // polls; recomputing aggregates on every poll is wasted work.
 const summaryTTL = 30 * time.Second
 
+// maxSummaryCacheEntries bounds the cache regardless of TTL expiry, since
+// arbitrary from/to pairs would otherwise let a caller grow it without
+// limit. Named ranges plus the default keep real usage well under this.
+const maxSummaryCacheEntries = 64
+
 type summaryEntry struct {
 	body []byte
 	at   time.Time
 }
 
-// summaryCache memoises /stats/summary bodies per window key.
+// summaryCache memoises /stats/summary bodies per window key, evicting the
+// oldest-inserted entry once it holds more than maxSummaryCacheEntries.
 type summaryCache struct {
 	mu      sync.Mutex
 	ttl     time.Duration
 	entries map[string]summaryEntry
+	order   []string         // insertion order, oldest first, for eviction
 	now     func() time.Time // swapped in tests
 }
 
@@ -41,12 +48,24 @@ func (c *summaryCache) get(key string) ([]byte, bool) {
 func (c *summaryCache) set(key string, body []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if _, exists := c.entries[key]; !exists {
+		c.order = append(c.order, key)
+	}
 	c.entries[key] = summaryEntry{body: body, at: c.now()}
+	for len(c.entries) > maxSummaryCacheEntries {
+		oldest := c.order[0]
+		c.order = c.order[1:]
+		delete(c.entries, oldest)
+	}
 }
 
 // statsSummary answers GET /stats/summary?range=, serving a cached body
 // for up to summaryTTL.
 func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Query().Get("from") != "" || r.URL.Query().Get("to") != "" {
+		errBadRequest(w, "stats/summary only accepts range=24h|7d|30d, not an explicit from/to pair")
+		return
+	}
 	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
 	if !ok {
 		return
