@@ -1,10 +1,9 @@
 import { useState } from 'react';
 import { SwitchField } from '../../components/SwitchField';
-import type { Target, TargetInput, ThresholdSet } from '../../lib/api';
+import { ENGINES, type Target, type TargetInput, type ThresholdSet } from '../../lib/api';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
 import { ThresholdFields, validateThresholds } from './ThresholdFields';
 
-const ENGINES = ['ookla', 'cloudflare', 'iperf3', 'fake'] as const;
 const LANES = ['wan', 'lan'] as const;
 
 interface Props {

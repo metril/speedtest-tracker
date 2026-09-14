@@ -1,3 +1,5 @@
+export const ENGINES = ['ookla', 'cloudflare', 'iperf3'] as const;
+
 export interface Target {
   id: number;
   name: string;

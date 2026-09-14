@@ -1,6 +1,6 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import type { ResultFilters, Target } from '../../lib/api';
+import { ENGINES, type ResultFilters, type Target } from '../../lib/api';
 import { useTags } from '../../lib/queries';
 
 interface Props {
@@ -55,7 +55,7 @@ export function ResultFiltersBar({ value, onChange, targets }: Props) {
       <select className={control} aria-label="Engine" value={value.engine ?? ''}
         onChange={(e) => set({ engine: e.target.value || undefined })}>
         <option value="">All engines</option>
-        {['ookla', 'cloudflare', 'iperf3', 'fake'].map((e) => <option key={e} value={e}>{e}</option>)}
+        {ENGINES.map((e) => <option key={e} value={e}>{e}</option>)}
       </select>
       <select className={control} aria-label="Status" value={value.status ?? ''}
         onChange={(e) => set({ status: e.target.value || undefined })}>
