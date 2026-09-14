@@ -6,10 +6,15 @@
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {
+  /* Surface hierarchy: app (page ground) < surface (cards/inputs) <
+     raised (hover/active fills). --color-line borders separate adjacent
+     surfaces at the same level; --color-line-strong is for form controls
+     and section dividers that need to read clearly on their own surface. */
   --color-app: #f8fafc;
   --color-surface: #ffffff;
   --color-raised: #f1f5f9;
   --color-line: #e2e8f0;
+  --color-line-strong: #cbd5e1;
   --color-fg: #0f172a;
   --color-muted: #475569;
   --color-faint: #5b6472;
@@ -53,7 +58,8 @@
   --color-app: #020617;
   --color-surface: #0f172a;
   --color-raised: #1e293b;
-  --color-line: #1e293b;
+  --color-line: #334155;
+  --color-line-strong: #475569;
   --color-fg: #f1f5f9;
   --color-muted: #94a3b8;
   --color-faint: #8594aa;

@@ -77,6 +77,22 @@ describe('ui primitives: static components render', () => {
   });
 });
 
+describe('Button variants', () => {
+  it('applies outline variant classes', () => {
+    render(<Button variant="outline">Outline</Button>);
+    expect(screen.getByRole('button', { name: 'Outline' })).toHaveClass(
+      'border', 'border-line-strong', 'bg-surface',
+    );
+  });
+
+  it('applies secondary variant classes', () => {
+    render(<Button variant="secondary">Secondary</Button>);
+    expect(screen.getByRole('button', { name: 'Secondary' })).toHaveClass(
+      'bg-raised', 'text-fg', 'border', 'border-line',
+    );
+  });
+});
+
 describe('Dialog', () => {
   it('opens on trigger click and closes on close button click', async () => {
     const user = userEvent.setup();

@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { TimezoneSelect } from '../../components/TimezoneSelect';
 import type { Schedule, ScheduleInput, Target } from '../../lib/api';
@@ -19,6 +22,8 @@ const PRESETS = [
 /** How long to wait after the last keystroke before asking the server to
  * validate the cron expression. */
 const PREVIEW_DEBOUNCE_MS = 300;
+
+const field = 'w-full h-9 rounded-md border border-line-strong bg-surface px-2 py-1.5 text-sm text-fg';
 
 interface Props {
   initial?: Schedule;
@@ -74,66 +79,70 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
   const previewError = preview.error instanceof ApiError ? preview.error.message : undefined;
 
   return (
-    <form onSubmit={submit} className="grid gap-4 rounded border border-line bg-raised p-4">
-      <div className="grid gap-1">
-        <label htmlFor="schedule-name" className="text-xs uppercase tracking-wide text-faint">Name</label>
-        <input
-          id="schedule-name" value={name} onChange={(e) => setName(e.target.value)}
-          className="rounded border border-line bg-app px-2 py-1.5 text-sm text-fg"
-        />
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>{initial ? 'Edit schedule' : 'New schedule'}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form onSubmit={submit} className="grid gap-4">
+          <FormField id="schedule-name" label="Name">
+            <input
+              id="schedule-name" value={name} onChange={(e) => setName(e.target.value)}
+              className={field}
+            />
+          </FormField>
 
-      <div className="grid gap-2">
-        <div className="flex flex-wrap gap-2">
-          {PRESETS.map((p) => (
-            <button
-              key={p.expr} type="button" onClick={() => setCron(p.expr)}
-              className={`rounded border px-2 py-1 text-xs ${cron === p.expr ? 'border-accent text-accent' : 'border-line text-muted hover:bg-surface'}`}
-            >
-              {p.label}
-            </button>
-          ))}
-        </div>
-        <label htmlFor="schedule-cron" className="text-xs uppercase tracking-wide text-faint">Cron expression</label>
-        <input
-          id="schedule-cron" value={cron} onChange={(e) => setCron(e.target.value)}
-          className="rounded border border-line bg-app px-2 py-1.5 font-mono text-sm text-fg"
-        />
-        <p data-testid="cron-preview" className="text-xs text-muted">
-          {previewError
-            ? <span className="text-bad">{previewError}</span>
-            : (preview.data ?? []).map((t) => formatDateTime(t)).join(' · ') || 'Next runs appear here.'}
-        </p>
-      </div>
+          <div className="grid gap-2">
+            <div className="flex flex-wrap gap-2">
+              {PRESETS.map((p) => (
+                <button
+                  key={p.expr} type="button" onClick={() => setCron(p.expr)}
+                  className={`rounded-md border px-2 py-1 text-xs ${cron === p.expr ? 'border-accent text-accent' : 'border-line-strong text-muted hover:bg-surface'}`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+            <FormField id="schedule-cron" label="Cron expression">
+              <input
+                id="schedule-cron" value={cron} onChange={(e) => setCron(e.target.value)}
+                className={`${field} font-mono`}
+              />
+            </FormField>
+            <p data-testid="cron-preview" className="text-xs text-muted">
+              {previewError
+                ? <span className="text-bad">{previewError}</span>
+                : (preview.data ?? []).map((t) => formatDateTime(t)).join(' · ') || 'Next runs appear here.'}
+            </p>
+          </div>
 
-      <div className="grid gap-1">
-        <label htmlFor="schedule-tz" className="text-xs uppercase tracking-wide text-faint">Timezone</label>
-        <TimezoneSelect
-          id="schedule-tz" value={timezone} onChange={setTimezone}
-          className="rounded border border-line bg-app px-2 py-1.5 text-sm text-fg"
-        />
-      </div>
+          <FormField id="schedule-tz" label="Timezone">
+            <TimezoneSelect
+              id="schedule-tz" value={timezone} onChange={setTimezone}
+              className={field}
+            />
+          </FormField>
 
-      <fieldset className="grid gap-2">
-        <legend className="text-xs uppercase tracking-wide text-faint">Targets, in run order</legend>
-        <SortableTargetList selected={selected} byID={byID} onChange={setSelected} />
-        <TargetPicker targets={targets} selected={selected} onChange={setSelected} />
-      </fieldset>
+          <fieldset className="grid gap-2">
+            <legend className="text-xs uppercase tracking-wide text-faint">Targets, in run order</legend>
+            <SortableTargetList selected={selected} byID={byID} onChange={setSelected} />
+            <TargetPicker targets={targets} selected={selected} onChange={setSelected} />
+          </fieldset>
 
-      <SwitchField id="schedule-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
+          <SwitchField id="schedule-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
 
-      {(localError || error) && <p className="text-sm text-bad">{localError || error}</p>}
+          {(localError || error) && <p className="text-sm text-bad">{localError || error}</p>}
 
-      <div className="flex gap-2">
-        <button type="submit" disabled={submitting}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50">
-          Save schedule
-        </button>
-        <button type="button" onClick={onCancel}
-          className="rounded border border-line px-3 py-1.5 text-sm text-muted hover:bg-surface">
-          Cancel
-        </button>
-      </div>
-    </form>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={submitting}>
+              Save schedule
+            </Button>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,7 +1,9 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { cn } from '@/lib/utils';
 import { ENGINES, type ResultFilters, type Target } from '../../lib/api';
 import { useTags } from '../../lib/queries';
+import { inputClass } from '../settings/styles';
 
 interface Props {
   value: ResultFilters;
@@ -13,7 +15,7 @@ interface Props {
 // fireEvent.change the way these filters (and their tests) rely on, so
 // these stay native <select> elements, styled to match ui/Input instead
 // of adopting the Radix component.
-const control = 'flex h-9 items-center rounded-md border border-input bg-transparent px-3 py-1 text-sm text-fg shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
+const control = cn(inputClass, 'w-auto');
 
 const pad = (n: number) => String(n).padStart(2, '0');
 

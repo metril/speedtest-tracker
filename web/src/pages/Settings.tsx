@@ -172,7 +172,7 @@ export function Settings() {
   };
 
   if (settings.isLoading || !general || !engines || !integrations || !notifications || !auth) {
-    return <h1 className="text-xl font-semibold">Settings</h1>;
+    return <h1 className="text-xl font-semibold tracking-tight">Settings</h1>;
   }
 
   const context: SettingsOutletContext = {

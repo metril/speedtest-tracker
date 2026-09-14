@@ -7,6 +7,7 @@ import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
 import { SwitchField } from '../../components/SwitchField';
+import { FormField } from '../../components/FormField';
 
 export type Options = Record<string, unknown>;
 
@@ -22,8 +23,7 @@ interface Props {
   forceOpenAdvancedSignal?: number;
 }
 
-const field = 'w-full rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
-const label = 'block text-xs font-medium uppercase tracking-wide text-muted';
+const field = 'w-full h-9 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
 
 /** setOption writes a key, deleting it when the value is empty. */
 function setOption(options: Options, key: string, value: unknown): Options {
@@ -228,8 +228,7 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
 
   return (
     <div className="grid gap-3">
-      <div>
-        <label className={label} htmlFor="ookla-server-id">Ookla server ID</label>
+      <FormField id="ookla-server-id" label="Ookla server ID">
         <input
           id="ookla-server-id"
           className={field}
@@ -237,10 +236,10 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
           placeholder="auto (nearest server)"
           onChange={(e) => onChange(setOption(options, 'server_id', numberOr(e.target.value)))}
         />
-      </div>
+      </FormField>
       <div className="flex gap-2">
         <div className="flex-1">
-          <label className={label} htmlFor="ookla-server-search">Search servers</label>
+          <FormField id="ookla-server-search" label="Search servers">
           <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
             <PopoverAnchor asChild>
               <input
@@ -277,30 +276,32 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
               />
             </PopoverContent>
           </Popover>
+          </FormField>
         </div>
         <div className="w-28 shrink-0">
-          <label className={label} htmlFor="ookla-country">Country</label>
-          <select
-            id="ookla-country"
-            className={field}
-            value={countrySelect}
-            onChange={(e) => setCountrySelect(e.target.value)}
-          >
-            <option value="">Any</option>
-            {COMMON_COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
-            <option value="other">Other…</option>
-          </select>
-          {countrySelect === 'other' && (
-            <input
-              id="ookla-country-other"
-              aria-label="Country code"
-              className={`${field} mt-1`}
-              value={countryOther}
-              maxLength={2}
-              placeholder="e.g. IE"
-              onChange={(e) => setCountryOther(e.target.value)}
-            />
-          )}
+          <FormField id="ookla-country" label="Country">
+            <select
+              id="ookla-country"
+              className={field}
+              value={countrySelect}
+              onChange={(e) => setCountrySelect(e.target.value)}
+            >
+              <option value="">Any</option>
+              {COMMON_COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+              <option value="other">Other…</option>
+            </select>
+            {countrySelect === 'other' && (
+              <input
+                id="ookla-country-other"
+                aria-label="Country code"
+                className={`${field} mt-1`}
+                value={countryOther}
+                maxLength={2}
+                placeholder="e.g. IE"
+                onChange={(e) => setCountryOther(e.target.value)}
+              />
+            )}
+          </FormField>
         </div>
       </div>
     </div>
@@ -370,8 +371,7 @@ function CloudflareFields({ options, onChange }: Omit<Props, 'engine'>) {
 
   return (
     <div className="grid gap-3">
-      <div>
-        <label className={label} htmlFor="cf-download-sizes">Download sizes (bytes, comma separated)</label>
+      <FormField id="cf-download-sizes" label="Download sizes (bytes, comma separated)">
         <input
           id="cf-download-sizes"
           className={field}
@@ -382,9 +382,8 @@ function CloudflareFields({ options, onChange }: Omit<Props, 'engine'>) {
             onChange(setOption(options, 'download_sizes', parsed.length ? parsed : ''));
           }}
         />
-      </div>
-      <div>
-        <label className={label} htmlFor="cf-upload-sizes">Upload sizes (bytes, comma separated)</label>
+      </FormField>
+      <FormField id="cf-upload-sizes" label="Upload sizes (bytes, comma separated)">
         <input
           id="cf-upload-sizes"
           className={field}
@@ -395,16 +394,15 @@ function CloudflareFields({ options, onChange }: Omit<Props, 'engine'>) {
             onChange(setOption(options, 'upload_sizes', parsed.length ? parsed : ''));
           }}
         />
-      </div>
-      <div>
-        <label className={label} htmlFor="cf-latency-samples">Latency samples</label>
+      </FormField>
+      <FormField id="cf-latency-samples" label="Latency samples">
         <input
           id="cf-latency-samples"
           className={field}
           value={options.latency_samples === undefined ? '' : String(options.latency_samples)}
           onChange={(e) => onChange(setOption(options, 'latency_samples', numberOr(e.target.value)))}
         />
-      </div>
+      </FormField>
     </div>
   );
 }
@@ -486,14 +484,15 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
 
       {custom && (
         <div className="sm:col-span-2">
-          <label className={label} htmlFor="iperf-host">Host</label>
-          <input id="iperf-host" className={field} value={text('host')}
-            onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
+          <FormField id="iperf-host" label="Host">
+            <input id="iperf-host" className={field} value={text('host')}
+              onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
+          </FormField>
         </div>
       )}
 
       <div className="sm:col-span-2">
-        <label className={label} htmlFor="iperf-public-search">Pick from public list</label>
+        <FormField id="iperf-public-search" label="Pick from public list">
         <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
           <PopoverAnchor asChild>
             <input
@@ -523,8 +522,9 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
             />
           </PopoverContent>
         </Popover>
+        </FormField>
         {!custom && pickedHost !== '' && (
-          <div data-testid="iperf3-picked" className="mt-2 rounded border border-line bg-surface px-2 py-1.5 text-sm">
+          <div data-testid="iperf3-picked" className="mt-2 rounded-md border border-line bg-surface px-2 py-1.5 text-sm">
             <span className="font-mono text-fg">{pickedHost}:{options.port !== undefined ? String(options.port) : '5201'}</span>
             {pickHints.length > 0 && (
               <p className="mt-1 text-xs text-faint">{pickHints.join(' · ')}</p>
@@ -535,19 +535,16 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
 
       {custom && (
       <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
-      <div>
-        <label className={label} htmlFor="iperf-port">Port</label>
+      <FormField id="iperf-port" label="Port">
         <input id="iperf-port" className={field} value={text('port')} placeholder="5201"
           onChange={(e) => onChange(setOption(options, 'port', numberOr(e.target.value)))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-port-range-end">Port range end</label>
+      </FormField>
+      <FormField id="iperf-port-range-end" label="Port range end">
         <input id="iperf-port-range-end" className={field} value={text('port_range_end')}
           placeholder="retry ports up to this one when busy"
           onChange={(e) => onChange(setOption(options, 'port_range_end', numberOr(e.target.value)))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-protocol">Protocol</label>
+      </FormField>
+      <FormField id="iperf-protocol" label="Protocol">
         <select id="iperf-protocol" className={field} value={protocol}
           onChange={(e) => {
             const nextProtocol = e.target.value;
@@ -559,48 +556,39 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
         </select>
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-parallel">Parallel streams</label>
+      </FormField>
+      <FormField id="iperf-parallel" label="Parallel streams">
         <input id="iperf-parallel" className={field} value={text('parallel')} placeholder="1"
           onChange={(e) => onChange(setOption(options, 'parallel', numberOr(e.target.value)))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-duration">Duration (s)</label>
+      </FormField>
+      <FormField id="iperf-duration" label="Duration (s)">
         <input id="iperf-duration" className={field} value={text('duration_s')} placeholder="10"
           onChange={(e) => onChange(setOption(options, 'duration_s', numberOr(e.target.value)))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-bitrate">UDP bitrate</label>
+      </FormField>
+      <FormField id="iperf-bitrate" label="UDP bitrate">
         <input id="iperf-bitrate" className={field} value={text('udp_bitrate')} placeholder="100M"
           disabled={!isUdp} title={isUdp ? undefined : 'Only applies to UDP'}
           onChange={(e) => onChange(setOption(options, 'udp_bitrate', e.target.value))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-bind">Bind address</label>
+      </FormField>
+      <FormField id="iperf-bind" label="Bind address">
         <input id="iperf-bind" className={field} value={text('bind')}
           onChange={(e) => onChange(setOption(options, 'bind', e.target.value))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-username">Username</label>
+      </FormField>
+      <FormField id="iperf-username" label="Username">
         <input id="iperf-username" className={field} value={text('username')}
           onChange={(e) => onChange(setOption(options, 'username', e.target.value))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-rsa">RSA public key path</label>
+      </FormField>
+      <FormField id="iperf-rsa" label="RSA public key path">
         <input id="iperf-rsa" className={field} value={text('rsa_public_key_path')}
           onChange={(e) => onChange(setOption(options, 'rsa_public_key_path', e.target.value))} />
-      </div>
-      <div>
-        <label className={label} htmlFor="iperf-password">Password</label>
+      </FormField>
+      <FormField
+        id="iperf-password" label="Password"
+        error={passwordNeedsAuth ? 'Password requires a username and RSA public key path' : undefined}
+      >
         <input id="iperf-password" type="password" className={field} value={text('password')}
           onChange={(e) => onChange(setOption(options, 'password', e.target.value))} />
-        {passwordNeedsAuth && (
-          <p className="mt-1 text-xs text-warn">
-            Password requires a username and RSA public key path
-          </p>
-        )}
-      </div>
+      </FormField>
       {/* Disable a box only when the other is checked and this one isn't —
           never both at once. Legacy options can have reverse and bidir both
           true (an invalid combination the engine would reject); if that

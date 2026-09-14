@@ -1,4 +1,7 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { ENGINES, type Target, type TargetInput, type ThresholdSet } from '../../lib/api';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
@@ -14,8 +17,7 @@ interface Props {
   error?: string;
 }
 
-const field = 'w-full rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
-const label = 'block text-xs font-medium uppercase tracking-wide text-muted';
+const field = 'w-full h-9 rounded-md border border-line-strong bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
 
 /** TargetForm creates or edits one target. */
 export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: Props) {
@@ -36,76 +38,75 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   const thresholdsError = validateThresholds(thresholds);
 
   return (
-    <form
-      className="grid gap-4 rounded-lg border border-line bg-raised p-4"
-      onSubmit={(e) => {
-        e.preventDefault();
-        setTouched(true);
-        if (nameInvalid || optionsError || thresholdsError) {
-          if (optionsError) setForceOpenAdvancedSignal((n) => n + 1);
-          return;
-        }
-        onSubmit({
-          name: name.trim(), engine, enabled, lane, options, thresholds: thresholds as Record<string, unknown>,
-        });
-      }}
-    >
-      <div className="grid gap-3 sm:grid-cols-3">
-        <div>
-          <label className={label} htmlFor="target-name">Name</label>
-          <input id="target-name" className={field} value={name}
-            onChange={(e) => setName(e.target.value)} />
-          {touched && nameInvalid && (
-            <p className="mt-1 text-xs text-bad">Name is required</p>
-          )}
-        </div>
-        <div>
-          <label className={label} htmlFor="target-engine">Engine</label>
-          <select id="target-engine" className={field} value={engine}
-            onChange={(e) => { setEngine(e.target.value); setOptions({}); }}>
-            {ENGINES.map((e) => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </div>
-        <div>
-          <label className={label} htmlFor="target-lane">Lane</label>
-          <select id="target-lane" className={field} value={lane}
-            onChange={(e) => setLane(e.target.value)}>
-            {LANES.map((l) => <option key={l} value={l}>{l}</option>)}
-          </select>
-        </div>
-      </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>{initial ? 'Edit target' : 'New target'}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <form
+          className="grid gap-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            setTouched(true);
+            if (nameInvalid || optionsError || thresholdsError) {
+              if (optionsError) setForceOpenAdvancedSignal((n) => n + 1);
+              return;
+            }
+            onSubmit({
+              name: name.trim(), engine, enabled, lane, options, thresholds: thresholds as Record<string, unknown>,
+            });
+          }}
+        >
+          <div className="grid gap-3 sm:grid-cols-3">
+            <FormField id="target-name" label="Name" error={touched && nameInvalid ? 'Name is required' : undefined}>
+              <input id="target-name" className={field} value={name}
+                onChange={(e) => setName(e.target.value)} />
+            </FormField>
+            <FormField id="target-engine" label="Engine">
+              <select id="target-engine" className={field} value={engine}
+                onChange={(e) => { setEngine(e.target.value); setOptions({}); }}>
+                {ENGINES.map((e) => <option key={e} value={e}>{e}</option>)}
+              </select>
+            </FormField>
+            <FormField id="target-lane" label="Lane">
+              <select id="target-lane" className={field} value={lane}
+                onChange={(e) => setLane(e.target.value)}>
+                {LANES.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </FormField>
+          </div>
 
-      <div className="w-fit">
-        <SwitchField id="target-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
-      </div>
+          <div className="w-fit">
+            <SwitchField id="target-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
+          </div>
 
-      <div className="border-t border-line pt-3">
-        <EngineOptionFields
-          engine={engine} options={options} onChange={setOptions}
-          forceOpenAdvancedSignal={forceOpenAdvancedSignal}
-        />
-      </div>
+          <div className="border-t border-line pt-3">
+            <EngineOptionFields
+              engine={engine} options={options} onChange={setOptions}
+              forceOpenAdvancedSignal={forceOpenAdvancedSignal}
+            />
+          </div>
 
-      <div className="border-t border-line pt-3">
-        <ThresholdFields value={thresholds} onChange={setThresholds} />
-        {touched && thresholdsError && (
-          <p className="mt-1 text-xs text-bad">{thresholdsError}</p>
-        )}
-      </div>
+          <div className="border-t border-line pt-3">
+            <ThresholdFields value={thresholds} onChange={setThresholds} />
+            {touched && thresholdsError && (
+              <p className="mt-1 text-xs text-bad">{thresholdsError}</p>
+            )}
+          </div>
 
-      {touched && optionsError && <p className="text-sm text-bad">{optionsError}</p>}
-      {error && <p className="text-sm text-bad">{error}</p>}
+          {touched && optionsError && <p className="text-sm text-bad">{optionsError}</p>}
+          {error && <p className="text-sm text-bad">{error}</p>}
 
-      <div className="flex gap-2">
-        <button type="submit" disabled={submitting}
-          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50">
-          Save target
-        </button>
-        <button type="button" onClick={onCancel}
-          className="rounded border border-line px-3 py-1.5 text-sm text-muted hover:bg-raised">
-          Cancel
-        </button>
-      </div>
-    </form>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={submitting}>
+              Save target
+            </Button>
+            <Button type="button" variant="outline" onClick={onCancel}>
+              Cancel
+            </Button>
+          </div>
+        </form>
+      </CardContent>
+    </Card>
   );
 }

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { ChevronRight } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
@@ -26,15 +27,17 @@ function RecentlyDeleted() {
 
   return (
     <section className="grid gap-2">
-      <button
+      <Button
         type="button"
-        className="flex items-center gap-1 text-left text-sm font-medium text-muted disabled:opacity-60"
+        variant="ghost"
+        size="sm"
+        className="w-fit gap-1"
         onClick={() => setExpanded((e) => !e)}
         disabled={count === 0}
       >
-        <span>{expanded ? '▾' : '▸'}</span>
+        <ChevronRight className={`size-4 transition-transform ${expanded ? 'rotate-90' : ''}`} />
         Recently deleted{count > 0 ? ` (${count})` : ''}
-      </button>
+      </Button>
 
       {expanded && count > 0 && (
         <>
