@@ -30,6 +30,10 @@ type Deps struct {
 	Registry   *engine.Registry
 	Runner     Runner
 	ServerList ServerLister
+
+	// ReloadSchedules asks the scheduler to rebuild its cron entries after
+	// a schedule mutation. Optional: nil means no scheduler is running.
+	ReloadSchedules func(context.Context) error
 }
 
 // requestTimeout bounds every /api/v1 request except the SSE stream.
@@ -66,6 +70,14 @@ func New(deps Deps) http.Handler {
 			t.Delete("/{id}", deps.deleteTarget)
 			t.Post("/{id}/run", deps.runTarget)
 			t.Get("/{id}/latest", deps.targetLatest)
+		})
+		v1.Route("/schedules", func(s chi.Router) {
+			s.Get("/", deps.listSchedules)
+			s.Post("/", deps.createSchedule)
+			s.Post("/validate", deps.validateCron)
+			s.Get("/{id}", deps.getSchedule)
+			s.Put("/{id}", deps.updateSchedule)
+			s.Delete("/{id}", deps.deleteSchedule)
 		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
 		v1.Route("/runs", func(rt chi.Router) {

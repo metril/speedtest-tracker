@@ -55,6 +55,8 @@ func newTestAPI(t *testing.T) (http.Handler, *store.Store, *stubRunner) {
 	reg.Register(fake.New())
 	run := &stubRunner{nextID: 77, cancelOK: true}
 
+	t.Cleanup(func() { reloadHook = nil })
+
 	h := New(Deps{
 		Pinger:   db,
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
@@ -66,6 +68,12 @@ func newTestAPI(t *testing.T) (http.Handler, *store.Store, *stubRunner) {
 			{ID: "1", Name: "Frankfurt Fiber", Location: "Frankfurt", Country: "Germany", Host: "fra.example:8080"},
 			{ID: "2", Name: "Init7", Location: "Zurich", Country: "Switzerland", Host: "zrh.example:8080"},
 		}},
+		ReloadSchedules: func(context.Context) error {
+			if reloadHook != nil {
+				reloadHook()
+			}
+			return nil
+		},
 	})
 	return h, db, run
 }
