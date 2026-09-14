@@ -43,16 +43,6 @@ export function formatPercent(fraction: number): string {
   return `${Number.isInteger(rounded) ? rounded : rounded.toFixed(1)}%`;
 }
 
-/** Renders a byte count as B / KB / MB / GB (binary units). */
-export function formatBytes(bytes: number): string {
-  if (!Number.isFinite(bytes) || bytes <= 0) return DASH;
-  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let value = bytes;
-  let i = 0;
-  while (value >= 1024 && i < units.length - 1) { value /= 1024; i += 1; }
-  return i === 0 ? `${Math.round(value)} B` : `${value.toFixed(1)} ${units[i]}`;
-}
-
 /** Renders an ISO timestamp in the viewer's locale, seconds included. */
 export function formatDateTime(iso: string): string {
   const ms = Date.parse(iso);

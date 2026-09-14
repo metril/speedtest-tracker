@@ -14,7 +14,6 @@ export const queryKeys = {
   runs: ['runs'] as const,
   schedules: ['schedules'] as const,
   cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
-  targetLatest: (id: number) => ['target-latest', id] as const,
   history: (id: number, range: Range) => ['history', id, range] as const,
   summary: (range: Range) => ['summary', range] as const,
   outages: (range: Range) => ['outages', range] as const,
@@ -158,16 +157,6 @@ export function useCronPreview(cron: string, timezone: string) {
     enabled: cron.trim().length > 0,
     retry: false,
     staleTime: 30_000,
-  });
-}
-
-/** useTargetLatest is the per-target latest result. Live `result` SSE
- * events patch this cache entry directly (see LiveRunProvider) instead of
- * forcing a refetch. */
-export function useTargetLatest(id: number) {
-  return useQuery({
-    queryKey: queryKeys.targetLatest(id),
-    queryFn: () => api.targetLatest(id),
   });
 }
 

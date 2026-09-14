@@ -85,10 +85,6 @@ describe('schedules client', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/runs?schedule_id=7&limit=20');
   });
 
-  it('turns a 404 from targetLatest into null', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: { code: 'not_found', message: 'no' } }, 404)));
-    await expect(api.targetLatest(3)).resolves.toBeNull();
-  });
 });
 
 describe('settings client', () => {

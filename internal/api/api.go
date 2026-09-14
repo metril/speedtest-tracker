@@ -224,7 +224,14 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 			start := time.Now()
 			defer func() {
-				logger.Info("http request",
+				level := slog.LevelInfo
+				switch {
+				case ww.Status() >= 500:
+					level = slog.LevelError
+				case ww.Status() >= 400:
+					level = slog.LevelWarn
+				}
+				logger.Log(r.Context(), level, "http request",
 					"method", r.Method,
 					"path", r.URL.Path,
 					"status", ww.Status(),

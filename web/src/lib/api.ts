@@ -282,17 +282,6 @@ export const renameTag = (id: number, name: string) =>
   request<{ id: number; name: string }>(`/tags/${id}`, { method: 'PUT', body: JSON.stringify({ name }) });
 export const deleteTag = (id: number) => request<void>(`/tags/${id}`, { method: 'DELETE' });
 
-/** targetLatest resolves to null when a target has no result yet, so
- * callers can render an empty state instead of an error. */
-export const targetLatest = async (id: number): Promise<Result | null> => {
-  try {
-    return await request<Result>(`/targets/${id}/latest`);
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 404) return null;
-    throw err;
-  }
-};
-
 /** MASKED_SECRET is what the server sends instead of a stored secret, and
  * what a form sends back to mean "leave the stored value alone". */
 export const MASKED_SECRET = '***';

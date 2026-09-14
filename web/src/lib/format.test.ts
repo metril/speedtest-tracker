@@ -62,7 +62,7 @@ describe('formatDateTime', () => {
   });
 });
 
-import { formatBytes, formatPercent } from './format';
+import { formatPercent } from './format';
 
 describe('formatPercent', () => {
   it('renders a 0..1 fraction with one decimal, dropping a trailing .0', () => {
@@ -72,17 +72,5 @@ describe('formatPercent', () => {
   });
   it('renders a dash for a non-finite value', () => {
     expect(formatPercent(Number.NaN)).toBe('—');
-  });
-});
-
-describe('formatBytes', () => {
-  it('scales to KB/MB/GB', () => {
-    expect(formatBytes(512)).toBe('512 B');
-    expect(formatBytes(2048)).toBe('2.0 KB');
-    expect(formatBytes(5 * 1024 * 1024)).toBe('5.0 MB');
-    expect(formatBytes(3 * 1024 ** 3)).toBe('3.0 GB');
-  });
-  it('renders a dash for zero or nonsense', () => {
-    expect(formatBytes(0)).toBe('—');
   });
 });

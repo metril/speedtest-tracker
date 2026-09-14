@@ -2,6 +2,7 @@ package api
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -204,5 +205,23 @@ func TestWriteErrorEnvelope(t *testing.T) {
 	}
 	if body.Error.Code != "invalid_request" || body.Error.Message != "name is required" {
 		t.Errorf("body = %+v", body.Error)
+	}
+}
+
+func TestRequestLoggerLevelsByStatus(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	h := New(Deps{Logger: logger, Pinger: stubPinger{}})
+	do(t, h, http.MethodGet, "/healthz", nil)
+	do(t, h, http.MethodGet, "/api/v1/nope", nil)
+	lines := strings.Split(strings.TrimSpace(buf.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("logged %d lines, want 2: %v", len(lines), lines)
+	}
+	if !strings.Contains(lines[0], `"level":"INFO"`) {
+		t.Errorf("2xx logged at %s, want INFO", lines[0])
+	}
+	if !strings.Contains(lines[1], `"level":"WARN"`) {
+		t.Errorf("4xx logged at %s, want WARN", lines[1])
 	}
 }

@@ -1,12 +1,14 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { lazy, Suspense } from 'react';
 import { BrowserRouter, Route, Routes } from 'react-router';
 import { Layout } from './components/Layout';
 import { ThemeProvider } from './lib/theme';
-import { Dashboard } from './pages/Dashboard';
-import { Results } from './pages/Results';
-import { Schedules } from './pages/Schedules';
-import { Settings } from './pages/Settings';
-import { Targets } from './pages/Targets';
+
+const Dashboard = lazy(() => import('./pages/Dashboard').then((m) => ({ default: m.Dashboard })));
+const Results = lazy(() => import('./pages/Results').then((m) => ({ default: m.Results })));
+const Targets = lazy(() => import('./pages/Targets').then((m) => ({ default: m.Targets })));
+const Schedules = lazy(() => import('./pages/Schedules').then((m) => ({ default: m.Schedules })));
+const Settings = lazy(() => import('./pages/Settings').then((m) => ({ default: m.Settings })));
 
 const queryClient = new QueryClient({
   defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
@@ -17,15 +19,17 @@ export function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <Routes>
-            <Route element={<Layout />}>
-              <Route index element={<Dashboard />} />
-              <Route path="results" element={<Results />} />
-              <Route path="targets" element={<Targets />} />
-              <Route path="schedules" element={<Schedules />} />
-              <Route path="settings" element={<Settings />} />
-            </Route>
-          </Routes>
+          <Suspense fallback={<div className="p-6 text-muted">Loading…</div>}>
+            <Routes>
+              <Route element={<Layout />}>
+                <Route index element={<Dashboard />} />
+                <Route path="results" element={<Results />} />
+                <Route path="targets" element={<Targets />} />
+                <Route path="schedules" element={<Schedules />} />
+                <Route path="settings" element={<Settings />} />
+              </Route>
+            </Routes>
+          </Suspense>
         </BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>

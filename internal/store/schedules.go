@@ -176,8 +176,9 @@ func (s *Store) ListSchedules(ctx context.Context) ([]Schedule, error) {
 }
 
 // attachLastRuns fills LastRun for every schedule in one query. The
-// highest run id per schedule is its newest run (ids are monotonic), so a
-// single grouped subquery replaces one lookup per row.
+// newest run is the one with the greatest started_at (ties broken by id),
+// not simply the greatest id: a backfilled or re-executed run can be
+// inserted after a run that started later.
 func (s *Store) attachLastRuns(ctx context.Context, list []Schedule) error {
 	if len(list) == 0 {
 		return nil
@@ -190,11 +191,15 @@ func (s *Store) attachLastRuns(ctx context.Context, list []Schedule) error {
 	}
 	placeholders := `(?` + strings.Repeat(",?", len(list)-1) + `)`
 	rows, err := s.Read.QueryContext(ctx, `
-		SELECT schedule_id, status, COALESCE(started_at,'')
-		FROM runs
-		WHERE id IN (SELECT MAX(id) FROM runs
-		             WHERE schedule_id IN `+placeholders+`
-		             GROUP BY schedule_id)`, args...)
+		SELECT schedule_id, status, COALESCE(started_at,'') FROM (
+			SELECT schedule_id, status, started_at,
+			       ROW_NUMBER() OVER (
+			           PARTITION BY schedule_id
+			           ORDER BY COALESCE(started_at,'') DESC, id DESC
+			       ) AS rn
+			FROM runs
+			WHERE schedule_id IN `+placeholders+`
+		) WHERE rn = 1`, args...)
 	if err != nil {
 		return fmt.Errorf("load schedule last runs: %w", err)
 	}

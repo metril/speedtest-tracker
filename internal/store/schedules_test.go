@@ -211,3 +211,41 @@ func TestListSchedulesAttachesLastRunInOneQuery(t *testing.T) {
 		t.Errorf("schedule with no runs should have a nil last_run, got %+v", byID[other].LastRun)
 	}
 }
+
+// insertRunAt inserts a run for the schedule with an explicit started_at,
+// so tests can control ordering independent of insertion (id) order.
+func insertRunAt(t *testing.T, db *Store, scheduleID int64, startedAt string) int64 {
+	t.Helper()
+	res, err := db.Write.ExecContext(context.Background(),
+		`INSERT INTO runs(schedule_id,trigger,status,started_at) VALUES(?,'manual','done',?)`,
+		scheduleID, startedAt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestLastRunUsesStartedAtNotInsertionOrder(t *testing.T) {
+	db, ids := newScheduleStore(t)
+	ctx := context.Background()
+	sid, err := db.CreateSchedule(ctx, &Schedule{
+		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: ids[:1]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Insert the later-started run first, so MAX(id) and MAX(started_at)
+	// disagree -- a re-executed or backfilled run does exactly this.
+	insertRunAt(t, db, sid, "2026-09-14T12:00:00.000Z")
+	insertRunAt(t, db, sid, "2026-09-14T09:00:00.000Z")
+	list, err := db.ListSchedules(ctx)
+	if err != nil || len(list) != 1 {
+		t.Fatal(err)
+	}
+	if list[0].LastRun == nil || list[0].LastRun.StartedAt != "2026-09-14T12:00:00.000Z" {
+		t.Fatalf("last_run = %+v, want the run with the latest started_at", list[0].LastRun)
+	}
+}
