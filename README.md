@@ -154,12 +154,52 @@ the shared chart palette.
 - `/results`, `/targets`, `/schedules` and `/runs` send an `ETag`; a matching
   `If-None-Match` gets back `304 Not Modified` with no body.
 
+## Observability
+
+- **VictoriaMetrics push** — enable under Settings → Integrations with a URL
+  like `http://victoria-metrics:8428`; results are POSTed to
+  `/api/v1/import/prometheus` with explicit millisecond timestamps. Series:
+  `speedtest_download_bps`, `speedtest_upload_bps`, `speedtest_ping_ms`,
+  `speedtest_jitter_ms`, `speedtest_packet_loss_pct`, `speedtest_run_success`,
+  `speedtest_duration_ms`; labels `target, target_id, engine, server_id,
+  server_name, isp, schedule` plus any extra labels configured in the UI.
+  SQLite stays the source of truth: while VM is down up to 200 batches are
+  buffered in memory with exponential backoff to 60s, oldest dropped first.
+- **VictoriaLogs** — enable with a URL like `http://victoria-logs:9428`; lines
+  go to `/insert/jsonline?_stream_fields=app,level&_msg_field=_msg&_time_field=_time`
+  in batches of 100 or every 2s. Logs always go to stdout as well; a VL
+  outage drops lines rather than blocking the process.
+- **`/metrics`** — off by default, toggled by Settings → Integrations →
+  *Enable /metrics*, answering 404 while disabled. Exposes
+  `speedtest_latest_*` gauges per target, `speedtest_runs_total{status}`,
+  `speedtest_runner_queue_depth{lane}`, `speedtest_summary_cache_hits_total` /
+  `_misses_total`, and the VM/VL push counters. `/healthz` is always
+  available and never gated.
+- **`/api/v1/targets/{id}/latest`** — the stable Home Assistant polling
+  endpoint, returning the latest result row for a target (404 when it has
+  none).
+- **Retention** — Settings → General sets results and runs retention in days
+  plus the prune interval (default 60 minutes). Pruning deletes in batches of
+  1000 per transaction; a run that still owns results is never pruned,
+  because `results.run_id` cascades.
+- **Docker** — `docker compose up -d` for the app alone, `docker compose
+  --profile observability up -d` to add VictoriaMetrics (`:8428`),
+  VictoriaLogs (`:9428`) and Grafana (`:3000`, VM pre-provisioned as the
+  default datasource).
+
 ## Docker
 
 ```bash
 docker run -d --name speedtest-tracker \
   -p 8080:8080 -v speedtest-data:/data \
   ghcr.io/metril/speedtest-tracker:latest
+```
+
+Or with `compose.yaml`:
+
+```bash
+docker compose up -d                          # app only, on :8080
+docker compose --profile observability up -d  # + VictoriaMetrics, VictoriaLogs, Grafana
 ```
 
 ## Development

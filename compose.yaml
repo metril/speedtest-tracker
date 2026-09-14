@@ -1,0 +1,45 @@
+services:
+  app:
+    build: .
+    image: ghcr.io/metril/speedtest-tracker:edge
+    environment:
+      ST_DB_PATH: /data/speedtest.db
+      ST_LISTEN: 0.0.0.0:8080
+    ports: ["8080:8080"]
+    volumes: ["speedtest-data:/data"]
+    restart: unless-stopped
+
+  victoria-metrics:
+    image: victoriametrics/victoria-metrics:v1.111.0
+    profiles: ["observability"]
+    command: ["-storageDataPath=/vmdata", "-retentionPeriod=12"]
+    ports: ["8428:8428"]
+    volumes: ["vm-data:/vmdata"]
+    restart: unless-stopped
+
+  victoria-logs:
+    image: victoriametrics/victoria-logs:v1.0.0-victorialogs
+    profiles: ["observability"]
+    command: ["-storageDataPath=/vldata", "-retentionPeriod=30d"]
+    ports: ["9428:9428"]
+    volumes: ["vl-data:/vldata"]
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:11.6.0
+    profiles: ["observability"]
+    depends_on: [victoria-metrics]
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+    ports: ["3000:3000"]
+    volumes:
+      - ./deploy/grafana/provisioning:/etc/grafana/provisioning:ro
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+volumes:
+  speedtest-data:
+  vm-data:
+  vl-data:
+  grafana-data:
