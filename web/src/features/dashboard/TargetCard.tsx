@@ -73,8 +73,11 @@ export function TargetCard({
           </Button>
         </div>
 
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Badge variant={badge.variant}>{badge.label}</Badge>
+          {summary.sla_compliance != null && (
+            <Badge variant="outline">SLA {Math.round(summary.sla_compliance * 100)}%</Badge>
+          )}
         </div>
 
         {!latest ? (

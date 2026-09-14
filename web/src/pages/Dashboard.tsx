@@ -16,7 +16,7 @@ import type { HistoryPoint, Range, TargetSummary, ThresholdSet } from '../lib/ap
 import { SERIES } from '../lib/chart';
 import { formatBps, formatMs } from '../lib/format';
 import {
-  queryKeys, useOutages, usePreviousSummary, useRunTarget, useSummary, useTargetHistory, useTargets,
+  queryKeys, useOutages, usePreviousSummary, useRunTarget, useSettings, useSummary, useTargetHistory, useTargets,
 } from '../lib/queries';
 
 const COLOR_CYCLE = [SERIES.download, SERIES.upload, SERIES.ping, SERIES.jitter];
@@ -219,6 +219,7 @@ export function Dashboard() {
   const summary = useSummary(range);
   const previousSummary = usePreviousSummary(range);
   const targetsQuery = useTargets();
+  const settingsQuery = useSettings();
   const run = useRunTarget();
   const { open } = useLivePanel();
   const runningTargetID = run.isPending ? run.variables : undefined;
@@ -253,7 +254,10 @@ export function Dashboard() {
 
       {summary.data && (
         <>
-          <SummaryTiles stats={summary.data} previousStats={previousSummary.data} spark={spark} />
+          <SummaryTiles
+            stats={summary.data} previousStats={previousSummary.data} spark={spark}
+            general={settingsQuery.data?.general}
+          />
 
           {summary.data.targets.length === 0 ? (
             <Card>

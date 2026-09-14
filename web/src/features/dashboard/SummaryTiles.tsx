@@ -1,4 +1,4 @@
-import type { SummaryStats } from '../../lib/api';
+import type { GeneralSettings, SummaryStats } from '../../lib/api';
 import { formatBps, formatMs, formatPercent } from '../../lib/format';
 import { SERIES } from '../../lib/chart';
 import { KpiTile } from './KpiTile';
@@ -37,10 +37,13 @@ export interface DashboardSpark {
 /** SummaryTiles shows the four headline numbers for the selected range —
  * success rate, average download, average upload and average ping — each
  * with an optional previous-period delta and range sparkline. */
-export function SummaryTiles({ stats, previousStats, spark }: {
+export function SummaryTiles({ stats, previousStats, spark, general }: {
   stats: SummaryStats;
   previousStats?: SummaryStats;
   spark?: DashboardSpark;
+  /** general is the current SLA plan speeds, used for the "Meets plan"
+   * tile's subtext. Omit if unavailable -- the tile still shows without it. */
+  general?: GeneralSettings;
 }) {
   if (stats.total_results === 0) {
     return (
@@ -62,6 +65,13 @@ export function SummaryTiles({ stats, previousStats, spark }: {
     ? weightedAvg(previousStats, (t) => t.avg_ping_ms, true) : undefined;
   const prevSuccessRate = previousStats && previousStats.total_results > 0
     ? previousStats.success_rate : undefined;
+
+  const slaCompliance = stats.sla_compliance;
+  const prevSlaCompliance = previousStats && previousStats.total_results > 0
+    ? previousStats.sla_compliance : undefined;
+  const planSubtext = general && (general.sla_download_mbps || general.sla_upload_mbps)
+    ? `${general.sla_download_mbps ?? 0}/${general.sla_upload_mbps ?? 0} Mbps plan`
+    : undefined;
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -96,6 +106,15 @@ export function SummaryTiles({ stats, previousStats, spark }: {
         delta={prevAvgPing !== undefined ? delta(avgPing, prevAvgPing) : undefined}
         favorable={false}
       />
+      {slaCompliance != null && (
+        <KpiTile
+          label="Meets plan"
+          value={formatPercent(slaCompliance)}
+          subtext={planSubtext}
+          delta={prevSlaCompliance != null ? delta(slaCompliance, prevSlaCompliance) : undefined}
+          favorable
+        />
+      )}
     </div>
   );
 }

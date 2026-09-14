@@ -157,6 +157,38 @@ describe('Settings page', () => {
     expect(put.mock.calls[0][0].integrations).toBeUndefined();
   });
 
+  it('saves the SLA plan speeds under "Plan speeds (SLA)"', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await screen.findByLabelText('Timezone');
+    await userEvent.type(screen.getByLabelText('Plan download (Mbps)'), '1000');
+    await userEvent.type(screen.getByLabelText('Plan upload (Mbps)'), '50');
+    await userEvent.click(
+      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
+    );
+    expect(put).toHaveBeenCalledWith({
+      general: expect.objectContaining({ sla_download_mbps: 1000, sla_upload_mbps: 50 }),
+    });
+  });
+
+  it('clears the SLA download plan by sending 0', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    const settings = settingsFixture();
+    settings.general.sla_download_mbps = 1000;
+    renderSettings({ put, settings });
+    await screen.findByLabelText('Timezone');
+    expect(screen.getByLabelText('Plan download (Mbps)')).toHaveValue(1000);
+    // Two "Clear" buttons exist (download, upload); the download field's
+    // one is the first in DOM order.
+    await userEvent.click(screen.getAllByRole('button', { name: 'Clear' })[0]);
+    await userEvent.click(
+      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
+    );
+    expect(put).toHaveBeenCalledWith({
+      general: expect.objectContaining({ sla_download_mbps: 0 }),
+    });
+  });
+
   it('saves an edited iperf3 server list URL, including clearing it to disable', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({ put, path: '/settings/engines' });

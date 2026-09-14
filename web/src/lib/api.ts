@@ -145,6 +145,11 @@ export interface TargetSummary {
   avg_upload_bps: number;
   avg_ping_ms: number;
   max_ping_ms: number;
+  /** sla_compliance is the fraction (0..1) of this target's successful
+   * results in range that met its resolved SLA plan speeds; null when no
+   * plan resolves for it (neither a per-target override nor the general
+   * plan) or it has no successful results in range. */
+  sla_compliance: number | null;
 }
 
 export interface SummaryStats {
@@ -154,6 +159,10 @@ export interface SummaryStats {
   total_results: number;
   total_failures: number;
   success_rate: number;
+  /** sla_compliance is the overall fraction (0..1), weighted by each
+   * target's own successful-result count; null when it resolves for no
+   * target. */
+  sla_compliance: number | null;
 }
 
 export interface Incident {
@@ -360,6 +369,12 @@ export interface GeneralSettings {
   retention_days_results: number;
   retention_days_runs: number;
   retention_prune_interval_minutes: number;
+  /** sla_download_mbps/sla_upload_mbps are the ISP-advertised plan speeds
+   * (in Mbps) used to compute the dashboard's SLA compliance tile. The
+   * server omits either field entirely from GET /settings when unset;
+   * PUT 0 (or omit) to leave/clear it -- 0 or blank means "no plan". */
+  sla_download_mbps?: number;
+  sla_upload_mbps?: number;
 }
 
 export interface EngineSettings {
@@ -393,6 +408,12 @@ export interface ThresholdSet {
   jitter_ms_max?: number | null;
   loss_pct_max?: number | null;
   notify_on_failure?: boolean | null;
+  /** sla_download_mbps/sla_upload_mbps override the general SLA plan
+   * speeds (GeneralSettings.sla_download_mbps/sla_upload_mbps) for this
+   * target only, resolved independently per field; omitted (like every
+   * other field here) means "inherit the general plan for this field". */
+  sla_download_mbps?: number | null;
+  sla_upload_mbps?: number | null;
 }
 
 export type NotifyChannelType = 'webhook' | 'ntfy' | 'apprise';

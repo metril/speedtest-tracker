@@ -280,4 +280,25 @@ describe('TargetForm', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText(/must be zero or more/i)).toBeInTheDocument();
   });
+
+  it('submits a per-target SLA plan override, omitting blank fields', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.type(screen.getByLabelText('SLA plan download override (Mbps)'), '500');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      thresholds: { sla_download_mbps: 500 },
+    }));
+  });
+
+  it('rejects a negative SLA plan override', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.type(screen.getByLabelText('SLA plan upload override (Mbps)'), '-1');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/must be zero or more/i)).toBeInTheDocument();
+  });
 });

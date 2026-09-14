@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { fieldClass, inputClass, labelClass } from './styles';
 import { Section } from './Section';
@@ -57,6 +58,48 @@ export function GeneralSection() {
         <Input id="general-prune-interval" type="number" min={1}
           value={general.retention_prune_interval_minutes}
           onChange={(e) => setGeneral({ ...general, retention_prune_interval_minutes: Number(e.target.value) })} />
+      </div>
+
+      <div className="col-span-full grid gap-3 border-t border-line pt-4">
+        <div>
+          <h3 className="text-sm font-semibold text-fg">Plan speeds (SLA)</h3>
+          <p className="text-xs text-faint">
+            Your ISP-advertised plan speeds, used to track compliance on the dashboard.
+            Leave blank (or 0) to disable.
+          </p>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className={fieldClass}>
+            <label htmlFor="general-sla-download" className={labelClass}>Plan download (Mbps)</label>
+            <div className="flex gap-2">
+              <Input id="general-sla-download" type="number" min={0}
+                value={general.sla_download_mbps ?? ''}
+                onChange={(e) => setGeneral({
+                  ...general,
+                  sla_download_mbps: e.target.value === '' ? 0 : Number(e.target.value),
+                })} />
+              <Button type="button" variant="outline" size="sm"
+                onClick={() => setGeneral({ ...general, sla_download_mbps: 0 })}>
+                Clear
+              </Button>
+            </div>
+          </div>
+          <div className={fieldClass}>
+            <label htmlFor="general-sla-upload" className={labelClass}>Plan upload (Mbps)</label>
+            <div className="flex gap-2">
+              <Input id="general-sla-upload" type="number" min={0}
+                value={general.sla_upload_mbps ?? ''}
+                onChange={(e) => setGeneral({
+                  ...general,
+                  sla_upload_mbps: e.target.value === '' ? 0 : Number(e.target.value),
+                })} />
+              <Button type="button" variant="outline" size="sm"
+                onClick={() => setGeneral({ ...general, sla_upload_mbps: 0 })}>
+                Clear
+              </Button>
+            </div>
+          </div>
+        </div>
       </div>
     </Section>
   );

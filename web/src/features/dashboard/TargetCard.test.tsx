@@ -16,6 +16,7 @@ const summary: TargetSummary = {
   count: 5, fail_count: 0, success_rate: 1,
   avg_download_bps: 110e6, min_download_bps: 90e6, max_download_bps: 130e6,
   avg_upload_bps: 28e6, avg_ping_ms: 12, max_ping_ms: 20,
+  sla_compliance: null,
 };
 
 it('shows the latest download, upload, ping and a relative time', () => {
@@ -56,4 +57,14 @@ it('flags a breached threshold', () => {
   render(<TargetCard summary={summary} spark={[]} onRun={() => {}} running={false}
     thresholds={{ ping_ms_max: 5 }} />);
   expect(screen.getByText('Threshold breached')).toBeInTheDocument();
+});
+
+it('shows an SLA badge when sla_compliance is non-null', () => {
+  render(<TargetCard summary={{ ...summary, sla_compliance: 0.974 }} spark={[]} onRun={() => {}} running={false} />);
+  expect(screen.getByText('SLA 97%')).toBeInTheDocument();
+});
+
+it('omits the SLA badge when sla_compliance is null', () => {
+  render(<TargetCard summary={summary} spark={[]} onRun={() => {}} running={false} />);
+  expect(screen.queryByText(/^SLA /)).not.toBeInTheDocument();
 });
