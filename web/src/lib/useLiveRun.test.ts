@@ -27,6 +27,10 @@ class FakeEventSource {
   }
 }
 
+function emit(type: string, data: unknown) {
+  FakeEventSource.last!.emit(type, data);
+}
+
 beforeEach(() => {
   vi.stubGlobal('EventSource', FakeEventSource);
 });
@@ -41,7 +45,7 @@ describe('useLiveRun', () => {
     expect(result.current).toBeNull();
 
     act(() => {
-      FakeEventSource.last!.emit('progress', {
+      emit('progress', {
         run_id: 5, result_id: 0, target_id: 2, engine: 'ookla',
         phase: 'download', progress: 0.4, bps: 94_000_000, ping_ms: 12.5,
       });
@@ -50,21 +54,6 @@ describe('useLiveRun', () => {
     expect(result.current).toMatchObject({
       runId: 5, targetId: 2, engine: 'ookla', phase: 'download', bps: 94_000_000,
     });
-  });
-
-  it('clears when the run reaches a terminal status', () => {
-    const { result } = renderHook(() => useLiveRun());
-    act(() => {
-      FakeEventSource.last!.emit('progress', {
-        run_id: 5, target_id: 2, engine: 'fake', phase: 'download', progress: 0.2, bps: 1,
-      });
-    });
-    expect(result.current).not.toBeNull();
-
-    act(() => {
-      FakeEventSource.last!.emit('run', { run_id: 5, status: 'done' });
-    });
-    expect(result.current).toBeNull();
   });
 
   it('closes the stream on unmount', () => {
@@ -78,9 +67,11 @@ describe('useLiveRun', () => {
     const onEvent = vi.fn();
     renderHook(() => useLiveRun({ onEvent }));
     act(() => {
-      FakeEventSource.last!.emit('result', { id: 1 });
+      emit('result', { id: 1, target_id: 2 });
     });
-    expect(onEvent).toHaveBeenCalledWith({ type: 'result' });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'result', result: expect.objectContaining({ id: 1 }),
+    }));
   });
 
   it('calls onEvent when a run reaches a terminal status, but not otherwise', () => {
@@ -88,13 +79,52 @@ describe('useLiveRun', () => {
     renderHook(() => useLiveRun({ onEvent }));
 
     act(() => {
-      FakeEventSource.last!.emit('run', { run_id: 5, status: 'running' });
+      emit('run', { run_id: 5, status: 'running', targets_total: 1, targets_done: 0 });
     });
     expect(onEvent).not.toHaveBeenCalled();
 
     act(() => {
-      FakeEventSource.last!.emit('run', { run_id: 5, status: 'canceled' });
+      emit('run', { run_id: 5, status: 'canceled', targets_total: 1, targets_done: 1 });
     });
-    expect(onEvent).toHaveBeenCalledWith({ type: 'run', status: 'canceled' });
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({ type: 'run', status: 'canceled' }));
+  });
+
+  it('keeps the finished run visible and marks it finished', async () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 50e6, ping_ms: 9 }));
+    act(() => emit('run', { run_id: 1, status: 'done', targets_total: 1, targets_done: 1 }));
+    expect(result.current?.finished).toBe(true);
+    expect(result.current?.status).toBe('done');
+    expect(result.current?.bps).toBe(50e6);
+  });
+
+  it('accumulates at most 60 throughput samples and resets them per phase', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => {
+      for (let i = 0; i < 70; i += 1) {
+        emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: (i + 1) * 1e6, ping_ms: 9 });
+      }
+    });
+    expect(result.current?.samples).toHaveLength(60);
+    expect(result.current?.samples.at(-1)).toBe(70e6);
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'upload', progress: 0.1, bps: 5e6, ping_ms: 9 }));
+    expect(result.current?.samples).toEqual([5e6]);
+  });
+
+  it('carries the stepper counts from run events', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('run', { run_id: 3, status: 'running', targets_total: 3, targets_done: 1 }));
+    act(() => emit('progress', { run_id: 3, target_id: 9, engine: 'fake', phase: 'ping', progress: 0.2, bps: 0, ping_ms: 12 }));
+    expect(result.current?.targetsTotal).toBe(3);
+    expect(result.current?.targetsDone).toBe(1);
+  });
+
+  it('hands the full result row to onEvent', () => {
+    const onEvent = vi.fn();
+    renderHook(() => useLiveRun({ onEvent }));
+    act(() => emit('result', { id: 5, target_id: 2, download_bps: 1 }));
+    expect(onEvent).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'result', result: expect.objectContaining({ id: 5 }),
+    }));
   });
 });
