@@ -215,6 +215,53 @@ func TestCreateTargetExplicitNullOptionsDefaultsToEmptyObject(t *testing.T) {
 	}
 }
 
+// TestCreateTargetPerMetricNullThresholdRoundTrips covers the per-metric
+// "disable" contract: a threshold key present with an explicit JSON null
+// (as opposed to the whole thresholds document being null, or the key
+// being absent) must be stored and echoed back with the null intact, not
+// dropped or coerced to absent.
+func TestCreateTargetPerMetricNullThresholdRoundTrips(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"thresholds": map[string]any{"ping_ms_max": nil, "download_mbps_min": 50},
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST with null ping_ms_max = %d body=%s", rec.Code, rec.Body)
+	}
+	var created store.Target
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(created.Thresholds, &got); err != nil {
+		t.Fatal(err)
+	}
+	pingRaw, present := got["ping_ms_max"]
+	if !present || pingRaw != nil {
+		t.Errorf("created thresholds = %s, want ping_ms_max present and null", created.Thresholds)
+	}
+	if got["download_mbps_min"] != float64(50) {
+		t.Errorf("created thresholds = %s, want download_mbps_min = 50", created.Thresholds)
+	}
+
+	path := "/api/v1/targets/" + itoa(created.ID)
+	rec = do(t, h, http.MethodGet, path, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET = %d body=%s", rec.Code, rec.Body)
+	}
+	var fetched store.Target
+	json.NewDecoder(rec.Body).Decode(&fetched)
+	got = nil
+	if err := json.Unmarshal(fetched.Thresholds, &got); err != nil {
+		t.Fatal(err)
+	}
+	if pingRaw, present := got["ping_ms_max"]; !present || pingRaw != nil {
+		t.Errorf("fetched thresholds = %s, want ping_ms_max present and null", fetched.Thresholds)
+	}
+}
+
 func TestCreateTargetValidation(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 

@@ -404,6 +404,12 @@ export interface IntegrationSettings {
 }
 
 export interface ThresholdSet {
+  /** download_mbps_min, upload_mbps_min, ping_ms_max, jitter_ms_max and
+   * loss_pct_max each have three states on a target: key absent means
+   * inherit the global default from Settings -> Notifications; key present
+   * with null means this metric is disabled for this target (the backend
+   * skips it entirely, regardless of the global default); key present with
+   * a number overrides the global default with that value. */
   download_mbps_min?: number | null;
   upload_mbps_min?: number | null;
   ping_ms_max?: number | null;

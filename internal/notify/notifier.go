@@ -204,14 +204,14 @@ func (n *Notifier) process(ctx context.Context, res *store.Result) {
 		return
 	}
 
-	perTarget, err := ParseThresholds(tgt.Thresholds)
+	perTarget, nulled, err := ParseThresholds(tgt.Thresholds)
 	if err != nil {
 		// A corrupt threshold document must not stop later results.
 		n.cfg.Logger.Warn("notify: bad thresholds", "target", tgt.Name, "target_id", tgt.ID, "err", err)
 		return
 	}
 
-	th := Merge(conf.DefaultThresholds, perTarget)
+	th := Merge(conf.DefaultThresholds, perTarget, nulled)
 	evals := Evaluate(res, th)
 
 	now := n.cfg.Now()
@@ -220,6 +220,41 @@ func (n *Notifier) process(ctx context.Context, res *store.Result) {
 
 	for _, e := range evals {
 		n.handleEval(ctx, conf, tgt, res, e, now, quiet, cooldown)
+	}
+	n.clearStaleState(ctx, tgt, evals)
+}
+
+// allMetrics lists every metric Evaluate can produce.
+var allMetrics = []Metric{MetricDownload, MetricUpload, MetricPing, MetricJitter, MetricLoss, MetricFailure}
+
+// clearStaleState clears any stored notify state for a metric that
+// Evaluate did not emit this round, e.g. because its threshold was just
+// disabled (set to null) or unset entirely. Without this, a metric that
+// was firing when its threshold is removed would never come back through
+// handleEval (its only caller of ClearNotifyState) to recover: the state
+// row would stay firing=1 forever, and a later re-enable could then fire a
+// stale "recovered" for a breach nobody currently observes. Cleared
+// silently: no recovery notification is delivered, since the metric is no
+// longer being evaluated at all.
+func (n *Notifier) clearStaleState(ctx context.Context, tgt *store.Target, evals []Eval) {
+	present := make(map[Metric]bool, len(evals))
+	for _, e := range evals {
+		present[e.Metric] = true
+	}
+	for _, m := range allMetrics {
+		if present[m] {
+			continue
+		}
+		metric := string(m)
+		if _, ok, err := n.cfg.Store.GetNotifyState(ctx, tgt.ID, metric); err != nil || !ok {
+			if err != nil {
+				n.cfg.Logger.Warn("notify: get stale state", "target", tgt.Name, "metric", metric, "err", err)
+			}
+			continue
+		}
+		if err := n.cfg.Store.ClearNotifyState(ctx, tgt.ID, metric); err != nil {
+			n.cfg.Logger.Warn("notify: clear stale state", "target", tgt.Name, "metric", metric, "err", err)
+		}
 	}
 }
 

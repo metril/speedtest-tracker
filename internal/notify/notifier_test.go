@@ -175,6 +175,48 @@ func TestRecoveryNotificationAndStateClear(t *testing.T) {
 	}
 }
 
+// TestDisablingMetricClearsStrandedFiringState covers a metric that is
+// firing when its threshold is disabled (set to an explicit null): since
+// Evaluate no longer emits that metric at all, handleEval (the only other
+// caller of ClearNotifyState) never runs for it and the state row would
+// otherwise stay firing=1 forever, later risking a stale "recovered" if
+// the threshold is ever re-enabled. process must clear it itself, and
+// silently (no recovery notification, since the metric isn't observed
+// anymore).
+func TestDisablingMetricClearsStrandedFiringState(t *testing.T) {
+	cfg := notifications(t, 60)
+	max := 50.0
+	cfg.DefaultThresholds = settings.Thresholds{PingMsMax: &max}
+	n, db, got, _ := newHarness(t, cfg)
+	ctx := context.Background()
+	id := seedTarget(t, db, `{}`)
+
+	breach := result(id, 100e6)
+	breach.PingMs = 200
+	n.process(ctx, breach)
+	if len(*got) != 1 || (*got)[0].Kind != "alert" {
+		t.Fatalf("first breach = %+v, want one ping alert", *got)
+	}
+	if st, ok, _ := db.GetNotifyState(ctx, id, "ping"); !ok || !st.Firing {
+		t.Fatalf("state = %+v ok %v, want firing before disabling", st, ok)
+	}
+
+	if err := db.UpdateTarget(ctx, &store.Target{
+		ID: id, Name: "Home", Engine: "librespeed", Enabled: true, Lane: "default",
+		Options: json.RawMessage(`{}`), Thresholds: json.RawMessage(`{"ping_ms_max":null}`),
+	}); err != nil {
+		t.Fatalf("disable ping threshold: %v", err)
+	}
+
+	n.process(ctx, result(id, 100e6)) // otherwise healthy result
+	if len(*got) != 1 {
+		t.Fatalf("messages = %+v, want no recovery sent for a disabled metric", *got)
+	}
+	if _, ok, _ := db.GetNotifyState(ctx, id, "ping"); ok {
+		t.Fatalf("ping state still present after its threshold was disabled")
+	}
+}
+
 func TestPerTargetThresholdsOverrideDefaults(t *testing.T) {
 	cfg := notifications(t, 60)
 	min := 500.0

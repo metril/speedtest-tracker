@@ -51,8 +51,11 @@ describe('TargetForm', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
 
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'cloudflare' } });
-    expect(screen.getByLabelText('Download sizes (bytes, comma separated)')).toBeInTheDocument();
-    expect(screen.getByLabelText('Latency samples')).toBeInTheDocument();
+    // NOTE: the cloudflare fields are being replaced concurrently (chip-based
+    // size pickers with a "Custom sizes" switch); this assertion targets the
+    // new UI and may fail until that work lands.
+    expect(screen.getByLabelText('Custom sizes')).toBeInTheDocument();
+    expect(screen.getAllByRole('checkbox', { name: '1 MB' })).toHaveLength(2);
   });
 
   it('submits name, engine, lane and typed options', () => {
@@ -256,27 +259,67 @@ describe('TargetForm', () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Min download (Mbps) mode'), 'Custom');
     await userEvent.type(screen.getByLabelText('Min download (Mbps)'), '100');
-    await userEvent.click(screen.getByLabelText('Notify on failed test'));
+    await userEvent.selectOptions(screen.getByLabelText('Notify on failed test'), 'On');
     await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       thresholds: { download_mbps_min: 100, notify_on_failure: true },
     }));
   });
 
-  it('seeds threshold fields from an existing target', async () => {
+  it('seeds threshold fields from an existing target with Custom notification on', async () => {
     wrap(<TargetForm initial={{
       id: 4, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
       thresholds: { ping_ms_max: 40 }, created_at: '', updated_at: '',
     }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
+    expect(screen.getByLabelText('Custom notification')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('Max ping (ms) mode')).toHaveValue('custom');
     expect(screen.getByLabelText('Max ping (ms)')).toHaveValue(40);
-    expect(screen.getByLabelText('Min download (Mbps)')).toHaveValue(null);
+    expect(screen.getByLabelText('Min download (Mbps) mode')).toHaveValue('inherit');
+    expect(screen.queryByLabelText('Min download (Mbps)')).not.toBeInTheDocument();
+  });
+
+  it('opens a seeded target with a disabled metric in Off mode', () => {
+    wrap(<TargetForm initial={{
+      id: 6, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      thresholds: { ping_ms_max: null }, created_at: '', updated_at: '',
+    }} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
+    expect(screen.getByLabelText('Custom notification')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('Max ping (ms) mode')).toHaveValue('off');
+    expect(screen.queryByLabelText('Max ping (ms)')).not.toBeInTheDocument();
+  });
+
+  it('submits null for a metric switched to Off', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Max ping (ms) mode'), 'Off');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      thresholds: { ping_ms_max: null },
+    }));
+  });
+
+  it('removes the key when switching a metric from Off back to Inherit', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm initial={{
+      id: 7, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      thresholds: { ping_ms_max: null }, created_at: '', updated_at: '',
+    }} onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.selectOptions(screen.getByLabelText('Max ping (ms) mode'), 'Inherit');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ thresholds: {} }));
   });
 
   it('rejects a negative threshold', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Max packet loss (%) mode'), 'Custom');
     await userEvent.type(screen.getByLabelText('Max packet loss (%)'), '-5');
     await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -287,6 +330,7 @@ describe('TargetForm', () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
     await userEvent.type(screen.getByLabelText('SLA plan download override (Mbps)'), '500');
     await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
@@ -298,9 +342,65 @@ describe('TargetForm', () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
     await userEvent.type(screen.getByLabelText('SLA plan upload override (Mbps)'), '-1');
     await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText(/must be zero or more/i)).toBeInTheDocument();
+  });
+
+  it('clears thresholds to {} when Custom notification is toggled off after typing a value', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    const toggle = screen.getByLabelText('Custom notification');
+    await userEvent.click(toggle);
+    await userEvent.selectOptions(screen.getByLabelText('Min download (Mbps) mode'), 'Custom');
+    await userEvent.type(screen.getByLabelText('Min download (Mbps)'), '100');
+    await userEvent.click(toggle);
+    expect(screen.queryByLabelText('Min download (Mbps)')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ thresholds: {} }));
+  });
+
+  it('submits {} when Custom notification is toggled on without entering anything', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    expect(screen.getByText(/still follows the global defaults/i)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ thresholds: {} }));
+  });
+
+  it('submits notify_on_failure: false when the failure select is set to Off', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Notify on failed test'), 'Off');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      thresholds: { notify_on_failure: false },
+    }));
+  });
+
+  it('omits notify_on_failure when the failure select is set back to Inherit', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Notify on failed test'), 'Off');
+    await userEvent.selectOptions(screen.getByLabelText('Notify on failed test'), 'Inherit');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ thresholds: {} }));
+  });
+
+  it('shows a seeded notify_on_failure: false target with the failure select set to Off', async () => {
+    wrap(<TargetForm initial={{
+      id: 5, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      thresholds: { notify_on_failure: false }, created_at: '', updated_at: '',
+    }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
+    expect(screen.getByLabelText('Notify on failed test')).toHaveValue('false');
   });
 });

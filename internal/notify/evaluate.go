@@ -36,24 +36,57 @@ type Eval struct {
 	Unit     string
 }
 
-// ParseThresholds decodes raw into a Thresholds value. Empty, whitespace-only
-// or "null" input returns the zero value (nothing set) and a nil error.
-func ParseThresholds(raw json.RawMessage) (settings.Thresholds, error) {
+// ParseThresholds decodes raw into a Thresholds value plus the set of JSON
+// field names that were explicitly set to null (as opposed to merely
+// absent). A per-target override document uses this distinction: an absent
+// key inherits the global default, while an explicit null (e.g.
+// {"ping_ms_max": null}) disables that metric for the target regardless of
+// the default. Empty, whitespace-only or top-level "null" input returns the
+// zero value, a nil set and a nil error.
+func ParseThresholds(raw json.RawMessage) (settings.Thresholds, map[string]bool, error) {
 	trimmed := bytes.TrimSpace(raw)
 	if len(trimmed) == 0 || string(trimmed) == "null" {
-		return settings.Thresholds{}, nil
+		return settings.Thresholds{}, nil, nil
 	}
 	var t settings.Thresholds
 	if err := json.Unmarshal(trimmed, &t); err != nil {
-		return settings.Thresholds{}, err
+		return settings.Thresholds{}, nil, err
 	}
-	return t, nil
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(trimmed, &fields); err != nil {
+		return settings.Thresholds{}, nil, err
+	}
+	var nulled map[string]bool
+	for k, v := range fields {
+		if bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
+			if nulled == nil {
+				nulled = map[string]bool{}
+			}
+			nulled[k] = true
+		}
+	}
+	return t, nulled, nil
+}
+
+// nullableFields clears one Thresholds field, keyed by its JSON name. Only
+// the fields with per-target "disable" semantics are included; the SLA
+// fields keep their existing "null means inherit" behavior and are handled
+// separately (see internal/store/summary.go's resolvePlan).
+var nullableFields = map[string]func(*settings.Thresholds){
+	"download_mbps_min": func(t *settings.Thresholds) { t.DownloadMbpsMin = nil },
+	"upload_mbps_min":   func(t *settings.Thresholds) { t.UploadMbpsMin = nil },
+	"ping_ms_max":       func(t *settings.Thresholds) { t.PingMsMax = nil },
+	"jitter_ms_max":     func(t *settings.Thresholds) { t.JitterMsMax = nil },
+	"loss_pct_max":      func(t *settings.Thresholds) { t.LossPctMax = nil },
+	"notify_on_failure": func(t *settings.Thresholds) { t.NotifyOnFailure = nil },
 }
 
 // Merge layers override on top of base: any field set (non-nil) in override
-// replaces the corresponding base field, and unset fields fall through to
-// base. Neither argument is mutated.
-func Merge(base, override settings.Thresholds) settings.Thresholds {
+// replaces the corresponding base field, unset fields fall through to base,
+// and any field named in nulled (from ParseThresholds) is forced to nil
+// regardless of base, disabling that metric for the target. Neither base
+// nor override is mutated.
+func Merge(base, override settings.Thresholds, nulled map[string]bool) settings.Thresholds {
 	merged := base
 	if override.DownloadMbpsMin != nil {
 		merged.DownloadMbpsMin = override.DownloadMbpsMin
@@ -72,6 +105,11 @@ func Merge(base, override settings.Thresholds) settings.Thresholds {
 	}
 	if override.NotifyOnFailure != nil {
 		merged.NotifyOnFailure = override.NotifyOnFailure
+	}
+	for k := range nulled {
+		if clear, ok := nullableFields[k]; ok {
+			clear(&merged)
+		}
 	}
 	return merged
 }

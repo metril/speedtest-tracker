@@ -35,6 +35,9 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
 
   const nameInvalid = name.trim() === '';
   const optionsError = validateEngineOptions(engine, options);
+  // thresholds is {} whenever Custom notification is off, and
+  // validateThresholds({}) is always undefined, so thresholdsError can only
+  // surface while ThresholdFields' Custom notification toggle is on.
   const thresholdsError = validateThresholds(thresholds);
 
   return (

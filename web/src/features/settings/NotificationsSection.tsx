@@ -76,6 +76,7 @@ export function NotificationsSection() {
         <ThresholdFields
           value={notifications.default_thresholds}
           onChange={(next) => setNotifications({ ...notifications, default_thresholds: next })}
+          allowDisable={false}
         />
       </div>
     </Section>
