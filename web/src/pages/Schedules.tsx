@@ -1,4 +1,10 @@
 import { Fragment, useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ScheduleForm } from '../features/schedules/ScheduleForm';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { Schedule, ScheduleInput, ScheduleRun, ScheduleSaved } from '../lib/api';
@@ -37,6 +43,7 @@ export function Schedules() {
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [warnings, setWarnings] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [confirmDelete, setConfirmDelete] = useState<Schedule | null>(null);
   const targetByID = new Map((targets.data ?? []).map((t) => [t.id, t]));
 
   const toggleExpanded = (id: number) => {
@@ -66,10 +73,9 @@ export function Schedules() {
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Schedules</h1>
         {editing.mode === 'none' && (
-          <button className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90"
-            onClick={() => { setWarnings([]); setEditing({ mode: 'new' }); }}>
+          <Button type="button" onClick={() => { setWarnings([]); setEditing({ mode: 'new' }); }}>
             New schedule
-          </button>
+          </Button>
         )}
       </header>
 
@@ -103,75 +109,85 @@ export function Schedules() {
       )}
 
       {schedules.data && schedules.data.length > 0 && (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
-              <th className="py-2 pr-3 font-medium">Name</th>
-              <th className="py-2 pr-3 font-medium">Cron</th>
-              <th className="py-2 pr-3 font-medium">Next run</th>
-              <th className="py-2 pr-3 font-medium">Last run</th>
-              <th className="py-2 pr-3 font-medium">Targets</th>
-              <th className="py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {schedules.data.map((s) => (
-              <Fragment key={s.id}>
-                <tr className="border-b border-line hover:bg-raised">
-                  <td className="py-2 pr-3 text-fg">
-                    {s.name}
-                    {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}
-                  </td>
-                  <td className="py-2 pr-3 font-mono text-xs text-muted">{s.cron}</td>
-                  <td className="py-2 pr-3 text-muted">
-                    {s.next_run ? formatDateTime(s.next_run) : '—'}
-                    <span className="ml-2 text-xs text-faint">{s.timezone}</span>
-                  </td>
-                  <td className="py-2 pr-3"><LastRun last={s.last_run} /></td>
-                  <td className="py-2 pr-3">
-                    <button type="button" className="text-muted underline decoration-dotted hover:text-fg"
-                      onClick={() => toggleExpanded(s.id)}>
-                      {s.target_ids.length}
-                    </button>
-                  </td>
-                  <td className="py-2 text-right">
-                    <div className="flex justify-end gap-2">
-                      <button
-                        className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
-                        disabled={run.isPending && run.variables === s.id}
-                        onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
-                        Run now
+        <div className="overflow-x-auto rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Cron</TableHead>
+                <TableHead>Next run</TableHead>
+                <TableHead>Last run</TableHead>
+                <TableHead>Targets</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {schedules.data.map((s) => (
+                <Fragment key={s.id}>
+                  <TableRow>
+                    <TableCell className="text-fg">
+                      {s.name}
+                      {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}
+                    </TableCell>
+                    <TableCell className="font-mono text-xs text-muted">{s.cron}</TableCell>
+                    <TableCell className="text-muted">
+                      {s.next_run ? formatDateTime(s.next_run) : '—'}
+                      <span className="ml-2 text-xs text-faint">{s.timezone}</span>
+                    </TableCell>
+                    <TableCell><LastRun last={s.last_run} /></TableCell>
+                    <TableCell>
+                      <button type="button" className="text-muted underline decoration-dotted hover:text-fg"
+                        onClick={() => toggleExpanded(s.id)}>
+                        {s.target_ids.length}
                       </button>
-                      <button className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
-                        onClick={() => { setWarnings([]); setEditing({ mode: 'edit', schedule: s }); }}>
-                        Edit
-                      </button>
-                      <button className="rounded border border-line px-2 py-1 text-xs text-bad hover:bg-bad/20"
-                        onClick={() => { if (window.confirm(`Delete schedule "${s.name}"?`)) remove.mutate(s.id); }}>
-                        Delete
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-                {expanded.has(s.id) && (
-                  <tr className="border-b border-line bg-raised/50">
-                    <td colSpan={6} className="py-2 pr-3">
-                      <div className="flex flex-wrap gap-1.5">
-                        {s.target_ids.length === 0 && <span className="text-xs text-faint">No targets.</span>}
-                        {s.target_ids.map((id) => (
-                          <span key={id} className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
-                            {targetByID.get(id)?.name ?? `#${id}`}
-                          </span>
-                        ))}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button
+                          type="button" variant="outline" size="sm"
+                          disabled={run.isPending && run.variables === s.id}
+                          onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
+                          Run now
+                        </Button>
+                        <Button type="button" variant="outline" size="sm"
+                          onClick={() => { setWarnings([]); setEditing({ mode: 'edit', schedule: s }); }}>
+                          Edit
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" className="text-bad hover:bg-bad/10"
+                          onClick={() => setConfirmDelete(s)}>
+                          Delete
+                        </Button>
                       </div>
-                    </td>
-                  </tr>
-                )}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
+                    </TableCell>
+                  </TableRow>
+                  {expanded.has(s.id) && (
+                    <TableRow className="bg-raised/50 hover:bg-raised/50">
+                      <TableCell colSpan={6}>
+                        <div className="flex flex-wrap gap-1.5">
+                          {s.target_ids.length === 0 && <span className="text-xs text-faint">No targets.</span>}
+                          {s.target_ids.map((id) => (
+                            <Badge key={id} variant="outline" className="rounded-full font-normal">
+                              {targetByID.get(id)?.name ?? `#${id}`}
+                            </Badge>
+                          ))}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </Fragment>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(v) => { if (!v) setConfirmDelete(null); }}
+        title={confirmDelete ? `Delete schedule "${confirmDelete.name}"?` : ''}
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDelete) remove.mutate(confirmDelete.id); }}
+      />
     </section>
   );
 }

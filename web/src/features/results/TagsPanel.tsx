@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ApiError } from '../../lib/api';
 import { useDeleteTag, useRenameTag, useTags } from '../../lib/queries';
+
+type Tag = { id: number; name: string };
 
 /** TagsPanel is a small management panel for the result tags: rename inline
  * or delete (with confirmation). */
@@ -11,6 +14,7 @@ export function TagsPanel() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Tag | null>(null);
 
   // The tag being edited can vanish out from under the panel (deleted
   // elsewhere, or its own delete confirmed while renaming in another tab's
@@ -99,9 +103,7 @@ export function TagsPanel() {
                 type="button"
                 aria-label={`Delete tag ${t.name}`}
                 className="text-muted hover:text-bad"
-                onClick={() => {
-                  if (window.confirm(`Delete tag "${t.name}"?`)) remove.mutate(t.id);
-                }}
+                onClick={() => setConfirmDelete(t)}
               >
                 ×
               </button>
@@ -109,6 +111,14 @@ export function TagsPanel() {
           )
         ))}
       </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(v) => { if (!v) setConfirmDelete(null); }}
+        title={confirmDelete ? `Delete tag "${confirmDelete.name}"?` : ''}
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDelete) remove.mutate(confirmDelete.id); }}
+      />
     </section>
   );
 }

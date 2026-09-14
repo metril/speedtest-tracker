@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import {
+  render, screen, waitFor, within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import * as api from '../../lib/api';
@@ -29,9 +31,10 @@ it('renames a tag', async () => {
 
 it('deletes a tag after confirmation', async () => {
   const remove = vi.spyOn(api, 'deleteTag').mockResolvedValue(undefined);
-  vi.spyOn(window, 'confirm').mockReturnValue(true);
   wrap(<TagsPanel />);
   await userEvent.click(await screen.findByRole('button', { name: /delete tag wifi/i }));
+  const dialog = await screen.findByRole('dialog');
+  await userEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
   await waitFor(() => expect(remove).toHaveBeenCalledWith(2));
 });
 

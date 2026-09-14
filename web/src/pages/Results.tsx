@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { ResultFiltersBar } from '../features/results/ResultFilters';
 import { ResultsTable } from '../features/results/ResultsTable';
 import { TagsPanel } from '../features/results/TagsPanel';
@@ -27,13 +28,9 @@ export function Results() {
         <h1 className="text-xl font-semibold tracking-tight">Results</h1>
         <div className="flex items-center gap-3">
           <span className="text-sm text-faint">{rows.length} loaded</span>
-          <a
-            className="rounded border border-line px-3 py-1.5 text-sm text-muted hover:text-fg"
-            href={resultsCsvUrl(filters)}
-            download
-          >
-            Export CSV
-          </a>
+          <Button asChild variant="outline" size="sm">
+            <a href={resultsCsvUrl(filters)} download>Export CSV</a>
+          </Button>
         </div>
       </header>
 
@@ -64,13 +61,13 @@ export function Results() {
       )}
 
       {results.hasNextPage && (
-        <button
-          className="mx-auto rounded border border-line px-4 py-1.5 text-sm text-muted hover:bg-raised disabled:opacity-50"
+        <Button
+          type="button" variant="outline" size="sm" className="mx-auto"
           disabled={results.isFetchingNextPage}
           onClick={() => results.fetchNextPage()}
         >
           {results.isFetchingNextPage ? 'Loading…' : 'Load more'}
-        </button>
+        </Button>
       )}
     </section>
   );

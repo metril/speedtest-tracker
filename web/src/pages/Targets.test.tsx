@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import {
+  fireEvent, render, screen, waitFor, within,
+} from '@testing-library/react';
 import type { ReactNode } from 'react';
 import {
   afterEach, beforeEach, describe, expect, it, vi,
@@ -40,7 +42,7 @@ afterEach(() => {
 });
 
 describe('Targets page delete confirmation', () => {
-  it('does not delete when the confirmation is declined', async () => {
+  it('does not delete when the confirmation dialog is canceled', async () => {
     const targets = [target()];
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
@@ -49,13 +51,15 @@ describe('Targets page delete confirmation', () => {
       if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       throw new Error(`unexpected fetch: ${url}`);
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
 
     wrap(<Targets />);
     await screen.findByText('home');
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
-    expect(window.confirm).toHaveBeenCalled();
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     // Only the GETs (targets list + recently-deleted list) happened — no
     // DELETE was issued.
     expect(fetchMock).not.toHaveBeenCalledWith(
@@ -64,7 +68,7 @@ describe('Targets page delete confirmation', () => {
     );
   });
 
-  it('deletes when the confirmation is accepted', async () => {
+  it('deletes when the confirmation dialog is accepted', async () => {
     const targets = [target()];
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
@@ -74,12 +78,13 @@ describe('Targets page delete confirmation', () => {
       if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       return jsonResponse(targets);
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     wrap(<Targets />);
     await screen.findByText('home');
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -112,7 +117,6 @@ describe('Targets page delete confirmation', () => {
       if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       throw new Error(`unexpected fetch: ${url}`);
     });
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
 
     wrap(<Targets />);
     await screen.findByText('home');
@@ -121,6 +125,8 @@ describe('Targets page delete confirmation', () => {
     expect(screen.getByRole('button', { name: /Recently deleted/ })).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     const toggle = await screen.findByRole('button', { name: /Recently deleted \(1\)/ });
     expect(toggle).not.toBeDisabled();

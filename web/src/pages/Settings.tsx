@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { LabelsEditor } from '../components/LabelsEditor';
 import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
 import { ChannelEditor } from '../features/settings/ChannelEditor';
@@ -32,17 +33,21 @@ function Section({
   children: ReactNode;
 }) {
   return (
-    <section aria-labelledby={id} className="space-y-4 rounded-lg border border-line bg-surface p-4">
-      <h2 id={id} className="text-lg font-semibold text-fg">{title}</h2>
-      <div className="grid gap-4">{children}</div>
-      <div className="flex items-center gap-3">
-        <button type="button" className={buttonClass} disabled={saving} onClick={onSave}>
-          Save {title}
-        </button>
-        {saved && <p className="text-sm text-ok">Saved</p>}
-      </div>
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
-    </section>
+    <Card aria-labelledby={id} role="region" className="space-y-4">
+      <CardHeader className="pb-0">
+        <CardTitle id={id} className="text-lg">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="grid gap-4">
+        {children}
+        <div className="flex items-center gap-3">
+          <button type="button" className={buttonClass} disabled={saving} onClick={onSave}>
+            Save {title}
+          </button>
+          {saved && <p className="text-sm text-ok">Saved</p>}
+        </div>
+        {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+      </CardContent>
+    </Card>
   );
 }
 

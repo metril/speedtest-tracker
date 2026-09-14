@@ -1,4 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import {
+  fireEvent, render, screen, waitFor, within,
+} from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Result } from '../../lib/api';
 import { ResultsTable } from './ResultsTable';
@@ -41,27 +43,29 @@ afterEach(() => {
 });
 
 describe('ResultsTable delete confirmation', () => {
-  it('does not call onDelete when the confirmation is canceled', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(false);
+  it('does not call onDelete when the confirmation dialog is canceled', async () => {
     const onDelete = vi.fn();
     render(
       <ResultsTable rows={[makeResult()]} onDelete={onDelete} onReexecute={vi.fn()} onTag={vi.fn()} />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Delete result for/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Cancel' }));
 
-    expect(window.confirm).toHaveBeenCalled();
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(onDelete).not.toHaveBeenCalled();
   });
 
-  it('calls onDelete when the confirmation is accepted', async () => {
-    vi.spyOn(window, 'confirm').mockReturnValue(true);
+  it('calls onDelete when the confirmation dialog is accepted', async () => {
     const onDelete = vi.fn();
     render(
       <ResultsTable rows={[makeResult({ id: 42 })]} onDelete={onDelete} onReexecute={vi.fn()} onTag={vi.fn()} />,
     );
 
     fireEvent.click(screen.getByRole('button', { name: /Delete result for/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
 
     expect(onDelete).toHaveBeenCalledWith(42);
   });

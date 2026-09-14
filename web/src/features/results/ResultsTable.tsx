@@ -1,5 +1,6 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useState } from 'react';
+import { ConfirmDialog } from '../../components/ConfirmDialog';
 import type { Result } from '../../lib/api';
 import { formatBps, formatDateTime, formatMs, formatRelative } from '../../lib/format';
 
@@ -17,6 +18,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [tagging, setTagging] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<Result | null>(null);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -26,7 +28,8 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
   });
 
   return (
-    <div className="rounded border border-line" role="table" aria-label="Results">
+    <div className="overflow-x-auto rounded border border-line">
+      <div className="min-w-[640px]" role="table" aria-label="Results">
       <div
         role="row"
         className="grid grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] gap-2 border-b border-line px-3 py-2 text-xs uppercase tracking-wide text-faint"
@@ -93,9 +96,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                     <button
                       className="text-bad hover:opacity-80"
                       aria-label={`Delete result for ${r.target_name}`}
-                      onClick={() => {
-                        if (window.confirm(`Delete this result for ${r.target_name}?`)) onDelete(r.id);
-                      }}
+                      onClick={() => setConfirmDelete(r)}
                     >
                       del
                     </button>
@@ -106,6 +107,15 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
           })}
         </div>
       </div>
+    </div>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(v) => { if (!v) setConfirmDelete(null); }}
+        title={confirmDelete ? `Delete this result for ${confirmDelete.target_name}?` : ''}
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDelete) onDelete(confirmDelete.id); }}
+      />
     </div>
   );
 }

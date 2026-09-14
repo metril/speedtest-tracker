@@ -1,4 +1,10 @@
 import { useState } from 'react';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import {
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
+} from '@/components/ui/table';
+import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TargetForm } from '../features/targets/TargetForm';
 import { HistoryDialog } from '../features/targets/HistoryDialog';
 import { useLivePanel } from '../features/live/LiveRunProvider';
@@ -31,36 +37,38 @@ function RecentlyDeleted() {
       </button>
 
       {expanded && count > 0 && (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
-              <th className="py-2 pr-3 font-medium">Name</th>
-              <th className="py-2 pr-3 font-medium">Engine</th>
-              <th className="py-2 pr-3 font-medium">Lane</th>
-              <th className="py-2 pr-3 font-medium">Deleted</th>
-              <th className="py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deleted.data!.map((d) => (
-              <tr key={d.id} className="border-b border-line">
-                <td className="py-2 pr-3 text-fg">{d.name}</td>
-                <td className="py-2 pr-3 text-muted">{d.engine}</td>
-                <td className="py-2 pr-3 text-muted">{d.lane}</td>
-                <td className="py-2 pr-3 text-muted">{new Date(d.deleted_at).toLocaleString()}</td>
-                <td className="py-2 text-right">
-                  <button
-                    className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
-                    disabled={restore.isPending}
-                    onClick={() => restore.mutate(d.id)}
-                  >
-                    {restore.isPending ? 'Restoring…' : 'Restore'}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className="overflow-x-auto rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Engine</TableHead>
+                <TableHead>Lane</TableHead>
+                <TableHead>Deleted</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {deleted.data!.map((d) => (
+                <TableRow key={d.id}>
+                  <TableCell className="text-fg">{d.name}</TableCell>
+                  <TableCell className="text-muted">{d.engine}</TableCell>
+                  <TableCell className="text-muted">{d.lane}</TableCell>
+                  <TableCell className="text-muted">{new Date(d.deleted_at).toLocaleString()}</TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      type="button" variant="outline" size="sm"
+                      disabled={restore.isPending}
+                      onClick={() => restore.mutate(d.id)}
+                    >
+                      {restore.isPending ? 'Restoring…' : 'Restore'}
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
     </section>
   );
@@ -79,6 +87,7 @@ export function Targets() {
   const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [notice, setNotice] = useState('');
+  const [confirmDelete, setConfirmDelete] = useState<Target | null>(null);
   // Reverse map: target id -> names of schedules that include it, built
   // from the schedules' own target_ids rather than a per-target fetch.
   const schedulesByTarget = new Map<number, string[]>();
@@ -112,12 +121,7 @@ export function Targets() {
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Targets</h1>
         {editing.mode === 'none' && (
-          <button
-            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90"
-            onClick={() => setEditing({ mode: 'new' })}
-          >
-            New target
-          </button>
+          <Button type="button" onClick={() => setEditing({ mode: 'new' })}>New target</Button>
         )}
       </header>
 
@@ -145,72 +149,72 @@ export function Targets() {
       )}
 
       {targets.data && targets.data.length > 0 && (
-        <table className="w-full border-collapse text-sm">
-          <thead>
-            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
-              <th className="py-2 pr-3 font-medium">Name</th>
-              <th className="py-2 pr-3 font-medium">Engine</th>
-              <th className="py-2 pr-3 font-medium">Lane</th>
-              <th className="py-2 pr-3 font-medium">State</th>
-              <th className="py-2 pr-3 font-medium">Schedules</th>
-              <th className="py-2 text-right font-medium">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {targets.data.map((t) => (
-              <tr key={t.id} className="border-b border-line hover:bg-raised">
-                <td className="py-2 pr-3 text-fg">{t.name}</td>
-                <td className="py-2 pr-3">
-                  <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs uppercase text-muted">
-                    {t.engine}
-                  </span>
-                </td>
-                <td className="py-2 pr-3 text-muted">{t.lane}</td>
-                <td className="py-2 pr-3">
-                  <span className={t.enabled ? 'text-ok' : 'text-faint'}>
-                    {t.enabled ? 'enabled' : 'disabled'}
-                  </span>
-                </td>
-                <td className="py-2 pr-3 text-muted">
-                  {(schedulesByTarget.get(t.id) ?? []).join(', ') || '—'}
-                </td>
-                <td className="py-2 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
-                      disabled={runningTargetID === t.id}
-                      onClick={() =>
-                        run.mutate(t.id, {
-                          onSuccess: (res) => { setNotice(`Queued run #${res.run_id} for ${t.name}`); open(); },
-                        })
-                      }
-                    >
-                      {runningTargetID === t.id ? 'Running…' : 'Run now'}
-                    </button>
-                    <button
-                      className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
-                      onClick={() => setEditing({ mode: 'edit', target: t })}
-                    >
-                      Edit
-                    </button>
-                    <HistoryDialog target={t} />
-                    <button
-                      className="rounded border border-bad px-2 py-1 text-xs text-bad hover:bg-bad/20"
-                      onClick={() => {
-                        if (window.confirm(`Delete target "${t.name}"? This cannot be undone.`)) {
-                          remove.mutate(t.id);
+        <div className="overflow-x-auto rounded-md border border-border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Name</TableHead>
+                <TableHead>Engine</TableHead>
+                <TableHead>Lane</TableHead>
+                <TableHead>State</TableHead>
+                <TableHead>Schedules</TableHead>
+                <TableHead className="text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {targets.data.map((t) => (
+                <TableRow key={t.id}>
+                  <TableCell className="text-fg">{t.name}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="font-mono uppercase">{t.engine}</Badge>
+                  </TableCell>
+                  <TableCell className="text-muted">{t.lane}</TableCell>
+                  <TableCell>
+                    <span className={t.enabled ? 'text-ok' : 'text-faint'}>
+                      {t.enabled ? 'enabled' : 'disabled'}
+                    </span>
+                  </TableCell>
+                  <TableCell className="text-muted">
+                    {(schedulesByTarget.get(t.id) ?? []).join(', ') || '—'}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <div className="flex flex-wrap justify-end gap-2">
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        disabled={runningTargetID === t.id}
+                        onClick={() =>
+                          run.mutate(t.id, {
+                            onSuccess: (res) => { setNotice(`Queued run #${res.run_id} for ${t.name}`); open(); },
+                          })
                         }
-                      }}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+                      >
+                        {runningTargetID === t.id ? 'Running…' : 'Run now'}
+                      </Button>
+                      <Button type="button" variant="outline" size="sm" onClick={() => setEditing({ mode: 'edit', target: t })}>
+                        Edit
+                      </Button>
+                      <HistoryDialog target={t} />
+                      <Button type="button" variant="outline" size="sm" className="text-bad hover:bg-bad/10"
+                        onClick={() => setConfirmDelete(t)}>
+                        Delete
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
       )}
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        onOpenChange={(v) => { if (!v) setConfirmDelete(null); }}
+        title={confirmDelete ? `Delete target "${confirmDelete.name}"?` : ''}
+        description="This cannot be undone, but the target's history stays in Recently deleted for restore."
+        confirmLabel="Delete"
+        onConfirm={() => { if (confirmDelete) remove.mutate(confirmDelete.id); }}
+      />
 
       <RecentlyDeleted />
     </section>
