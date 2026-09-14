@@ -141,6 +141,9 @@ func TestEnginesDefaults(t *testing.T) {
 	if got.ServerListTTLSeconds != 86400 {
 		t.Errorf("ttl = %d, want 86400", got.ServerListTTLSeconds)
 	}
+	if got.Iperf3ListURL != "https://export.iperf3serverlist.net/listed_iperf3_servers.json" {
+		t.Errorf("iperf3_list_url = %q, want the default feed URL", got.Iperf3ListURL)
+	}
 	for name, raw := range map[string]json.RawMessage{
 		"ookla":      got.DefaultOoklaOptions,
 		"cloudflare": got.DefaultCloudflareOptions,
@@ -218,6 +221,32 @@ func TestGeneralPruneIntervalDefault(t *testing.T) {
 	}
 	if g.RetentionDaysResults != 90 || g.RetentionDaysRuns != 90 {
 		t.Fatalf("retention = %d/%d, want 90/90", g.RetentionDaysResults, g.RetentionDaysRuns)
+	}
+}
+
+func TestEnginesIperf3ListURLRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if err := s.Set(ctx, KeyIperf3ListURL, ""); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, err := s.Engines(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Iperf3ListURL != "" {
+		t.Errorf("iperf3_list_url = %q, want empty (disabled)", got.Iperf3ListURL)
+	}
+
+	if err := s.Set(ctx, KeyIperf3ListURL, "https://example.test/servers.json"); err != nil {
+		t.Fatalf("Set: %v", err)
+	}
+	got, err = s.Engines(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Iperf3ListURL != "https://example.test/servers.json" {
+		t.Errorf("iperf3_list_url = %q, want the custom URL", got.Iperf3ListURL)
 	}
 }
 

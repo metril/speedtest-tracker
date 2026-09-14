@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 const iperf3ServerColumns = `id,host,port,options,supports_reverse,supports_udp,gbs,continent,country,site,provider`
@@ -103,7 +104,7 @@ func (s *Store) SearchIperf3Servers(ctx context.Context, q string, limit int) ([
 		rows, err = s.Read.QueryContext(ctx,
 			`SELECT `+iperf3ServerColumns+` FROM iperf3_servers ORDER BY host, port LIMIT ?`, limit)
 	} else {
-		like := "%" + q + "%"
+		like := "%" + escapeLike(q) + "%"
 		rows, err = s.Read.QueryContext(ctx, `
 			SELECT `+iperf3ServerColumns+` FROM iperf3_servers
 			WHERE host LIKE ? ESCAPE '\' COLLATE NOCASE
@@ -129,6 +130,14 @@ func (s *Store) SearchIperf3Servers(ctx context.Context, q string, limit int) ([
 		return nil, fmt.Errorf("search iperf3 servers: %w", err)
 	}
 	return out, nil
+}
+
+// escapeLike escapes the SQL LIKE metacharacters %, _ and the escape
+// character \ itself in q, so a query containing one of them is matched
+// literally rather than as a wildcard (the callers use ESCAPE '\').
+func escapeLike(q string) string {
+	r := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return r.Replace(q)
 }
 
 // CountIperf3Servers returns the total number of cached servers,

@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 )
@@ -29,6 +31,67 @@ const (
 	defaultOoklaSearchLimit = 20
 	maxOoklaSearchLimit     = 200
 )
+
+// RateLimiter gates remote Ookla searches. Allow reports whether a remote
+// search may proceed right now, consuming a token if so.
+type RateLimiter interface {
+	Allow() bool
+}
+
+// ooklaLimiterBurst and ooklaLimiterRefillPerSecond size the default
+// per-process token-bucket limiter NewOoklaLimiter builds: a burst of 10
+// remote searches, refilling at 1/s — generous for interactive typing in
+// the server picker, but enough to stop a runaway client (or several)
+// from hammering speedtest.net.
+const (
+	ooklaLimiterBurst           = 10
+	ooklaLimiterRefillPerSecond = 1.0
+)
+
+// tokenBucketLimiter is a small, dependency-free token-bucket rate
+// limiter (a stand-in for golang.org/x/time/rate.Limiter, which is not a
+// project dependency). The zero value is not usable; construct with
+// NewOoklaLimiter.
+type tokenBucketLimiter struct {
+	mu           sync.Mutex
+	tokens       float64
+	burst        float64
+	refillPerSec float64
+	last         time.Time
+	now          func() time.Time
+}
+
+// NewOoklaLimiter returns a RateLimiter sized for GET /ookla/servers'
+// remote search: burst 10, refill 1/s. Intended to be constructed once
+// per process and shared across requests via Deps.OoklaLimiter.
+func NewOoklaLimiter() RateLimiter {
+	return &tokenBucketLimiter{
+		tokens: ooklaLimiterBurst, burst: ooklaLimiterBurst, refillPerSec: ooklaLimiterRefillPerSecond,
+		now: time.Now,
+	}
+}
+
+// Allow reports whether a call may proceed right now, consuming one token
+// if so.
+func (l *tokenBucketLimiter) Allow() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	now := l.now()
+	if !l.last.IsZero() {
+		if elapsed := now.Sub(l.last).Seconds(); elapsed > 0 {
+			l.tokens += elapsed * l.refillPerSec
+			if l.tokens > l.burst {
+				l.tokens = l.burst
+			}
+		}
+	}
+	l.last = now
+	if l.tokens < 1 {
+		return false
+	}
+	l.tokens--
+	return true
+}
 
 // listOoklaServers answers GET /ookla/servers?q=&limit=. Local (`speedtest
 // -L`, filtered by matchesServer) and remote (OoklaSearch, when q is set)
@@ -73,20 +136,29 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 	var remoteAttempted bool
 	var remoteErr error
 	if q != "" && d.OoklaSearch != nil {
-		remoteAttempted = true
-		remote, err := d.OoklaSearch.Search(r.Context(), q, limit)
-		if err != nil {
-			remoteErr = err
+		if d.OoklaLimiter != nil && !d.OoklaLimiter.Allow() {
+			// Upstream protection: serve local results only, never error
+			// the request just because the limiter denied this remote
+			// search.
 			if d.Logger != nil {
-				d.Logger.Warn("ookla remote search failed", "query", q, "error", err)
+				d.Logger.Debug("ookla remote search rate limited, serving local results only", "query", q)
 			}
 		} else {
-			for _, s := range remote {
-				if seen[s.ID] {
-					continue
+			remoteAttempted = true
+			remote, err := d.OoklaSearch.Search(r.Context(), q, limit)
+			if err != nil {
+				remoteErr = err
+				if d.Logger != nil {
+					d.Logger.Warn("ookla remote search failed", "query", q, "error", err)
 				}
-				seen[s.ID] = true
-				out = append(out, s)
+			} else {
+				for _, s := range remote {
+					if seen[s.ID] {
+						continue
+					}
+					seen[s.ID] = true
+					out = append(out, s)
+				}
 			}
 		}
 	}

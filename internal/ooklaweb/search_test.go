@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -245,6 +246,60 @@ func TestHaversineKm(t *testing.T) {
 	}
 	if got := haversineKm(10, 10, 10, 10); got != 0 {
 		t.Errorf("haversineKm same point = %v, want 0", got)
+	}
+}
+
+// TestSearchSingleFlightsConcurrentIdenticalQueries covers task-1-brief
+// item 1: several concurrent Search calls for the same query (differing
+// only in case) must share one upstream request, not fire one each.
+func TestSearchSingleFlightsConcurrentIdenticalQueries(t *testing.T) {
+	var reqs int32
+	release := make(chan struct{})
+	var inFlight int32
+	sp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&reqs, 1)
+		if atomic.AddInt32(&inFlight, 1) > 1 {
+			t.Errorf("more than one request in flight concurrently")
+		}
+		<-release
+		atomic.AddInt32(&inFlight, -1)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(denverFixture))
+	}))
+	defer sp.Close()
+	geo := geoServer(t, map[string]string{})
+	defer geo.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.GeoBase = geo.URL
+
+	const n = 10
+	queries := []string{"comcast", "COMCAST", "Comcast", "comCast"}
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(q string) {
+			defer wg.Done()
+			if _, err := c.Search(context.Background(), q, 10); err != nil {
+				errs <- err
+			}
+		}(queries[i%len(queries)])
+	}
+
+	// Give every goroutine a chance to reach the singleflight/HTTP layer
+	// before releasing the one in-flight request.
+	time.Sleep(50 * time.Millisecond)
+	close(release)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("Search: %v", err)
+	}
+
+	if got := atomic.LoadInt32(&reqs); got != 1 {
+		t.Errorf("upstream received %d requests, want exactly 1 (single-flighted)", got)
 	}
 }
 

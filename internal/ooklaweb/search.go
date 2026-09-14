@@ -70,6 +70,8 @@ type Client struct {
 	mu    sync.Mutex
 	cache map[string]cacheEntry
 	now   func() time.Time
+
+	sf singleflightGroup
 }
 
 type cacheEntry struct {
@@ -118,6 +120,13 @@ type geoPoint struct {
 // keyed by the lowercased query, in a cache capped at cacheMaxEntries
 // (oldest evicted first). limit caps the number of servers returned; <= 0
 // means unbounded.
+//
+// Concurrent calls for the same lowercased query are single-flighted: only
+// one of them actually reaches speedtest.net (and, if needed, Open-Meteo);
+// the rest wait for and share its result. This protects the upstream from
+// a thundering herd of identical searches (e.g. several browser tabs
+// typing the same query) independently of the TTL cache above, which only
+// helps once a result already exists.
 func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Server, error) {
 	q = strings.TrimSpace(q)
 	if q == "" {
@@ -129,7 +138,29 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 		return capServers(servers, limit), nil
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, overallTimeout)
+	servers, err := c.sf.Do(key, func() ([]ookla.Server, error) {
+		// Re-check: a concurrent call for the same key may have already
+		// populated the cache while this call waited to become the
+		// leader (or waited on another leader that has since finished).
+		if servers, ok := c.cacheGet(key); ok {
+			return servers, nil
+		}
+		return c.searchAndCache(q, key)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return capServers(servers, limit), nil
+}
+
+// searchAndCache performs the actual direct-search(+geocode) flow for q
+// and caches the result under key. It is only ever run once per key at a
+// time, via Client.sf (see Search). It intentionally does not inherit any
+// particular caller's context — a single-flighted call is shared by every
+// concurrent caller, so it must not be cancelable by whichever caller
+// happened to start it; overallTimeout still bounds its total duration.
+func (c *Client) searchAndCache(q, key string) ([]ookla.Server, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), overallTimeout)
 	defer cancel()
 
 	servers, err := c.search(ctx, q)
@@ -158,7 +189,7 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 	}
 
 	c.cacheSet(key, servers)
-	return capServers(servers, limit), nil
+	return servers, nil
 }
 
 func applyDistances(servers []ookla.Server, point geoPoint) {

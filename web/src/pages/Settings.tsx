@@ -313,8 +313,13 @@ export function Settings() {
             <h3 className="text-sm font-semibold text-fg">iperf3 server list</h3>
             <p className="text-sm text-faint">
               A cached list of public iperf3 servers, refreshed daily, used by the target form's
-              &quot;Pick from public list&quot; picker.
+              &quot;Pick from public list&quot; picker. Clear the URL to disable the list entirely.
             </p>
+            <div className={fieldClass}>
+              <label htmlFor="engines-iperf3-list-url" className={labelClass}>iperf3 server list URL</label>
+              <input id="engines-iperf3-list-url" className={inputClass} value={engines.iperf3_list_url}
+                onChange={(e) => setEngines({ ...engines, iperf3_list_url: e.target.value })} />
+            </div>
             <Iperf3ServerListSection />
           </div>
         </Section>

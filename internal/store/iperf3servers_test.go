@@ -124,6 +124,29 @@ func TestSearchIperf3Servers(t *testing.T) {
 	}
 }
 
+// TestSearchIperf3ServersEscapesLikeWildcards is a regression test: a query
+// containing SQL LIKE metacharacters (%, _) must be matched literally, not
+// as a wildcard that could match far more than intended.
+func TestSearchIperf3ServersEscapesLikeWildcards(t *testing.T) {
+	db := newTestStore(t)
+	ctx := context.Background()
+	servers := sampleIperf3Servers()
+	servers = append(servers, Iperf3Server{Host: "literal%percent.example.net", Port: 5201, Provider: "100% Fiber"})
+	if err := db.ReplaceIperf3Servers(ctx, servers); err != nil {
+		t.Fatal(err)
+	}
+
+	// An unescaped "%" would match every row (it's already a wildcard), so
+	// this must return only the row whose provider contains a literal "%".
+	got, err := db.SearchIperf3Servers(ctx, "100%", 50)
+	if err != nil {
+		t.Fatalf("SearchIperf3Servers: %v", err)
+	}
+	if len(got) != 1 || got[0].Provider != "100% Fiber" {
+		t.Fatalf("SearchIperf3Servers(%%q=100%%) = %+v, want only the literal-%% row", got)
+	}
+}
+
 func TestReplaceIperf3ServersEmptyStillClearsTable(t *testing.T) {
 	// ReplaceIperf3Servers itself always does what it's told: callers that
 	// want to keep the existing table on an empty fetch (see

@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 )
@@ -203,6 +204,97 @@ func TestOoklaServerSearchLocalErrorWithNoSearcherIs502(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=denver", nil)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502 (local failed, no remote to fall back on)", rec.Code)
+	}
+}
+
+// denyLimiter always denies, simulating an exhausted rate limiter.
+type denyLimiter struct{ calls int }
+
+func (l *denyLimiter) Allow() bool { l.calls++; return false }
+
+// TestOoklaServerSearchRateLimiterDeniesFallsBackToLocal covers
+// task-1-brief item 1: when OoklaLimiter denies, the remote search must be
+// skipped entirely (never called), local results are still served, the
+// response is 200 (never an error), and the denial is logged at debug.
+func TestOoklaServerSearchRateLimiterDeniesFallsBackToLocal(t *testing.T) {
+	var buf bytes.Buffer
+	search := &stubSearcher{servers: []ookla.Server{{ID: "999", Name: "Should not appear"}}}
+	limiter := &denyLimiter{}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.OoklaSearch = search
+		d.OoklaLimiter = limiter
+		d.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=frank", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (limiter denial must not error)", rec.Code)
+	}
+	var got []ookla.Server
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "1" {
+		t.Fatalf("got = %+v, want local-only match", got)
+	}
+	if search.calls != 0 {
+		t.Errorf("remote search called %d times, want 0 when the limiter denies", search.calls)
+	}
+	if limiter.calls == 0 {
+		t.Error("limiter was never consulted")
+	}
+	if !strings.Contains(buf.String(), "level=DEBUG") || !strings.Contains(buf.String(), "rate limited") {
+		t.Errorf("log output = %q, want a DEBUG line about the rate limit", buf.String())
+	}
+}
+
+// allowLimiter always allows, recording how many times it was consulted.
+type allowLimiter struct{ calls int }
+
+func (l *allowLimiter) Allow() bool { l.calls++; return true }
+
+func TestOoklaServerSearchLimiterAllowsRemoteSearch(t *testing.T) {
+	search := &stubSearcher{servers: []ookla.Server{{ID: "101", Name: "Comcast"}}}
+	limiter := &allowLimiter{}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.OoklaSearch = search
+		d.OoklaLimiter = limiter
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=frank", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if search.calls != 1 {
+		t.Errorf("remote search called %d times, want 1 when the limiter allows", search.calls)
+	}
+	if limiter.calls != 1 {
+		t.Errorf("limiter consulted %d times, want 1", limiter.calls)
+	}
+}
+
+// TestTokenBucketLimiterBurstAndRefill covers task-1-brief item 1's exact
+// shape: burst 10, refill 1/s.
+func TestTokenBucketLimiterBurstAndRefill(t *testing.T) {
+	now := time.Now()
+	l := &tokenBucketLimiter{tokens: ooklaLimiterBurst, burst: ooklaLimiterBurst, refillPerSec: ooklaLimiterRefillPerSecond, now: func() time.Time { return now }}
+
+	for i := 0; i < 10; i++ {
+		if !l.Allow() {
+			t.Fatalf("call %d denied, want the initial burst of 10 to be allowed", i)
+		}
+	}
+	if l.Allow() {
+		t.Fatal("11th call within the burst allowed, want denied")
+	}
+
+	// After 1s, exactly one more token has refilled.
+	now = now.Add(1 * time.Second)
+	if !l.Allow() {
+		t.Fatal("call after 1s refill denied, want allowed")
+	}
+	if l.Allow() {
+		t.Fatal("second call right after a single 1s refill allowed, want denied")
 	}
 }
 

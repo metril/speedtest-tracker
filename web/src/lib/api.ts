@@ -361,6 +361,7 @@ export interface EngineSettings {
   default_ookla_options: Record<string, unknown>;
   default_cloudflare_options: Record<string, unknown>;
   default_iperf3_options: Record<string, unknown>;
+  iperf3_list_url: string;
 }
 
 export interface IntegrationSettings {

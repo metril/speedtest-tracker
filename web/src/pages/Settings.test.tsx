@@ -40,6 +40,7 @@ function settingsFixture({
       default_ookla_options: {},
       default_cloudflare_options: {},
       default_iperf3_options: {},
+      iperf3_list_url: 'https://export.iperf3serverlist.net/listed_iperf3_servers.json',
     },
     integrations: {
       vm_enabled: true,
@@ -123,6 +124,17 @@ describe('Settings page', () => {
     );
     expect(put).toHaveBeenCalledWith({ general: expect.objectContaining({ retention_days_results: 30 }) });
     expect(put.mock.calls[0][0].integrations).toBeUndefined();
+  });
+
+  it('saves an edited iperf3 server list URL, including clearing it to disable', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    const urlField = await screen.findByLabelText('iperf3 server list URL');
+    await userEvent.clear(urlField);
+    await userEvent.click(
+      within(screen.getByRole('region', { name: 'Engines' })).getByRole('button', { name: 'Save Engines' }),
+    );
+    expect(put).toHaveBeenCalledWith({ engines: expect.objectContaining({ iperf3_list_url: '' }) });
   });
 
   it('keeps a stored secret when the field is left untouched', async () => {

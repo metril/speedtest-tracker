@@ -61,6 +61,7 @@ var defaults = map[string]any{
 	KeyDefaultOoklaOptions:      json.RawMessage(`{}`),
 	KeyDefaultCloudflareOptions: json.RawMessage(`{}`),
 	KeyDefaultIperf3Options:     json.RawMessage(`{}`),
+	KeyIperf3ListURL:            defaultIperf3ListURL,
 
 	KeyVMEnabled:      false,
 	KeyVMURL:          "",
@@ -127,7 +128,17 @@ type Engines struct {
 	DefaultOoklaOptions      json.RawMessage `json:"default_ookla_options"`
 	DefaultCloudflareOptions json.RawMessage `json:"default_cloudflare_options"`
 	DefaultIperf3Options     json.RawMessage `json:"default_iperf3_options"`
+
+	// Iperf3ListURL is the export.iperf3serverlist.net-shaped JSON feed
+	// internal/iperf3list.Refresher polls to keep the public iperf3
+	// server picker populated. Empty disables the refresher entirely
+	// (see internal/iperf3list): no periodic fetch, and POST
+	// /iperf3/servers/refresh answers 409.
+	Iperf3ListURL string `json:"iperf3_list_url"`
 }
+
+// defaultIperf3ListURL is the seeded default for Iperf3ListURL.
+const defaultIperf3ListURL = "https://export.iperf3serverlist.net/listed_iperf3_servers.json"
 
 // Keys of the Engines section.
 const (
@@ -139,6 +150,7 @@ const (
 	KeyDefaultOoklaOptions      = "engines.default_ookla_options"
 	KeyDefaultCloudflareOptions = "engines.default_cloudflare_options"
 	KeyDefaultIperf3Options     = "engines.default_iperf3_options"
+	KeyIperf3ListURL            = "engines.iperf3_list_url"
 )
 
 // Thresholds is one set of alerting limits. Every field is a pointer so a
@@ -332,6 +344,7 @@ func (s *Store) Engines(ctx context.Context) (Engines, error) {
 		{KeyDefaultOoklaOptions, &e.DefaultOoklaOptions},
 		{KeyDefaultCloudflareOptions, &e.DefaultCloudflareOptions},
 		{KeyDefaultIperf3Options, &e.DefaultIperf3Options},
+		{KeyIperf3ListURL, &e.Iperf3ListURL},
 	} {
 		raw, ok, err := s.Get(ctx, f.key)
 		if err != nil {

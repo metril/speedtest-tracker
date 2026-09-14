@@ -2,13 +2,20 @@ package iperf3list
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// ErrDisabled is returned by RefreshNow when URLFunc reports an empty URL
+// (the iperf3_list_url setting has been cleared), meaning refreshing is
+// deliberately disabled rather than misconfigured.
+var ErrDisabled = errors.New("iperf3list: refresh disabled (iperf3_list_url is empty)")
 
 // timeFormat is the timestamp format store.ReplaceIperf3Servers stamps
 // fetched_at with (strftime('%Y-%m-%dT%H:%M:%fZ','now')).
@@ -22,10 +29,17 @@ const defaultInterval = 24 * time.Hour
 type Config struct {
 	Store      *store.Store
 	HTTPClient *http.Client
-	URL        string
-	Logger     *slog.Logger
-	Interval   time.Duration // default 24h
-	Now        func() time.Time
+
+	// URLFunc returns the current feed URL, read fresh on every refresh
+	// (so a settings change takes effect without restarting the
+	// process). An empty return disables refreshing: RefreshNow returns
+	// ErrDisabled without fetching anything. Required; a nil URLFunc
+	// behaves as always-disabled.
+	URLFunc func() string
+
+	Logger   *slog.Logger
+	Interval time.Duration // default 24h
+	Now      func() time.Time
 }
 
 // Refresher keeps the cached public iperf3 server list up to date: on
@@ -36,6 +50,9 @@ type Config struct {
 // refresh using its own request context.
 type Refresher struct {
 	cfg Config
+
+	mu             sync.Mutex
+	loggedDisabled bool
 }
 
 // New returns a ready-to-run Refresher, applying defaults for any
@@ -53,15 +70,40 @@ func New(cfg Config) *Refresher {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.URLFunc == nil {
+		cfg.URLFunc = func() string { return "" }
+	}
 	return &Refresher{cfg: cfg}
 }
 
-// RefreshNow fetches the upstream list and replaces the cache, unless the
-// fetch yields zero rows — in which case the existing table is left alone
-// (a thin/broken upstream response must never wipe a good cache). It
-// returns the resulting fetched_at and total server count either way.
+// RefreshNow reads the current feed URL from URLFunc and, if set, fetches
+// the upstream list and replaces the cache, unless the fetch yields zero
+// rows — in which case the existing table is left alone (a thin/broken
+// upstream response must never wipe a good cache). It returns the
+// resulting fetched_at and total server count either way.
+//
+// When URLFunc reports an empty URL, RefreshNow does not fetch anything
+// and returns ErrDisabled; an info line is logged the first time this is
+// observed (and again if it flips back to disabled after being enabled),
+// not on every call, so a long-disabled feed does not spam the log once
+// per refresh tick.
 func (r *Refresher) RefreshNow(ctx context.Context) (time.Time, int, error) {
-	servers, err := Fetch(ctx, r.cfg.HTTPClient, r.cfg.URL)
+	url := r.cfg.URLFunc()
+	if url == "" {
+		r.mu.Lock()
+		alreadyLogged := r.loggedDisabled
+		r.loggedDisabled = true
+		r.mu.Unlock()
+		if !alreadyLogged {
+			r.cfg.Logger.Info("iperf3list: refresh disabled (iperf3_list_url is empty)")
+		}
+		return time.Time{}, 0, ErrDisabled
+	}
+	r.mu.Lock()
+	r.loggedDisabled = false
+	r.mu.Unlock()
+
+	servers, err := Fetch(ctx, r.cfg.HTTPClient, url)
 	if err != nil {
 		return time.Time{}, 0, fmt.Errorf("iperf3list: fetch: %w", err)
 	}
@@ -126,6 +168,10 @@ func (r *Refresher) shouldRefreshOnStart(ctx context.Context) bool {
 
 func (r *Refresher) refreshAndLog(ctx context.Context) {
 	if _, _, err := r.RefreshNow(ctx); err != nil {
+		if errors.Is(err, ErrDisabled) {
+			// Already logged (once) inside RefreshNow.
+			return
+		}
 		r.cfg.Logger.Warn("iperf3list: refresh failed", "error", err)
 	}
 }

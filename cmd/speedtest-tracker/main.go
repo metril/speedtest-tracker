@@ -436,8 +436,15 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	pj := prune.New(prune.Config{Store: db, Settings: st, Logger: logger})
 
 	iperf3Refresher := iperf3list.New(iperf3list.Config{
-		Store:  db,
-		URL:    "https://export.iperf3serverlist.net/listed_iperf3_servers.json",
+		Store: db,
+		URLFunc: func() string {
+			e, err := st.Engines(context.Background())
+			if err != nil {
+				logger.Warn("read engines settings for iperf3 list URL", "error", err)
+				return ""
+			}
+			return e.Iperf3ListURL
+		},
 		Logger: logger,
 	})
 
@@ -465,6 +472,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Runner:          rn,
 			ServerList:      servers,
 			OoklaSearch:     ooklaSearch,
+			OoklaLimiter:    api.NewOoklaLimiter(),
 			Iperf3:          iperf3Refresher,
 			ReloadSchedules: sch.Reload,
 			Scheduler:       sch,

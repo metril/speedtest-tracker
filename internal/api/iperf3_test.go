@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/auth"
+	"github.com/metril/speedtest-tracker/internal/iperf3list"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -142,6 +143,19 @@ func TestRefreshIperf3ServersPropagatesError(t *testing.T) {
 	rec := do(t, h, http.MethodPost, "/api/v1/iperf3/servers/refresh", nil)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+}
+
+// TestRefreshIperf3ServersReturns409WhenDisabled covers task-1-brief item
+// 2: a RefreshNow error wrapping iperf3list.ErrDisabled (the operator
+// cleared iperf3_list_url) must surface as 409, not the generic 502.
+func TestRefreshIperf3ServersReturns409WhenDisabled(t *testing.T) {
+	refresher := &stubIperf3Refresher{err: iperf3list.ErrDisabled}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.Iperf3 = refresher })
+
+	rec := do(t, h, http.MethodPost, "/api/v1/iperf3/servers/refresh", nil)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
 	}
 }
 

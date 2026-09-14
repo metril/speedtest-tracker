@@ -1,10 +1,14 @@
 package iperf3list
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -40,7 +44,7 @@ func TestRefreshNowReplacesAndReportsCount(t *testing.T) {
 	db := newTestStore(t)
 	srv, _ := countingServer(t, oneServerFixture)
 
-	rf := New(Config{Store: db, URL: srv.URL})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }})
 	fetchedAt, count, err := rf.RefreshNow(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +69,7 @@ func TestRefreshNowKeepsExistingTableOnEmptyFetch(t *testing.T) {
 	before, _ := db.Iperf3ServersFetchedAt(context.Background())
 
 	srv, _ := countingServer(t, `[]`)
-	rf := New(Config{Store: db, URL: srv.URL})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }})
 	fetchedAt, count, err := rf.RefreshNow(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +93,7 @@ func TestRefreshNowReturnsErrorOnFetchFailure(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	rf := New(Config{Store: db, URL: srv.URL})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }})
 	if _, _, err := rf.RefreshNow(context.Background()); err == nil {
 		t.Fatal("want an error when the upstream fetch fails")
 	}
@@ -99,7 +103,7 @@ func TestRunRefreshesOnStartWhenTableIsEmpty(t *testing.T) {
 	db := newTestStore(t)
 	srv, calls := countingServer(t, oneServerFixture)
 
-	rf := New(Config{Store: db, URL: srv.URL, Interval: time.Hour})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }, Interval: time.Hour})
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	rf.Run(ctx)
@@ -120,7 +124,7 @@ func TestRunSkipsStartupRefreshWhenRecentlyFetched(t *testing.T) {
 	}
 	srv, calls := countingServer(t, oneServerFixture)
 
-	rf := New(Config{Store: db, URL: srv.URL, Interval: time.Hour})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }, Interval: time.Hour})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	rf.Run(ctx)
@@ -138,7 +142,7 @@ func TestRunRefreshesOnStartWhenStale(t *testing.T) {
 	srv, calls := countingServer(t, oneServerFixture)
 
 	rf := New(Config{
-		Store: db, URL: srv.URL, Interval: time.Hour,
+		Store: db, URLFunc: func() string { return srv.URL }, Interval: time.Hour,
 		Now: func() time.Time { return time.Now().Add(25 * time.Hour) },
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -150,11 +154,64 @@ func TestRunRefreshesOnStartWhenStale(t *testing.T) {
 	}
 }
 
+// TestRefreshNowReturnsErrDisabledWhenURLEmpty covers task-1-brief item 2:
+// RefreshNow must not fetch anything and must report ErrDisabled when
+// URLFunc reports an empty URL.
+func TestRefreshNowReturnsErrDisabledWhenURLEmpty(t *testing.T) {
+	db := newTestStore(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(oneServerFixture))
+	}))
+	defer srv.Close()
+
+	rf := New(Config{Store: db, URLFunc: func() string { return "" }})
+	_, _, err := rf.RefreshNow(context.Background())
+	if !errors.Is(err, ErrDisabled) {
+		t.Fatalf("err = %v, want ErrDisabled", err)
+	}
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("upstream was called %d times, want 0 when disabled", calls)
+	}
+}
+
+// TestRunSkipsRefreshWhenURLEmptyAndLogsOnce is a regression test for the
+// "log info once per change" requirement: repeated ticks while disabled
+// must not spam the log, and Run must never hit the upstream.
+func TestRunSkipsRefreshWhenURLEmptyAndLogsOnce(t *testing.T) {
+	db := newTestStore(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(oneServerFixture))
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	rf := New(Config{
+		Store: db, URLFunc: func() string { return "" }, Interval: 10 * time.Millisecond, Logger: logger,
+	})
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
+	defer cancel()
+	rf.Run(ctx)
+
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("upstream was called %d times, want 0 while disabled", calls)
+	}
+	n := strings.Count(buf.String(), "refresh disabled")
+	if n != 1 {
+		t.Fatalf("logged %q %d times, want exactly once across the whole disabled run", "refresh disabled", n)
+	}
+}
+
 func TestRunStopsOnContextCancel(t *testing.T) {
 	db := newTestStore(t)
 	srv, _ := countingServer(t, oneServerFixture)
 
-	rf := New(Config{Store: db, URL: srv.URL, Interval: time.Millisecond})
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }, Interval: time.Millisecond})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() {

@@ -45,6 +45,12 @@ type Deps struct {
 	// only.
 	OoklaSearch ServerSearcher
 
+	// OoklaLimiter gates GET /ookla/servers' remote search: when it denies
+	// (Allow() returns false), the remote search is skipped and local
+	// results are served alone — logged at debug, never as an error.
+	// Optional: nil means no rate limiting. See NewOoklaLimiter.
+	OoklaLimiter RateLimiter
+
 	// ReloadSchedules asks the scheduler to rebuild its cron entries after
 	// a schedule mutation. Optional: nil means no scheduler is running.
 	ReloadSchedules func(context.Context) error

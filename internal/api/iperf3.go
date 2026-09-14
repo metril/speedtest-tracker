@@ -2,10 +2,13 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/metril/speedtest-tracker/internal/iperf3list"
 )
 
 // Iperf3Refresher triggers an immediate refresh of the cached public
@@ -63,6 +66,11 @@ func (d Deps) refreshIperf3Servers(w http.ResponseWriter, r *http.Request) {
 	}
 	fetchedAt, count, err := d.Iperf3.RefreshNow(r.Context())
 	if err != nil {
+		if errors.Is(err, iperf3list.ErrDisabled) {
+			writeError(w, http.StatusConflict, "disabled",
+				"iperf3 server list refresh is disabled: set Engines > iperf3 server list in Settings to enable it")
+			return
+		}
 		writeError(w, http.StatusBadGateway, "refresh_failed", err.Error())
 		return
 	}

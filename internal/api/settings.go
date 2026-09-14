@@ -52,6 +52,7 @@ type enginesBody struct {
 	DefaultOoklaOptions      *json.RawMessage `json:"default_ookla_options"`
 	DefaultCloudflareOptions *json.RawMessage `json:"default_cloudflare_options"`
 	DefaultIperf3Options     *json.RawMessage `json:"default_iperf3_options"`
+	Iperf3ListURL            *string          `json:"iperf3_list_url"`
 }
 
 // integrationsBody is the partial PUT document for the Integrations
@@ -326,6 +327,9 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			func() error {
 				return setPtr(ctx, d.Settings, settings.KeyDefaultIperf3Options, e.DefaultIperf3Options)
 			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyIperf3ListURL, e.Iperf3ListURL)
+			},
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -484,6 +488,9 @@ func setKeys(body settingsBody) []string {
 		}
 		if e.DefaultIperf3Options != nil {
 			keys = append(keys, settings.KeyDefaultIperf3Options)
+		}
+		if e.Iperf3ListURL != nil {
+			keys = append(keys, settings.KeyIperf3ListURL)
 		}
 	}
 	if i := body.Integrations; i != nil {
