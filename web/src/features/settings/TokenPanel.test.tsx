@@ -31,7 +31,7 @@ function renderPanel(opts: {
   const tokens = opts.tokens ?? [];
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.startsWith('/api/v1/tokens')) return jsonResponse({ tokens });
+    if (url === '/api/v1/settings/tokens') return jsonResponse({ tokens });
     throw new Error(`unexpected fetch: ${url}`);
   });
   if (opts.create) vi.spyOn(api, 'createToken').mockImplementation(opts.create);

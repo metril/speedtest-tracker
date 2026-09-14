@@ -154,26 +154,32 @@ describe('auth client', () => {
     expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/me');
   });
 
-  it('unwraps the tokens envelope', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+  it('unwraps the tokens envelope from the settings-scoped endpoint', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({
       tokens: [{ id: 1, name: 'ha', prefix: 'stt_abc', created_at: 'x' }],
-    })));
+    }));
+    vi.stubGlobal('fetch', fetchMock);
     await expect(api.listTokens()).resolves.toHaveLength(1);
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/settings/tokens');
   });
 
-  it('returns the plaintext token exactly as the server sent it', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+  it('creates a token at the settings-scoped endpoint and returns the plaintext exactly as the server sent it', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({
       id: 1, name: 'ha', prefix: 'stt_abc', created_at: 'x', token: 'stt_abcdef',
-    }, 201)));
+    }, 201));
+    vi.stubGlobal('fetch', fetchMock);
     await expect(api.createToken('ha')).resolves.toMatchObject({ token: 'stt_abcdef' });
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('/api/v1/settings/tokens');
+    expect((init as RequestInit).method).toBe('POST');
   });
 
-  it('deletes a token by id', async () => {
+  it('deletes a token by id at the settings-scoped endpoint', async () => {
     const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse(undefined, 204));
     vi.stubGlobal('fetch', fetchMock);
     await api.deleteToken(3);
     const [url, init] = fetchMock.mock.calls[0];
-    expect(String(url)).toBe('/api/v1/tokens/3');
+    expect(String(url)).toBe('/api/v1/settings/tokens/3');
     expect((init as RequestInit).method).toBe('DELETE');
   });
 });

@@ -281,6 +281,19 @@ describe('Settings page', () => {
     expect(put.mock.calls[0][0].general).toBeUndefined();
   });
 
+  it('drops a trailing newline and blank lines from trusted proxy CIDRs before saving', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
+    const textarea = screen.getByLabelText('Trusted proxy CIDRs');
+    await userEvent.type(textarea, '10.0.0.0/8{enter}{enter}192.168.0.0/16{enter}');
+    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
+      .getByRole('button', { name: 'Save Auth' }));
+    expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
+      mode: 'forward_auth', trusted_proxies: ['10.0.0.0/8', '192.168.0.0/16'],
+    }) });
+  });
+
   it('disables a field that is set by the environment', async () => {
     renderSettings({ settings: settingsFixture({ locked: ['auth.mode'] }) });
     expect(await screen.findByLabelText('Auth mode')).toBeDisabled();

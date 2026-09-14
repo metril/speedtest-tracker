@@ -421,8 +421,8 @@ export interface CreatedToken extends ApiTokenInfo {
 }
 
 export const listTokens = async () =>
-  (await request<{ tokens: ApiTokenInfo[] }>('/tokens')).tokens;
+  (await request<{ tokens: ApiTokenInfo[] }>('/settings/tokens')).tokens;
 export const createToken = (name: string) =>
-  request<CreatedToken>('/tokens', { method: 'POST', body: JSON.stringify({ name }) });
+  request<CreatedToken>('/settings/tokens', { method: 'POST', body: JSON.stringify({ name }) });
 export const deleteToken = (id: number) =>
-  request<void>(`/tokens/${id}`, { method: 'DELETE' });
+  request<void>(`/settings/tokens/${id}`, { method: 'DELETE' });

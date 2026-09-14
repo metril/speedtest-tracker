@@ -169,12 +169,16 @@ export function Settings() {
 
   const saveAuth = () => {
     if (!auth) return;
-    const authError = validateAuthSettings(auth);
+    const normalized: AuthSettings = {
+      ...auth,
+      trusted_proxies: auth.trusted_proxies.map((l) => l.trim()).filter(Boolean),
+    };
+    const authError = validateAuthSettings(normalized);
     if (authError) {
       setErrors((e) => ({ ...e, auth: authError }));
       return;
     }
-    save('auth', { auth });
+    save('auth', { auth: normalized });
   };
 
   const saveNotifications = () => {
