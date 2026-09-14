@@ -4,11 +4,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// countingMetrics implements CacheMetrics for tests.
+type countingMetrics struct {
+	hits   *atomic.Int32
+	misses *atomic.Int32
+}
+
+func (c countingMetrics) SummaryCacheHit()  { c.hits.Add(1) }
+func (c countingMetrics) SummaryCacheMiss() { c.misses.Add(1) }
+
+func TestSummaryCacheCountedInMetrics(t *testing.T) {
+	var hits, misses atomic.Int32
+	h, db, _ := newTestAPIWith(t, func(d *Deps) { d.Metrics = countingMetrics{&hits, &misses} })
+	seedResults(t, db, 1)
+	do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
+	do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
+	if misses.Load() != 1 || hits.Load() != 1 {
+		t.Fatalf("hits=%d misses=%d, want 1/1", hits.Load(), misses.Load())
+	}
+}
 
 func TestStatsSummaryReturnsTargetsAndCacheHeader(t *testing.T) {
 	h, db, _ := newTestAPI(t)

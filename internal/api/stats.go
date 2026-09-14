@@ -73,10 +73,16 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	key := from + "|" + to
 	w.Header().Set("Cache-Control", "max-age=30")
 	if body, hit := d.summary.get(key); hit {
+		if d.Metrics != nil {
+			d.Metrics.SummaryCacheHit()
+		}
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		w.Write(body)
 		return
+	}
+	if d.Metrics != nil {
+		d.Metrics.SummaryCacheMiss()
 	}
 	stats, err := d.Store.Summary(r.Context(), from, to)
 	if err != nil {

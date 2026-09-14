@@ -47,8 +47,23 @@ type Deps struct {
 	// nil falls back to parsing the schedule's cron expression.
 	Scheduler NextRunner
 
+	// MetricsHandler serves Prometheus exposition at /metrics. The route
+	// exists whenever it is non-nil but answers 404 unless MetricsEnabled
+	// reports true, so the toggle takes effect live without a restart.
+	MetricsHandler http.Handler
+	MetricsEnabled func() bool
+
+	// Metrics counts cache behaviour. Optional: nil disables counting.
+	Metrics CacheMetrics
+
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
+}
+
+// CacheMetrics records /stats/summary cache behaviour.
+type CacheMetrics interface {
+	SummaryCacheHit()
+	SummaryCacheMiss()
 }
 
 // requestTimeout bounds every /api/v1 request except the SSE stream.
@@ -70,6 +85,16 @@ func New(deps Deps) http.Handler {
 	r.Use(setRequestIDHeader)
 
 	r.Get("/healthz", healthz(deps.Pinger))
+
+	if deps.MetricsHandler != nil {
+		r.Get("/metrics", func(w http.ResponseWriter, req *http.Request) {
+			if deps.MetricsEnabled != nil && !deps.MetricsEnabled() {
+				errNotFound(w, "metrics endpoint disabled")
+				return
+			}
+			deps.MetricsHandler.ServeHTTP(w, req)
+		})
+	}
 
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
