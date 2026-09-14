@@ -110,9 +110,11 @@ type settingsBody struct {
 		// SLADownloadMbps/SLAUploadMbps: like every other field here, nil
 		// (omitted, or an explicit JSON null — Go's encoding/json can't
 		// tell those apart for a pointer-typed field) leaves the stored
-		// plan untouched; a value sets it. There is currently no way to
-		// clear a plan back to "unset" via this endpoint, same as every
-		// other scalar field in this section (e.g. retention_days_results).
+		// plan untouched; a value sets it. To disable/clear a plan, PUT 0
+		// (or a negative value) — store.resolvePlan treats a non-positive
+		// plan speed as unset, which is the documented way to clear one,
+		// since this endpoint otherwise can't distinguish omitted from
+		// explicit null on a plain pointer field.
 		SLADownloadMbps *float64 `json:"sla_download_mbps"`
 		SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
 	} `json:"general"`

@@ -64,22 +64,35 @@ type targetSLAOverride struct {
 	SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
 }
 
+// normalizeMbps treats a non-positive plan speed as unset: <PUT>ting a plan
+// field to 0 (or a negative value slipping through) is the documented way
+// to disable/clear it, since the settings API can't distinguish an
+// omitted field from an explicit JSON null on a plain pointer field (see
+// internal/api/settings.go's settingsBody.General SLA fields).
+func normalizeMbps(v *float64) *float64 {
+	if v == nil || *v <= 0 {
+		return nil
+	}
+	return v
+}
+
 // resolvePlan resolves a target's effective SLA plan: its own override
 // (parsed from its thresholds JSON) takes precedence per-field over the
-// general plan. Both returned pointers are nil when neither the target
-// nor the general plan set that field.
+// general plan, and a non-positive value at either level is treated as
+// unset (see normalizeMbps). Both returned pointers are nil when neither
+// the target nor the general plan set that field.
 func resolvePlan(thresholdsJSON string, general SLAPlan) (downloadMbps, uploadMbps *float64) {
 	var t targetSLAOverride
 	if thresholdsJSON != "" {
 		_ = json.Unmarshal([]byte(thresholdsJSON), &t) // malformed thresholds: treat as no override
 	}
-	downloadMbps = t.SLADownloadMbps
+	downloadMbps = normalizeMbps(t.SLADownloadMbps)
 	if downloadMbps == nil {
-		downloadMbps = general.DownloadMbps
+		downloadMbps = normalizeMbps(general.DownloadMbps)
 	}
-	uploadMbps = t.SLAUploadMbps
+	uploadMbps = normalizeMbps(t.SLAUploadMbps)
 	if uploadMbps == nil {
-		uploadMbps = general.UploadMbps
+		uploadMbps = normalizeMbps(general.UploadMbps)
 	}
 	return downloadMbps, uploadMbps
 }
@@ -152,7 +165,7 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 	slaDenom := map[int64]int{}
 	slaCompliant := map[int64]int{}
 	slaRows, err := s.Read.QueryContext(ctx, `
-		SELECT target_id, download_bps, upload_bps FROM results
+		SELECT target_id, COALESCE(download_bps,0), COALESCE(upload_bps,0) FROM results
 		WHERE status='ok' AND target_id IS NOT NULL AND started_at >= ? AND started_at <= ?`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("summary sla results: %w", err)
@@ -168,8 +181,21 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 		if dl == nil && ul == nil {
 			continue // no plan resolves for this target: not counted
 		}
+		// A direction whose measured value is exactly 0 means the engine
+		// never measured it (e.g. a reverse-only or forward-only iperf3
+		// run leaves the other direction's *_bps at 0 — see
+		// internal/engine/iperf3/parse.go's parseSummary), not that it
+		// measured a genuine 0bps: skip that direction's criterion rather
+		// than count it as a miss. If neither applicable direction was
+		// actually measured, the result says nothing about plan
+		// compliance and is excluded from the denominator entirely.
+		checkDL := dl != nil && downloadBps != 0
+		checkUL := ul != nil && uploadBps != 0
+		if !checkDL && !checkUL {
+			continue
+		}
 		slaDenom[targetID]++
-		if (dl == nil || downloadBps >= *dl*1e6) && (ul == nil || uploadBps >= *ul*1e6) {
+		if (!checkDL || downloadBps >= *dl*1e6) && (!checkUL || uploadBps >= *ul*1e6) {
 			slaCompliant[targetID]++
 		}
 	}

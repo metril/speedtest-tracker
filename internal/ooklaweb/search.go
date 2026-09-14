@@ -94,7 +94,7 @@ type Client struct {
 	nomMu    sync.Mutex
 	nomLast  time.Time
 	nomNow   func() time.Time
-	nomSleep func(time.Duration)
+	nomSleep func(ctx context.Context, d time.Duration) error
 }
 
 type cacheEntry struct {
@@ -133,31 +133,59 @@ func NewClient() *Client {
 		cache:         make(map[string]cacheEntry),
 		now:           time.Now,
 		nomNow:        time.Now,
-		nomSleep:      time.Sleep,
+		nomSleep:      ctxSleep,
+	}
+}
+
+// ctxSleep is the production nomSleep: it waits for d, or returns
+// ctx.Err() early if ctx is canceled first, so a canceled caller doesn't
+// block the full rate-limit wait.
+func ctxSleep(ctx context.Context, d time.Duration) error {
+	if d <= 0 {
+		return nil
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
 // waitNominatim blocks, if necessary, so that no two Nominatim requests
 // from this Client start less than nominatimMinInterval apart — enforced
 // here, independent of the result cache, since the cache only helps once
-// a query has already been resolved once.
-func (c *Client) waitNominatim() {
+// a query has already been resolved once. It is ctx-aware: a canceled ctx
+// interrupts the wait instead of blocking regardless of cancellation.
+func (c *Client) waitNominatim(ctx context.Context) error {
 	c.nomMu.Lock()
-	defer c.nomMu.Unlock()
 	if c.nomNow == nil {
 		c.nomNow = time.Now
 	}
 	if c.nomSleep == nil {
-		c.nomSleep = time.Sleep
+		c.nomSleep = ctxSleep
 	}
 	now := c.nomNow()
+	var wait time.Duration
 	if !c.nomLast.IsZero() {
-		if wait := nominatimMinInterval - now.Sub(c.nomLast); wait > 0 {
-			c.nomSleep(wait)
-			now = c.nomNow()
-		}
+		wait = nominatimMinInterval - now.Sub(c.nomLast)
 	}
-	c.nomLast = now
+	if wait < 0 {
+		wait = 0
+	}
+	// Reserve the slot up front (rather than after sleeping) so concurrent
+	// callers pace off each other correctly instead of all measuring wait
+	// against the same stale nomLast.
+	c.nomLast = now.Add(wait)
+	sleep := c.nomSleep
+	c.nomMu.Unlock()
+
+	if wait <= 0 {
+		return nil
+	}
+	return sleep(ctx, wait)
 }
 
 // rejectCrossHostRedirect is a http.Client CheckRedirect func that refuses
@@ -524,6 +552,15 @@ func (c *Client) geocodePostcode(ctx context.Context, q, country string) (*geoPo
 // the given query params (format=jsonv2&limit=1 are added automatically),
 // returning the first (best) match, or a nil point when there are none.
 func (c *Client) nominatimSearch(ctx context.Context, params url.Values) (*geoPoint, error) {
+	// Rate-limit wait happens against the caller's own ctx, before the
+	// per-request timeout below starts — otherwise a rate-limit wait
+	// close to perRequestTimeout would eat into the budget meant for the
+	// actual HTTP round trip, and a canceled caller ctx wouldn't
+	// interrupt the wait at all.
+	if err := c.waitNominatim(ctx); err != nil {
+		return nil, fmt.Errorf("nominatim rate limit wait: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, perRequestTimeout)
 	defer cancel()
 
@@ -547,7 +584,6 @@ func (c *Client) nominatimSearch(ctx context.Context, params url.Values) (*geoPo
 	}
 	req.Header.Set("User-Agent", c.userAgent())
 
-	c.waitNominatim()
 	resp, err := c.httpClient().Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("nominatim search: %w", err)

@@ -121,6 +121,48 @@ func TestStatsSummaryServesFromCacheWithinTTL(t *testing.T) {
 	}
 }
 
+// TestStatsSummaryCacheInvalidatesOnSLAPlanChange covers the fix-round-1
+// finding: changing the general SLA plan must be reflected immediately,
+// not served stale from the 30s summary cache.
+func TestStatsSummaryCacheInvalidatesOnSLAPlanChange(t *testing.T) {
+	h, db, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertResult(ctx, &store.Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt:       time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05.000Z"),
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     1e8, UploadBps: 5e7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	before := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
+	var beforeBody store.SummaryStats
+	json.NewDecoder(before.Body).Decode(&beforeBody)
+	if beforeBody.SLACompliance != nil {
+		t.Fatalf("SLACompliance before a plan is set = %v, want nil", *beforeBody.SLACompliance)
+	}
+
+	if err := st.Set(ctx, "general.sla_download_mbps", 90.0); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set(ctx, "general.sla_upload_mbps", 40.0); err != nil {
+		t.Fatal(err)
+	}
+
+	after := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
+	var afterBody store.SummaryStats
+	json.NewDecoder(after.Body).Decode(&afterBody)
+	if afterBody.SLACompliance == nil || *afterBody.SLACompliance != 1 {
+		t.Fatalf("SLACompliance after setting the plan = %v, want 1 (not served stale from the pre-plan cache entry)",
+			afterBody.SLACompliance)
+	}
+}
+
 func TestStatsSummaryRejectsExplicitFromTo(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 	rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?from=1700000000&to=1700003600", nil)

@@ -321,7 +321,13 @@ target's own successful-result count, not a plain average across targets).
 It is the share of successful (`status=ok`) results in the window whose
 download **and** upload speed both met the resolved plan; `null` when
 neither the target nor the general settings set a plan, or per-target when
-there were no successful results in the window to judge.
+there were no successful results in the window to judge. A direction the
+engine didn't actually measure (e.g. iperf3 reverse-only or forward-only,
+which leaves the other direction's speed at 0) is skipped rather than
+counted as a miss; if neither applicable direction was measured, that
+result is excluded from the compliance fraction entirely. Set a plan speed
+to 0 to disable it — the settings API can't distinguish an omitted field
+from an explicit null, so 0 is the documented way to clear a plan.
 
 ## Outages
 

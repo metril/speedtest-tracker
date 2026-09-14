@@ -3,6 +3,7 @@ package ooklaweb
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -94,6 +95,14 @@ const geoDenverFixture = `{"results":[{"name":"Denver","latitude":39.7392,"longi
 
 const nominatimDenverFixture = `[{"display_name":"Denver, Colorado, United States","lat":"39.7392","lon":"-104.9903"}]`
 
+// noNominatimSleep is a nomSleep stub that never actually sleeps, so tests
+// exercising multiple sequential Nominatim requests (which would
+// otherwise pace themselves 1s apart, per nominatimMinInterval) run
+// instantly. The rate-limiting behavior itself is covered separately by
+// TestNominatimRateLimitedToOnePerSecond, which asserts on wait durations
+// directly instead.
+func noNominatimSleep(context.Context, time.Duration) error { return nil }
+
 func TestSearchPostcodeGeocodesViaNominatimAndMerges(t *testing.T) {
 	sp := speedtestServer(t, map[string]string{
 		"80202":                          `[]`,
@@ -111,6 +120,7 @@ func TestSearchPostcodeGeocodesViaNominatimAndMerges(t *testing.T) {
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
 
 	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10})
 	if err != nil {
@@ -144,6 +154,7 @@ func TestSearchPostcodeWithCountryUsesCountrycodesThenFallsBackWithoutIt(t *test
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
 
 	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
 	if err != nil {
@@ -173,6 +184,7 @@ func TestSearchPostcodeFallsBackWithoutCountryThenFreeForm(t *testing.T) {
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
 
 	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
 	if err != nil {
@@ -206,6 +218,7 @@ func TestSearchPostcodeSendsUserAgentToNominatim(t *testing.T) {
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
 	c.UserAgent = "speedtest-tracker/1.2.3 (+https://example.com)"
 
 	if _, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10}); err != nil {
@@ -227,6 +240,7 @@ func TestSearchPostcodeFallsBackToOpenMeteoWhenNominatimEmpty(t *testing.T) {
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.nomSleep = noNominatimSleep
 	c.GeoBase = geo.URL
 
 	res, err := c.Search(context.Background(), SearchRequest{Q: "80202", Limit: 10})
@@ -246,17 +260,24 @@ func TestNominatimRateLimitedToOnePerSecond(t *testing.T) {
 	defer nom.Close()
 	sp := speedtestServer(t, nil, nil)
 	defer sp.Close()
+	// Nominatim never matches in this test, so Search falls through to the
+	// Open-Meteo geocoder too; stub it locally so the test never touches
+	// the real network.
+	geo := geoServer(t, map[string]string{})
+	defer geo.Close()
 
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.GeoBase = geo.URL
 
 	fixedNow := time.Now()
 	c.nomNow = func() time.Time { return fixedNow }
 	var slept []time.Duration
-	c.nomSleep = func(d time.Duration) {
+	c.nomSleep = func(_ context.Context, d time.Duration) error {
 		slept = append(slept, d)
 		fixedNow = fixedNow.Add(d)
+		return nil
 	}
 
 	// Two postcode searches for different queries (so they aren't
@@ -274,6 +295,34 @@ func TestNominatimRateLimitedToOnePerSecond(t *testing.T) {
 		if d <= 0 || d > nominatimMinInterval {
 			t.Errorf("slept %v, want (0, %v]", d, nominatimMinInterval)
 		}
+	}
+}
+
+// TestWaitNominatimRespectsContextCancellation covers the fix-round-1
+// finding: waitNominatim must be ctx-aware, returning promptly with the
+// ctx's error instead of blocking for the full rate-limit wait when the
+// caller's context is canceled. Uses the real (default) ctxSleep — not a
+// stubbed nomSleep — since the point is to exercise the actual
+// select-on-ctx.Done() behavior.
+func TestWaitNominatimRespectsContextCancellation(t *testing.T) {
+	c := NewClient()
+	fixedNow := time.Now()
+	c.nomNow = func() time.Time { return fixedNow }
+	c.nomLast = fixedNow // a request "just happened": the next wait is ~nominatimMinInterval
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before waitNominatim is even called
+
+	start := time.Now()
+	err := c.waitNominatim(ctx)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitNominatim = %v, want context.Canceled", err)
+	}
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("waitNominatim blocked %v despite an already-canceled ctx, want a prompt return well under nominatimMinInterval (%v)",
+			elapsed, nominatimMinInterval)
 	}
 }
 
@@ -405,10 +454,16 @@ func TestSearchCacheKeyIncludesCountry(t *testing.T) {
 		return `[]`
 	})
 	defer nom.Close()
+	// The no-country call below falls through to Open-Meteo (Nominatim
+	// never matches without countrycodes=us); stub it locally.
+	geo := geoServer(t, map[string]string{})
+	defer geo.Close()
 
 	c := NewClient()
 	c.Base = sp.URL
 	c.NominatimBase = nom.URL
+	c.GeoBase = geo.URL
+	c.nomSleep = noNominatimSleep
 
 	res1, err := c.Search(context.Background(), SearchRequest{Q: "80202", Country: "us", Limit: 10})
 	if err != nil {
@@ -633,6 +688,7 @@ func TestNominatimSearchRejectsOversizedResponse(t *testing.T) {
 
 	c := NewClient()
 	c.NominatimBase = srv.URL
+	c.nomSleep = noNominatimSleep
 
 	if _, err := c.nominatimSearch(context.Background(), url.Values{"q": {"x"}}); err == nil {
 		t.Fatal("nominatimSearch: want error for oversized response, got nil")

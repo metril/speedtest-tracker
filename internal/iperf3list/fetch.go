@@ -142,8 +142,9 @@ func parsePortRange(raw string) (start, end int, ok bool) {
 		return n, 0, true
 	}
 	e, err := strconv.Atoi(strings.TrimSpace(last))
-	if err != nil || e <= 0 {
-		// A malformed end still leaves the start port usable.
+	if err != nil || e <= 0 || e < n || e > 65535 {
+		// A malformed, out-of-order or out-of-range end still leaves the
+		// start port usable — just fall back to a single port.
 		return n, 0, true
 	}
 	return n, e, true
