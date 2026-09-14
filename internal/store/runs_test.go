@@ -114,6 +114,43 @@ func TestQueuedRunForSchedule(t *testing.T) {
 	}
 }
 
+// backdateRun overwrites a run's started_at/finished_at directly, so
+// retention tests can simulate old runs without waiting.
+func backdateRun(t *testing.T, s *Store, runID int64, at string) {
+	t.Helper()
+	if _, err := s.Write.ExecContext(context.Background(),
+		`UPDATE runs SET started_at=?, finished_at=? WHERE id=?`, at, at, runID); err != nil {
+		t.Fatalf("backdateRun: %v", err)
+	}
+}
+
+func TestPruneRunsBeforeKeepsRunsWithResults(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	withResult, _ := s.CreateRun(ctx, "cron", nil)
+	s.SetRunStatus(ctx, withResult, "running", "")
+	s.SetRunStatus(ctx, withResult, "done", "")
+	insertResultForRun(t, s, withResult, "2030-01-01T00:00:00.000Z")
+	empty, _ := s.CreateRun(ctx, "cron", nil)
+	s.SetRunStatus(ctx, empty, "running", "")
+	s.SetRunStatus(ctx, empty, "done", "")
+	backdateRun(t, s, empty, "2020-01-01T00:00:00.000Z")
+	backdateRun(t, s, withResult, "2020-01-01T00:00:00.000Z")
+
+	n, err := s.PruneRunsBefore(ctx, "2021-01-01T00:00:00.000Z", 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 1 {
+		t.Fatalf("deleted %d runs, want 1 (the one with no results)", n)
+	}
+	if _, err := s.GetRun(ctx, withResult); err != nil {
+		t.Fatalf("run holding results was deleted: %v", err)
+	}
+	if _, err := s.GetRun(ctx, empty); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("empty run not pruned: %v", err)
+	}
+}
+
 // TestSetRunStatusRejectsTransitionOutOfTerminal covers the terminal-state
 // guard: once a run is done/failed/canceled/skipped, no further status
 // write may change it.

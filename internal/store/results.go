@@ -264,6 +264,24 @@ func (s *Store) LatestResultForTarget(ctx context.Context, targetID int64) (*Res
 	return &one[0], nil
 }
 
+// PruneResultsBefore deletes at most batch results whose started_at is
+// older than cutoff (an RFC3339 UTC string in this schema's format) and
+// returns how many rows went. SQLite's DELETE has no LIMIT clause in the
+// default build, so the cap is applied by a subquery.
+func (s *Store) PruneResultsBefore(ctx context.Context, cutoff string, batch int) (int64, error) {
+	if batch <= 0 {
+		batch = 1000
+	}
+	res, err := s.Write.ExecContext(ctx, `
+		DELETE FROM results WHERE id IN (
+			SELECT id FROM results WHERE started_at < ? ORDER BY started_at LIMIT ?
+		)`, cutoff, batch)
+	if err != nil {
+		return 0, fmt.Errorf("prune results: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // LatestResults returns the newest result per target.
 func (s *Store) LatestResults(ctx context.Context) ([]Result, error) {
 	rows, err := s.Read.QueryContext(ctx, `

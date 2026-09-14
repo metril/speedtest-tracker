@@ -155,6 +155,30 @@ func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, int64, error)
 	return out, next, nil
 }
 
+// PruneRunsBefore deletes at most batch finished runs older than cutoff
+// that own no result rows. results.run_id is ON DELETE CASCADE, so a run
+// still holding results must never be pruned by the runs retention: it
+// would take those results with it regardless of the results retention.
+// The runs table has no created_at column, so only started_at/finished_at
+// are considered.
+func (s *Store) PruneRunsBefore(ctx context.Context, cutoff string, batch int) (int64, error) {
+	if batch <= 0 {
+		batch = 1000
+	}
+	res, err := s.Write.ExecContext(ctx, `
+		DELETE FROM runs WHERE id IN (
+			SELECT r.id FROM runs r
+			WHERE COALESCE(r.finished_at, r.started_at) < ?
+			  AND r.status IN ('done','failed','canceled','skipped')
+			  AND NOT EXISTS (SELECT 1 FROM results res WHERE res.run_id = r.id)
+			ORDER BY r.id LIMIT ?
+		)`, cutoff, batch)
+	if err != nil {
+		return 0, fmt.Errorf("prune runs: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // clampLimit bounds a caller-supplied page size.
 func clampLimit(limit int) int {
 	if limit <= 0 {

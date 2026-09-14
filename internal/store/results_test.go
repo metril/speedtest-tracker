@@ -8,6 +8,34 @@ import (
 	"testing"
 )
 
+// insertResultAtTime inserts a plain, target-less result with an explicit
+// started_at, for retention-pruning tests that only care about ordering.
+func insertResultAtTime(t *testing.T, s *Store, startedAt string) int64 {
+	t.Helper()
+	id, err := s.InsertResult(context.Background(), &Result{
+		Engine: "ookla", Status: "ok", StartedAt: startedAt,
+		OptionsSnapshot: json.RawMessage("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertResult: %v", err)
+	}
+	return id
+}
+
+// insertResultForRun is like insertResultAtTime but attaches the result to
+// a run, so PruneRunsBefore's "keep runs with results" rule can be tested.
+func insertResultForRun(t *testing.T, s *Store, runID int64, startedAt string) int64 {
+	t.Helper()
+	id, err := s.InsertResult(context.Background(), &Result{
+		RunID: &runID, Engine: "ookla", Status: "ok", StartedAt: startedAt,
+		OptionsSnapshot: json.RawMessage("{}"),
+	})
+	if err != nil {
+		t.Fatalf("InsertResult: %v", err)
+	}
+	return id
+}
+
 // insertResultAt inserts a result with an explicit started_at so ordering
 // and range filters are deterministic.
 func insertResultAt(t *testing.T, s *Store, targetID int64, engine, status, startedAt string) int64 {
@@ -116,6 +144,43 @@ func TestListResultsFiltersAndKeyset(t *testing.T) {
 		From: "2026-09-13T11:00:00.000Z", To: "2026-09-13T13:00:00.000Z"})
 	if len(byRange) != 3 {
 		t.Errorf("range filter = %d, want 3", len(byRange))
+	}
+}
+
+func TestPruneResultsBeforeDeletesInBatches(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	for i := 0; i < 5; i++ {
+		insertResultAtTime(t, s, fmt.Sprintf("2020-01-0%dT00:00:00.000Z", i+1))
+	}
+	insertResultAtTime(t, s, "2030-01-01T00:00:00.000Z")
+
+	n, err := s.PruneResultsBefore(ctx, "2021-01-01T00:00:00.000Z", 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 2 {
+		t.Fatalf("first batch deleted %d, want 2 (batch cap)", n)
+	}
+	total := n
+	for {
+		n, err = s.PruneResultsBefore(ctx, "2021-01-01T00:00:00.000Z", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		total += n
+		if n == 0 {
+			break
+		}
+	}
+	if total != 5 {
+		t.Fatalf("deleted %d, want 5", total)
+	}
+	var left int
+	if err := s.Read.QueryRowContext(ctx, `SELECT COUNT(*) FROM results`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != 1 {
+		t.Fatalf("%d results left, want the 2030 row only", left)
 	}
 }
 
