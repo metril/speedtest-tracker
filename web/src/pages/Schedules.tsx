@@ -67,7 +67,7 @@ export function Schedules() {
       {warnings.length > 0 && (
         <div role="status" className="flex items-start justify-between gap-3 rounded border border-warn/60 bg-warn/10 px-3 py-2 text-sm text-warn">
           <div>{warnings.map((wmsg) => <p key={wmsg}>{wmsg}</p>)}</div>
-          <button type="button" aria-label="Dismiss warnings" className="text-warn hover:text-warn"
+          <button type="button" aria-label="Dismiss warnings" className="text-warn hover:opacity-80"
             onClick={() => setWarnings([])}>
             ×
           </button>
@@ -106,7 +106,7 @@ export function Schedules() {
           </thead>
           <tbody>
             {schedules.data.map((s) => (
-              <tr key={s.id} className="border-b border-line hover:hover:bg-raised">
+              <tr key={s.id} className="border-b border-line hover:bg-raised">
                 <td className="py-2 pr-3 text-fg">
                   {s.name}
                   {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}

@@ -90,7 +90,7 @@ export function Gauge({ bps, phase, maxMbps = DEFAULT_MAX_MBPS }: GaugeProps) {
         <span className="font-mono text-5xl tabular-nums tracking-tight text-fg">
           {mbps.toFixed(1)}
         </span>
-        <span className="text-xs uppercase tracking-[0.2em] text-fg0">Mbps</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-faint">Mbps</span>
         <span className="mt-2 text-sm capitalize" style={{ color: stroke }}>
           {phase}
         </span>

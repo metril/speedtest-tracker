@@ -44,7 +44,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
               <div
                 key={r.id}
                 role="row"
-                className="absolute left-0 flex w-full items-center border-b border-line px-3 text-sm hover:hover:bg-raised"
+                className="absolute left-0 flex w-full items-center border-b border-line px-3 text-sm hover:bg-raised"
                 style={{ height: item.size, transform: `translateY(${item.start}px)` }}
               >
                 <div className="grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2">
@@ -84,14 +84,14 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                   <span role="cell" className="flex items-center justify-end gap-2 text-xs text-muted">
                     <span title={formatDateTime(r.started_at)}>{formatRelative(r.started_at)}</span>
                     <button
-                      className="text-accent hover:text-accent"
+                      className="text-accent hover:opacity-80"
                       aria-label={`Replay result for ${r.target_name}`}
                       onClick={() => onReexecute(r.id)}
                     >
                       replay
                     </button>
                     <button
-                      className="text-bad hover:text-bad"
+                      className="text-bad hover:opacity-80"
                       aria-label={`Delete result for ${r.target_name}`}
                       onClick={() => {
                         if (window.confirm(`Delete this result for ${r.target_name}?`)) onDelete(r.id);

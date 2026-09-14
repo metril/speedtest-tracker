@@ -87,7 +87,7 @@ export function Targets() {
           </thead>
           <tbody>
             {targets.data.map((t) => (
-              <tr key={t.id} className="border-b border-line hover:hover:bg-raised">
+              <tr key={t.id} className="border-b border-line hover:bg-raised">
                 <td className="py-2 pr-3 text-fg">{t.name}</td>
                 <td className="py-2 pr-3">
                   <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs uppercase text-muted">
