@@ -95,12 +95,19 @@
 /* Tailwind v4 reads utility colors from @theme, but the aliases above are
    defined as plain custom properties (so .dark can override them). This
    inline block re-exposes them as theme colors, generating bg-background,
-   text-muted-foreground, border-border, etc. */
+   text-muted-foreground, border-border, etc.
+   --color-accent, --color-accent-foreground and --color-muted are
+   deliberately NOT re-exposed here: the app already defines --color-accent
+   and --color-muted above (in @theme) as TEXT colors (#0369a1/#38bdf8 and
+   #475569/#94a3b8). Re-exposing shadcn's --accent/--muted (the light-gray
+   raised surface) under those same names would silently override the
+   app's own tokens, making every text-accent/text-muted/bg-accent render
+   as near-invisible gray-on-gray. Components needing shadcn's neutral
+   hover/surface color use bg-raised / text-fg instead (see ui/*.tsx). */
 @theme inline {
   --color-background: var(--background);
   --color-card: var(--card);
   --color-popover: var(--popover);
-  --color-muted: var(--muted);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-foreground: var(--foreground);
@@ -109,8 +116,6 @@
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
   --color-card-foreground: var(--card-foreground);
   --color-popover-foreground: var(--popover-foreground);
   --color-ring: var(--ring);
