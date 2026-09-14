@@ -70,6 +70,7 @@ func New(deps Deps) http.Handler {
 			t.Delete("/{id}", deps.deleteTarget)
 			t.Post("/{id}/run", deps.runTarget)
 			t.Get("/{id}/latest", deps.targetLatest)
+			t.Get("/{id}/history", deps.targetHistory)
 		})
 		v1.Route("/schedules", func(s chi.Router) {
 			s.Get("/", deps.listSchedules)
@@ -96,6 +97,7 @@ func New(deps Deps) http.Handler {
 			rs.Put("/{id}/tags", deps.setResultTags)
 		})
 		v1.Get("/tags", deps.listTags)
+		v1.Get("/outages", deps.outages)
 	})
 
 	if deps.UI != nil {

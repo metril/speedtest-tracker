@@ -41,6 +41,15 @@ func seedResults(t *testing.T, db *store.Store, n int) (int64, []int64) {
 	return tid, ids
 }
 
+func insertFailed(t *testing.T, db *store.Store, targetID int64, at string) {
+	t.Helper()
+	if _, err := db.InsertResult(context.Background(), &store.Result{
+		TargetID: &targetID, TargetName: "home", Engine: "fake", Status: "failed",
+		StartedAt: at, OptionsSnapshot: json.RawMessage(`{}`), Error: "boom"}); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListResultsCursorPagination(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	_, ids := seedResults(t, db, 5)
