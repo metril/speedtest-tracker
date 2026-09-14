@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { TargetForm } from './TargetForm';
@@ -45,6 +46,7 @@ describe('TargetForm', () => {
       enabled: true,
       lane: 'lan',
       options: { host: '10.0.0.5', port: 5201 },
+      thresholds: {},
     });
   });
 
@@ -188,5 +190,36 @@ describe('TargetForm', () => {
 
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+
+  it('submits per-target thresholds, omitting blank fields', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.type(screen.getByLabelText('Min download (Mbps)'), '100');
+    await userEvent.click(screen.getByLabelText('Notify on failed test'));
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      thresholds: { download_mbps_min: 100, notify_on_failure: true },
+    }));
+  });
+
+  it('seeds threshold fields from an existing target', async () => {
+    wrap(<TargetForm initial={{
+      id: 4, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      thresholds: { ping_ms_max: 40 }, created_at: '', updated_at: '',
+    }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
+    expect(screen.getByLabelText('Max ping (ms)')).toHaveValue(40);
+    expect(screen.getByLabelText('Min download (Mbps)')).toHaveValue(null);
+  });
+
+  it('rejects a negative threshold', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.type(screen.getByLabelText('Max packet loss (%)'), '-5');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(screen.getByText(/must be zero or more/i)).toBeInTheDocument();
   });
 });

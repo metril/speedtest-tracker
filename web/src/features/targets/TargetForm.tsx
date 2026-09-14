@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import type { Target, TargetInput } from '../../lib/api';
+import type { Target, TargetInput, ThresholdSet } from '../../lib/api';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
+import { ThresholdFields, validateThresholds } from './ThresholdFields';
 
 const ENGINES = ['ookla', 'cloudflare', 'iperf3', 'fake'] as const;
 const LANES = ['wan', 'lan'] as const;
@@ -23,10 +24,12 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   const [lane, setLane] = useState(initial?.lane ?? 'wan');
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [options, setOptions] = useState<Options>(initial?.options ?? {});
+  const [thresholds, setThresholds] = useState<ThresholdSet>((initial?.thresholds as ThresholdSet) ?? {});
   const [touched, setTouched] = useState(false);
 
   const nameInvalid = name.trim() === '';
   const optionsError = validateEngineOptions(engine, options);
+  const thresholdsError = validateThresholds(thresholds);
 
   return (
     <form
@@ -34,8 +37,10 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
       onSubmit={(e) => {
         e.preventDefault();
         setTouched(true);
-        if (nameInvalid || optionsError) return;
-        onSubmit({ name: name.trim(), engine, enabled, lane, options });
+        if (nameInvalid || optionsError || thresholdsError) return;
+        onSubmit({
+          name: name.trim(), engine, enabled, lane, options, thresholds: thresholds as Record<string, unknown>,
+        });
       }}
     >
       <div className="grid gap-3 sm:grid-cols-3">
@@ -71,6 +76,13 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
 
       <div className="border-t border-line pt-3">
         <EngineOptionFields engine={engine} options={options} onChange={setOptions} />
+      </div>
+
+      <div className="border-t border-line pt-3">
+        <ThresholdFields value={thresholds} onChange={setThresholds} />
+        {touched && thresholdsError && (
+          <p className="mt-1 text-xs text-bad">{thresholdsError}</p>
+        )}
       </div>
 
       {error && <p className="text-sm text-bad">{error}</p>}
