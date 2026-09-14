@@ -158,6 +158,18 @@ func (j *Job) Run(ctx context.Context) {
 	changes, cancel := j.cfg.Settings.Subscribe()
 	defer cancel()
 
+	// Run one pass immediately so a restart does not leave retention
+	// unenforced for up to a full interval.
+	if ctx.Err() == nil {
+		if st, err := j.Once(ctx); err != nil {
+			j.cfg.Logger.Error("prune: pass failed", "error", err,
+				"results", st.Results, "runs", st.Runs)
+		} else {
+			j.cfg.Logger.Info("prune: pass complete",
+				"results", st.Results, "runs", st.Runs)
+		}
+	}
+
 	ticker := time.NewTicker(j.intervalFor(ctx))
 	defer ticker.Stop()
 

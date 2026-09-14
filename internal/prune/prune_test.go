@@ -66,6 +66,31 @@ func TestJobOncePrunesBothTables(t *testing.T) {
 	}
 }
 
+// TestRunPrunesImmediatelyOnStart is the regression case for the finding
+// that Run only pruned on the ticker, leaving retention unenforced for up
+// to a full interval after every restart.
+func TestRunPrunesImmediatelyOnStart(t *testing.T) {
+	db, st := newTestStack(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyRetentionDaysResults, 1)
+	st.Set(ctx, settings.KeyRetentionPruneIntervalMinutes, 60) // must not need to wait for this
+	insertResultAt(t, db, "2020-01-01T00:00:00.000Z")
+
+	j := prune.New(prune.Config{Store: db, Settings: st,
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil))})
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go j.Run(runCtx)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) && j.Last().Results == 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if j.Last().Results != 1 {
+		t.Fatalf("Last().Results = %d, want 1 pruned immediately at start", j.Last().Results)
+	}
+}
+
 func TestRunStopsOnContextCancel(t *testing.T) {
 	db, st := newTestStack(t)
 	st.Set(context.Background(), settings.KeyRetentionPruneIntervalMinutes, 1)

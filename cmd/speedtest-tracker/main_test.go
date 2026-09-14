@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -155,7 +156,8 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, logger)
+	var metricsEnabled atomic.Bool
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, &metricsEnabled, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -272,6 +274,7 @@ func TestApplyIntegrationsConfiguresClients(t *testing.T) {
 	}
 	st.Set(ctx, settings.KeyVMEnabled, true)
 	st.Set(ctx, settings.KeyVMURL, srv.URL)
+	st.Set(ctx, settings.KeyMetricsEnabled, true)
 
 	vm := vmpush.New(vmpush.Config{})
 	vm.Start()
@@ -280,8 +283,12 @@ func TestApplyIntegrationsConfiguresClients(t *testing.T) {
 	vl.Start()
 	defer vl.Close(ctx)
 
-	if err := applyIntegrations(ctx, st, vm, vl, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+	var metricsEnabled atomic.Bool
+	if err := applyIntegrations(ctx, st, vm, vl, &metricsEnabled, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
 		t.Fatal(err)
+	}
+	if !metricsEnabled.Load() {
+		t.Fatal("applyIntegrations did not cache metrics_enabled")
 	}
 	vm.OnResult(ctx, &store.Result{Status: "ok", StartedAt: "2026-09-14T10:00:00.000Z"}, vmpush.Meta{})
 	select {

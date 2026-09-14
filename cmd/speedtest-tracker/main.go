@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -115,7 +116,7 @@ func parseLevel(s string) slog.Level {
 // never race the notification past a subscriber that isn't listening yet.
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
-	vm *vmpush.Writer, vl *vlpush.Handler, logger *slog.Logger) {
+	vm *vmpush.Writer, vl *vlpush.Handler, metricsEnabled *atomic.Bool, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -151,7 +152,7 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 				}
 				logger.Info("schedules reloaded after timezone change")
 			case strings.HasPrefix(key, "integrations."):
-				if err := applyIntegrations(ctx, st, vm, vl, logger); err != nil {
+				if err := applyIntegrations(ctx, st, vm, vl, metricsEnabled, logger); err != nil {
 					logger.Error("reload integrations", "error", err)
 					continue
 				}
@@ -162,16 +163,19 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 }
 
 // applyIntegrations pushes the stored Integrations section into the live
-// VictoriaMetrics and VictoriaLogs clients. It is called once at startup
-// and again on every integrations.* settings change, which is what makes
-// the toggles take effect without a restart.
-func applyIntegrations(ctx context.Context, st *settings.Store, vm *vmpush.Writer, vl *vlpush.Handler, logger *slog.Logger) error {
+// VictoriaMetrics and VictoriaLogs clients, and caches MetricsEnabled in
+// metricsEnabled so the /metrics handler never needs a settings DB read per
+// scrape. It is called once at startup and again on every integrations.*
+// settings change, which is what makes the toggles take effect without a
+// restart.
+func applyIntegrations(ctx context.Context, st *settings.Store, vm *vmpush.Writer, vl *vlpush.Handler, metricsEnabled *atomic.Bool, logger *slog.Logger) error {
 	i, err := st.Integrations(ctx)
 	if err != nil {
 		return err
 	}
 	vm.Configure(i.VMEnabled, i.VMURL, i.VMAuthHeader, i.VMExtraLabels)
 	vl.Configure(i.VLEnabled, i.VLURL, i.VLAuthHeader, i.VLStreamFields)
+	metricsEnabled.Store(i.MetricsEnabled)
 	logger.Debug("integrations applied", "vm_enabled", i.VMEnabled, "vl_enabled", i.VLEnabled)
 	return nil
 }
@@ -212,7 +216,8 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	vm := vmpush.New(vmpush.Config{Logger: logger})
 	vm.Start()
 
-	if err := applyIntegrations(ctx, st, vm, vlHandler, logger); err != nil {
+	var metricsEnabled atomic.Bool
+	if err := applyIntegrations(ctx, st, vm, vlHandler, &metricsEnabled, logger); err != nil {
 		return err
 	}
 
@@ -268,7 +273,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
-	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, logger)
+	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, &metricsEnabled, logger)
 	go pj.Run(watchCtx)
 
 	srv := &http.Server{
@@ -287,13 +292,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Settings:        st,
 			Metrics:         m,
 			MetricsHandler:  m.Handler(),
-			MetricsEnabled: func() bool {
-				i, err := st.Integrations(context.Background())
-				if err != nil {
-					return false
-				}
-				return i.MetricsEnabled
-			},
+			MetricsEnabled: metricsEnabled.Load,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
