@@ -45,11 +45,17 @@ type shared struct {
 	stopOnce sync.Once
 	done     chan struct{}
 
-	// reqCtx bounds in-flight and pending flush POSTs; it is cancelled
-	// when stop fires so Close does not wait out the HTTP client timeout
-	// on a stalled endpoint.
+	// reqCtx bounds in-flight and pending flush POSTs during normal
+	// operation. It is cancelled only after done closes (see Close), so it
+	// never races the final drainAndFlush, which gets its own bounded
+	// context (finalCtx) instead.
 	reqCtx    context.Context
 	reqCancel context.CancelFunc
+
+	// finalCtx bounds the last drainAndFlush POST on shutdown. It is set
+	// once by Close before stop is closed, so the worker goroutine observes
+	// it safely via the happens-before edge on the stop channel close/recv.
+	finalCtx context.Context
 
 	dropped atomic.Int64
 
@@ -137,12 +143,19 @@ func (h *Handler) Dropped() int64 {
 	return h.shared.dropped.Load()
 }
 
-// Close stops the worker and waits for it to drain, or ctx to expire.
+// Close stops the worker and waits for it to drain, or ctx to expire. The
+// final flush uses ctx as its own deadline, independent of reqCtx, which is
+// cancelled only once the worker has actually finished (or leaked, if ctx
+// expires first) to free its resources.
 func (h *Handler) Close(ctx context.Context) error {
 	h.shared.stopOnce.Do(func() {
+		h.shared.finalCtx = ctx
 		close(h.shared.stop)
-		h.shared.reqCancel()
 	})
+	go func() {
+		<-h.shared.done
+		h.shared.reqCancel()
+	}()
 	select {
 	case <-h.shared.done:
 		return nil
@@ -253,12 +266,12 @@ func (s *shared) run() {
 		case b := <-s.lines:
 			buf = append(buf, b)
 			if len(buf) >= s.batch {
-				s.doFlush(buf)
+				s.doFlush(s.reqCtx, buf)
 				buf = buf[:0]
 			}
 		case <-ticker.C:
 			if len(buf) > 0 {
-				s.doFlush(buf)
+				s.doFlush(s.reqCtx, buf)
 				buf = buf[:0]
 			}
 		case <-s.stop:
@@ -269,7 +282,12 @@ func (s *shared) run() {
 }
 
 // drainAndFlush pulls any lines already queued, appends them to buf, and
-// flushes once before the worker exits.
+// flushes once before the worker exits, using finalCtx (set by Close)
+// rather than reqCtx so the last flush is not cancelled the instant Close
+// is called. The flush is additionally capped at 10s regardless of
+// finalCtx's own deadline (even none at all, e.g. context.Background()), so
+// a caller that forgets to bound Close's ctx can never hang on a stalled
+// endpoint.
 func (s *shared) drainAndFlush(buf [][]byte) {
 	for {
 		select {
@@ -277,23 +295,29 @@ func (s *shared) drainAndFlush(buf [][]byte) {
 			buf = append(buf, b)
 		default:
 			if len(buf) > 0 {
-				s.doFlush(buf)
+				parent := s.finalCtx
+				if parent == nil {
+					parent = context.Background()
+				}
+				ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+				defer cancel()
+				s.doFlush(ctx, buf)
 			}
 			return
 		}
 	}
 }
 
-// doFlush ships buf to VictoriaLogs. On failure the batch is dropped and
-// counted; errors are logged to Next at most once per 30s so a VL outage
-// cannot become a log storm.
-func (s *shared) doFlush(buf [][]byte) {
+// doFlush ships buf to VictoriaLogs using ctx to bound the request. On
+// failure the batch is dropped and counted; errors are logged to Next at
+// most once per 30s so a VL outage cannot become a log storm.
+func (s *shared) doFlush(ctx context.Context, buf [][]byte) {
 	s.mu.Lock()
 	u, auth := s.url, s.auth
 	streamFields := s.streamFields
 	s.mu.Unlock()
 
-	if err := s.post(u, auth, streamFields, buf); err != nil {
+	if err := s.post(ctx, u, auth, streamFields, buf); err != nil {
 		s.dropped.Add(int64(len(buf)))
 		s.lastErrMu.Lock()
 		shouldLog := time.Since(s.lastErrLogT) >= 30*time.Second
@@ -307,7 +331,7 @@ func (s *shared) doFlush(buf [][]byte) {
 	}
 }
 
-func (s *shared) post(u, auth string, streamFields map[string]string, buf [][]byte) error {
+func (s *shared) post(ctx context.Context, u, auth string, streamFields map[string]string, buf [][]byte) error {
 	body := bytes.Join(buf, []byte("\n"))
 	body = append(body, '\n')
 
@@ -323,7 +347,7 @@ func (s *shared) post(u, auth string, streamFields map[string]string, buf [][]by
 	q.Set("_msg_field", "_msg")
 	q.Set("_time_field", "_time")
 
-	req, err := http.NewRequestWithContext(s.reqCtx, http.MethodPost,
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
 		strings.TrimRight(u, "/")+"/insert/jsonline?"+q.Encode(), bytes.NewReader(body))
 	if err != nil {
 		return err

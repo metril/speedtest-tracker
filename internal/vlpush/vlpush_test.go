@@ -104,6 +104,43 @@ func TestHandlerDropsWhenQueueFullAndNeverBlocks(t *testing.T) {
 	}
 }
 
+// TestCloseFlushesBufferedLinesBeforeReturning is the regression case for
+// the finding that Close cancelled reqCtx at the same moment it closed
+// stop, so the final drainAndFlush's POST always failed instantly and every
+// buffered line was dropped instead of shipped.
+func TestCloseFlushesBufferedLinesBeforeReturning(t *testing.T) {
+	bodies := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies <- string(b)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	// A large BatchSize and FlushInterval mean the line is still sitting in
+	// the queue, unflushed, when Close is called.
+	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
+		BatchSize: 1000, FlushInterval: time.Hour})
+	h.Configure(true, srv.URL, "", nil)
+	h.Start()
+	slog.New(h).Info("buffered at shutdown")
+
+	if err := h.Close(context.Background()); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	select {
+	case body := <-bodies:
+		if !strings.Contains(body, "buffered at shutdown") {
+			t.Fatalf("flushed body missing the line: %s", body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("Close did not flush the buffered line")
+	}
+	if h.Dropped() != 0 {
+		t.Fatalf("Dropped() = %d, want 0", h.Dropped())
+	}
+}
+
 func TestWithAttrsAndGroupAreCarried(t *testing.T) {
 	bodies := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
