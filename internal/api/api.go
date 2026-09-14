@@ -40,6 +40,11 @@ type Deps struct {
 	Runner     Runner
 	ServerList ServerLister
 
+	// OoklaSearch widens GET /ookla/servers with a remote speedtest.net
+	// search when a query is given. Optional: nil serves the local list
+	// only.
+	OoklaSearch ServerSearcher
+
 	// ReloadSchedules asks the scheduler to rebuild its cron entries after
 	// a schedule mutation. Optional: nil means no scheduler is running.
 	ReloadSchedules func(context.Context) error

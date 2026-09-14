@@ -22,6 +22,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 	"github.com/metril/speedtest-tracker/internal/metrics"
 	"github.com/metril/speedtest-tracker/internal/notify"
+	"github.com/metril/speedtest-tracker/internal/ooklaweb"
 	"github.com/metril/speedtest-tracker/internal/prune"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
@@ -377,6 +378,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	reg := buildRegistry(engineCfg)
 	servers := ookla.NewServerList(engineCfg.SpeedtestBin,
 		time.Duration(engineCfg.ServerListTTLSeconds)*time.Second)
+	ooklaSearch := ooklaweb.NewClient()
 
 	hub := sse.NewHub()
 	rn := runner.New(runner.Config{
@@ -453,6 +455,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Registry:        reg,
 			Runner:          rn,
 			ServerList:      servers,
+			OoklaSearch:     ooklaSearch,
 			ReloadSchedules: sch.Reload,
 			Scheduler:       sch,
 			Settings:        st,

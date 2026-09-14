@@ -1,5 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useOoklaServers } from '../../lib/queries';
+import type { OoklaServer } from '../../lib/api';
+import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
+import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
 
 export type Options = Record<string, unknown>;
 
@@ -55,17 +58,73 @@ export function EngineOptionFields({ engine, options, onChange }: Props) {
   );
 }
 
+/** OoklaResultsList renders the server search hits as a Command list; kept
+ * separate from OoklaFields so it can be tested (or reused) without going
+ * through the Popover that wraps it. */
+export function OoklaResultsList({ servers, isFetching, isError, onSelect }: {
+  servers: OoklaServer[];
+  isFetching: boolean;
+  isError: boolean;
+  onSelect: (s: OoklaServer) => void;
+}) {
+  return (
+    <Command shouldFilter={false}>
+      <CommandList>
+        {isFetching && (
+          <div className="px-2 py-3 text-xs text-faint">Searching…</div>
+        )}
+        {isError && (
+          <div className="px-2 py-3 text-xs text-warn">Server list unavailable — enter an ID manually.</div>
+        )}
+        {!isFetching && !isError && servers.length === 0 && (
+          <CommandEmpty>No servers found</CommandEmpty>
+        )}
+        {!isFetching && !isError && servers.length > 0 && (
+          <CommandGroup heading="Servers">
+            {servers.slice(0, 50).map((s) => (
+              <CommandItem key={s.id} value={s.id} onSelect={() => onSelect(s)}>
+                <div className="flex w-full items-baseline justify-between gap-2">
+                  <span className="truncate text-fg">{s.name}</span>
+                  <span className="shrink-0 text-xs text-faint">
+                    {s.sponsor && s.sponsor !== s.name ? `${s.sponsor} · ` : ''}
+                    {s.location ? `${s.location}, ` : ''}
+                    {s.country}
+                    {s.distance_km !== undefined ? ` · ${Math.round(s.distance_km)} km` : ''}
+                  </span>
+                </div>
+              </CommandItem>
+            ))}
+          </CommandGroup>
+        )}
+      </CommandList>
+    </Command>
+  );
+}
+
 function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
+  // The popover only opens while the field is focused, never merely because
+  // it has enough characters — typing (fireEvent.change) alone must not
+  // open it, so tests that don't focus the field never mount PopoverContent
+  // (Radix's Popper positioning hangs jsdom for ~30s once mounted).
+  const [focused, setFocused] = useState(false);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [search]);
 
-  const servers = useOoklaServers(debouncedSearch, debouncedSearch.trim().length >= 2);
+  const enabled = debouncedSearch.trim().length >= 2;
+  const servers = useOoklaServers(debouncedSearch, enabled);
   const serverId = options.server_id === undefined ? '' : String(options.server_id);
+  const open = focused && enabled;
+
+  const handleSelect = (s: OoklaServer) => {
+    onChange(setOption(options, 'server_id', Number(s.id)));
+    setSearch(s.sponsor ? `${s.sponsor} — ${s.location}` : s.name);
+    setFocused(false);
+  };
 
   return (
     <div className="grid gap-3">
@@ -81,33 +140,31 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
       </div>
       <div>
         <label className={label} htmlFor="ookla-server-search">Search servers</label>
-        <input
-          id="ookla-server-search"
-          className={field}
-          value={search}
-          placeholder="city, country or host"
-          onChange={(e) => setSearch(e.target.value)}
-        />
-        {servers.isFetching && <p className="mt-1 text-xs text-faint">Searching…</p>}
-        {servers.data && servers.data.length > 0 && (
-          <ul className="mt-1 max-h-48 divide-y divide-line overflow-y-auto rounded border border-line">
-            {servers.data.slice(0, 50).map((s) => (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  className="flex w-full items-baseline justify-between px-2 py-1 text-left text-sm hover:bg-raised"
-                  onClick={() => onChange(setOption(options, 'server_id', Number(s.id)))}
-                >
-                  <span className="text-fg">{s.name}</span>
-                  <span className="text-xs text-faint">{s.location}, {s.country}</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-        {servers.isError && (
-          <p className="mt-1 text-xs text-warn">Server list unavailable — enter an ID manually.</p>
-        )}
+        <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
+          <PopoverAnchor asChild>
+            <input
+              id="ookla-server-search"
+              className={field}
+              value={search}
+              autoComplete="off"
+              placeholder="city, postcode, sponsor or host"
+              onFocus={() => setFocused(true)}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </PopoverAnchor>
+          <PopoverContent
+            align="start"
+            onOpenAutoFocus={(e) => e.preventDefault()}
+            className="w-[--radix-popover-trigger-width] p-0"
+          >
+            <OoklaResultsList
+              servers={servers.data ?? []}
+              isFetching={servers.isFetching}
+              isError={servers.isError}
+              onSelect={handleSelect}
+            />
+          </PopoverContent>
+        </Popover>
       </div>
     </div>
   );

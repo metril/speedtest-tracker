@@ -11,13 +11,21 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine/execx"
 )
 
-// Server is one entry of the Ookla server list.
+// Server is one entry of the Ookla server list. Sponsor, Lat, Lon and
+// DistanceKm are only populated by a remote search (internal/ooklaweb);
+// the local `speedtest -L` list leaves them zero. DistanceKm is only
+// meaningful once a geocode point was resolved for the query, so it is
+// omitted otherwise.
 type Server struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Location string `json:"location"`
-	Country  string `json:"country"`
-	Host     string `json:"host"`
+	ID         string  `json:"id"`
+	Name       string  `json:"name"`
+	Location   string  `json:"location"`
+	Country    string  `json:"country"`
+	Host       string  `json:"host"`
+	Sponsor    string  `json:"sponsor,omitempty"`
+	Lat        float64 `json:"lat,omitempty"`
+	Lon        float64 `json:"lon,omitempty"`
+	DistanceKm float64 `json:"distance_km,omitempty"`
 }
 
 // ServerList fetches and caches `speedtest -L -f json`.

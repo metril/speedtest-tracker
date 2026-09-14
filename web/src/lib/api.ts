@@ -49,6 +49,10 @@ export interface OoklaServer {
   location: string;
   country: string;
   host: string;
+  sponsor?: string;
+  lat?: number;
+  lon?: number;
+  distance_km?: number;
 }
 
 export interface ResultsPage {
