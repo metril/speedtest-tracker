@@ -13,7 +13,6 @@ export const queryKeys = {
   tags: ['tags'] as const,
   runs: ['runs'] as const,
   schedules: ['schedules'] as const,
-  scheduleRuns: (id: number) => ['runs', 'schedule', id] as const,
   cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
   targetLatest: (id: number) => ['target-latest', id] as const,
   history: (id: number, range: Range) => ['history', id, range] as const,
@@ -158,14 +157,6 @@ export function useCronPreview(cron: string, timezone: string) {
     enabled: cron.trim().length > 0,
     retry: false,
     staleTime: 30_000,
-  });
-}
-
-/** useScheduleRuns backs the "last run" column on the Schedules page. */
-export function useScheduleRuns(id: number) {
-  return useQuery({
-    queryKey: queryKeys.scheduleRuns(id),
-    queryFn: () => api.listRuns(id),
   });
 }
 

@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { ResultFiltersBar } from '../features/results/ResultFilters';
 import { ResultsTable } from '../features/results/ResultsTable';
+import { TagsPanel } from '../features/results/TagsPanel';
 import { useLivePanel } from '../features/live/LiveRunProvider';
+import { resultsCsvUrl } from '../lib/api';
 import type { ResultFilters } from '../lib/api';
 import {
   useDeleteResult, useReexecute, useResults, useSetTags, useTargets,
@@ -23,10 +25,26 @@ export function Results() {
     <section className="grid gap-4">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Results</h1>
-        <span className="text-sm text-faint">{rows.length} loaded</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-faint">{rows.length} loaded</span>
+          <a
+            className="rounded border border-line px-3 py-1.5 text-sm text-muted hover:text-fg"
+            href={resultsCsvUrl(filters)}
+            download
+          >
+            Export CSV
+          </a>
+        </div>
       </header>
 
       <ResultFiltersBar value={filters} onChange={setFilters} targets={targets.data ?? []} />
+
+      <details className="rounded border border-line p-3">
+        <summary className="cursor-pointer text-sm text-muted">Manage tags</summary>
+        <div className="mt-3">
+          <TagsPanel />
+        </div>
+      </details>
 
       {results.isLoading && <p className="text-sm text-muted">Loading results…</p>}
       {results.isError && <p className="text-sm text-bad">Could not load results.</p>}

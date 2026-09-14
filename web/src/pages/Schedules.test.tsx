@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import * as api from '../lib/api';
 import { Schedules } from './Schedules';
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -10,11 +11,14 @@ function jsonResponse(body: unknown, status = 200): Response {
 
 const schedule = {
   id: 1, name: 'nightly', cron: '0 3 * * *', enabled: true, timezone: 'UTC',
-  target_ids: [1], next_run: '2026-09-14T03:00:00Z', created_at: '', updated_at: '',
+  target_ids: [1], next_run: '2026-09-14T03:00:00Z',
+  last_run: { status: 'done', started_at: '2026-09-13T03:00:00Z' },
+  created_at: '', updated_at: '',
 };
 const schedule2 = {
   id: 2, name: 'weekly', cron: '0 4 * * 0', enabled: true, timezone: 'UTC',
-  target_ids: [2], next_run: '2026-09-14T04:00:00Z', created_at: '', updated_at: '',
+  target_ids: [2], next_run: '2026-09-14T04:00:00Z', last_run: null,
+  created_at: '', updated_at: '',
 };
 const target1 = { id: 1, name: 't1', engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
 const target2 = { id: 2, name: 't2', engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
@@ -48,6 +52,13 @@ describe('Schedules page', () => {
     expect(await screen.findByText('nightly')).toBeInTheDocument();
     expect(screen.getByText('0 3 * * *')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('done')).toBeInTheDocument());
+  });
+
+  it('renders the batched last run without fetching runs per schedule', async () => {
+    const listRuns = vi.spyOn(api, 'listRuns');
+    wrap();
+    expect(await screen.findByText('done')).toBeInTheDocument();
+    expect(listRuns).not.toHaveBeenCalled();
   });
 
   it('runs a schedule now', async () => {

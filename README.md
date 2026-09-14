@@ -5,10 +5,11 @@ named schedules, SQLite as the source of truth, with an embedded React UI.
 
 ## Status
 
-Milestone 4 (schedules and live runs): the `Engine` interface plus the Ookla,
-Cloudflare, iperf3 and fake engines; targets and schedules with cron-driven
-execution; a React UI for targets, schedules and results, including a live
-view of an in-progress run.
+Milestone 5 (dashboard): the `Engine` interface plus the Ookla, Cloudflare,
+iperf3 and fake engines; targets and schedules with cron-driven execution; a
+React UI for targets, schedules and results, including a live view of an
+in-progress run, a per-target dashboard, an outage timeline, CSV export and
+tag management.
 
 ## Requirements
 
@@ -104,6 +105,42 @@ gauge, a throughput sparkline, ping/jitter/loss tiles, the server and ISP, a
 per-target stepper for multi-target runs and a cancel button. Runs started from
 the UI open the panel directly; scheduled runs appear as a compact bar.
 
+## Dashboard
+
+The dashboard shows one card per target — latest download, upload and ping, a
+24-hour sparkline, a status dot and a "Run now" button — over a 24h / 7d / 30d
+range selector, plus summary tiles (tests run, success rate, average download,
+worst ping), a download/upload chart, a ping/jitter chart and an outage strip.
+
+Chart data is downsampled **in SQL**: `GET /api/v1/targets/{id}/history?range=7d`
+returns `{bucket_seconds, points[]}` with at most ~500 buckets, each carrying
+avg/min/max download, upload and ping plus the test and failure counts for that
+bucket. `GET /api/v1/stats/summary?range=` is cached in-memory for 30 seconds
+and sent with `Cache-Control: max-age=30`.
+
+## Outages
+
+`GET /api/v1/outages?from&to&gap_seconds` returns the trouble timeline:
+consecutive failed or degraded results for one target that are no further apart
+than `gap_seconds` (default 1800, i.e. twice a 15-minute schedule) collapse into
+one incident with its start, end and test count; every `skipped` cron fire is its
+own incident named after the schedule.
+
+## CSV export
+
+`GET /api/v1/results.csv` accepts the same filters as `GET /api/v1/results`
+(`target_id`, `engine`, `status`, `from`, `to`, `tag`) and streams rows as they
+are read from SQLite, so exporting a year of history costs one row of memory.
+The Results page's "Export CSV" button links to it with the filters currently
+applied.
+
+## Theme
+
+The UI ships light, dark and system themes; the header toggle persists the
+choice in `localStorage` (`st-theme`) and stamps `light`/`dark` on `<html>`.
+Every colour comes from one token set defined in `web/src/index.css`, including
+the shared chart palette.
+
 ## API conventions
 
 `/api/v1` follows a few consistent shapes:
@@ -114,6 +151,8 @@ the UI open the panel directly; scheduled runs appear as a compact bar.
 - Every other list (`/targets`, `/tags`, `/ookla/servers`) returns a bare JSON array.
 - Errors always use the envelope `{"error": {"code": "...", "message": "..."}}`,
   with a matching HTTP status code (400 invalid_request, 404 not_found, 500 internal_error, etc).
+- `/results`, `/targets`, `/schedules` and `/runs` send an `ETag`; a matching
+  `If-None-Match` gets back `304 Not Modified` with no body.
 
 ## Docker
 

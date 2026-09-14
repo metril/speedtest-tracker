@@ -1,20 +1,19 @@
 import { useState } from 'react';
 import { ScheduleForm } from '../features/schedules/ScheduleForm';
 import { useLivePanel } from '../features/live/LiveRunProvider';
-import type { Schedule, ScheduleInput, ScheduleSaved } from '../lib/api';
+import type { Schedule, ScheduleInput, ScheduleRun, ScheduleSaved } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { formatDateTime, formatRelative } from '../lib/format';
 import {
-  useCreateSchedule, useDeleteSchedule, useRunSchedule, useScheduleRuns, useSchedules,
+  useCreateSchedule, useDeleteSchedule, useRunSchedule, useSchedules,
   useTargets, useUpdateSchedule,
 } from '../lib/queries';
 
 type Editing = { mode: 'none' } | { mode: 'new' } | { mode: 'edit'; schedule: Schedule };
 
-/** LastRun shows the most recent run of one schedule. */
-function LastRun({ scheduleId }: { scheduleId: number }) {
-  const runs = useScheduleRuns(scheduleId);
-  const last = runs.data?.runs[0];
+/** LastRun shows the most recent run of one schedule, from the batched
+ * `last_run` field on the schedule row rather than a per-row fetch. */
+function LastRun({ last }: { last: ScheduleRun | null }) {
   if (!last) return <span className="text-faint">never run</span>;
   const tone = last.status === 'done' ? 'text-ok'
     : last.status === 'skipped' ? 'text-warn'
@@ -116,7 +115,7 @@ export function Schedules() {
                   {s.next_run ? formatDateTime(s.next_run) : '—'}
                   <span className="ml-2 text-xs text-faint">{s.timezone}</span>
                 </td>
-                <td className="py-2 pr-3"><LastRun scheduleId={s.id} /></td>
+                <td className="py-2 pr-3"><LastRun last={s.last_run} /></td>
                 <td className="py-2 text-right">
                   <div className="flex justify-end gap-2">
                     <button

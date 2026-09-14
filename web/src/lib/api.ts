@@ -203,6 +203,11 @@ export const listTags = () => request<{ id: number; name: string }[]>('/tags');
 export const cancelRun = (id: number) =>
   request<{ run_id: number }>(`/runs/${id}`, { method: 'DELETE' });
 
+export interface ScheduleRun {
+  status: string;
+  started_at: string;
+}
+
 export interface Schedule {
   id: number;
   name: string;
@@ -211,6 +216,7 @@ export interface Schedule {
   timezone: string;
   target_ids: number[];
   next_run: string;
+  last_run: ScheduleRun | null;
   created_at: string;
   updated_at: string;
 }
