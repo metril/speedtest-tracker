@@ -211,6 +211,9 @@ func New(deps Deps) http.Handler {
 			v1.Put("/settings", deps.putSettings)
 			v1.Post("/settings/test/notify/{channel_id}", deps.testNotifyChannel)
 			v1.Post("/settings/test/{target}", deps.testIntegration)
+			v1.Get("/settings/tokens", deps.listTokens)
+			v1.Post("/settings/tokens", deps.createToken)
+			v1.Delete("/settings/tokens/{id}", deps.deleteToken)
 		}
 	})
 
