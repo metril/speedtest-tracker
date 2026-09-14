@@ -1,9 +1,31 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { TargetForm } from './TargetForm';
+
+// TargetForm renders EngineOptionFields' Ookla/iperf3 server pickers, which
+// wrap their results in a Radix Popover. Rendering Radix's real
+// PopoverContent (its floating-ui Popper positioning) with open=true hangs
+// jsdom for ~25-30s regardless of how `open` became true — see the same
+// mock and its longer rationale comment in EngineOptionFields.test.tsx. This
+// file doesn't test popover open/close behavior itself, so a minimal
+// stand-in that just renders children (always, for the always-visible
+// anchored input; only-when-open for the results list) is enough to keep
+// the tests below from tripping over it.
+const PopoverOpenContext = createContext(false);
+
+vi.mock('@/components/ui/popover', () => ({
+  Popover: ({ open, children }: { open: boolean; children: ReactNode }) => (
+    <PopoverOpenContext.Provider value={open}>{children}</PopoverOpenContext.Provider>
+  ),
+  PopoverAnchor: ({ children }: { children: ReactNode }) => children,
+  PopoverContent: ({ children }: { children: ReactNode }) => {
+    const open = useContext(PopoverOpenContext);
+    return open ? <div>{children}</div> : null;
+  },
+}));
 
 function wrap(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });

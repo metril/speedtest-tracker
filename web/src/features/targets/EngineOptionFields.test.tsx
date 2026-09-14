@@ -2,12 +2,53 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
   act, fireEvent, render, screen, waitFor,
 } from '@testing-library/react';
-import type { ReactNode } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
 import { EngineOptionFields, Iperf3ResultsList, OoklaResultsList } from './EngineOptionFields';
+
+// Rendering Radix's real PopoverContent (its floating-ui Popper positioning)
+// with open=true hangs jsdom for ~25-30s regardless of how `open` became
+// true — confirmed with a minimal repro (Popover+PopoverAnchor+PopoverContent,
+// no app code involved) while fixing the "typing after the popover closes
+// itself never reopens it" bug. jsdom's ResizeObserver is already stubbed in
+// test-setup.ts, so that's not it; something in floating-ui's autoUpdate loop
+// against jsdom's always-zero layout never settles.
+//
+// So this file replaces '@/components/ui/popover' with a lightweight stand-in
+// that preserves the real open/close *state machine* our components drive
+// (Popover always renders its children so the anchored <input> stays
+// visible; PopoverContent only renders when `open` is true) without any of
+// Radix's real dismiss/positioning machinery. A hidden
+// `mock-popover-force-close` button simulates what a real outside
+// interaction or Escape does (call onOpenChange(false)), which lets
+// "OoklaFields: reopens after closing" below exercise the actual fix
+// (typing after a close sets `focused` back to true) — the outside-click
+// *detection* itself (onInteractOutside) can't be exercised in jsdom, per
+// the above.
+const PopoverOpenContext = createContext(false);
+
+vi.mock('@/components/ui/popover', () => ({
+  Popover: ({ open, onOpenChange, children }: {
+    open: boolean; onOpenChange?: (open: boolean) => void; children: ReactNode;
+  }) => (
+    <PopoverOpenContext.Provider value={open}>
+      {children}
+      <button
+        type="button"
+        data-testid="mock-popover-force-close"
+        onClick={() => onOpenChange?.(false)}
+      />
+    </PopoverOpenContext.Provider>
+  ),
+  PopoverAnchor: ({ children }: { children: ReactNode }) => children,
+  PopoverContent: ({ children }: { children: ReactNode }) => {
+    const open = useContext(PopoverOpenContext);
+    return open ? <div>{children}</div> : null;
+  },
+}));
 
 function wrap(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -85,16 +126,10 @@ describe('OoklaFields: manual server ID input', () => {
   });
 });
 
-// Note: these tests deliberately never let the search Popover actually
-// open. Rendering Radix's PopoverContent (Popper positioning) in jsdom
-// hangs the test runner for ~30s per the task brief's jsdom note, whether
-// triggered by a click or, as found here, simply by controlled `open`
-// becoming true. The picker's visible rendering (sponsor/location/country/
-// distance, empty/error/loading states, selection) is covered instead by
-// the "OoklaResultsList (tested directly, no Popover)" suite below; here we
-// only check that OoklaFields wires the debounced query and manual ID
-// input correctly, which doesn't require the popover to mount.
-describe('OoklaFields: search wiring (popover stays closed)', () => {
+// The Popover mock above means these no longer risk the jsdom hang: they
+// check that OoklaFields wires the debounced query and manual ID input
+// correctly (and, below, that closing/reopening the picker works).
+describe('OoklaFields: search wiring', () => {
   it('fetches with the typed query once the debounce settles', async () => {
     fetchMock.mockImplementation(async () => jsonResponse([denver, boulder]));
     wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
@@ -116,6 +151,29 @@ describe('OoklaFields: search wiring (popover stays closed)', () => {
 
     fireEvent.change(screen.getByLabelText('Ookla server ID'), { target: { value: '42' } });
     expect(onChange).toHaveBeenCalledWith({ server_id: 42 });
+  });
+
+  // Regression test for the real-browser/Playwright bug: a click into an
+  // already-focused search field (or a second click) fires Radix's
+  // interact-outside on PopoverContent, closing the popover — and since
+  // focus never actually changes, typing afterwards used to never reopen
+  // it (onChange only updated `search`, not `focused`). The fix makes
+  // onChange also set `focused` back to true. Real outside-interaction
+  // *detection* can't be exercised under jsdom (see the mock's top-of-file
+  // note), so "closing" is simulated via the mock's force-close button,
+  // which calls the same onOpenChange(false) a real dismiss would.
+  it('reopens the results list once typing resumes after the popover was closed', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse([denver]));
+    wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver' } });
+    expect(await screen.findByText('Comcast')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-popover-force-close'));
+    expect(screen.queryByText('Comcast')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver2' } });
+    expect(await screen.findByText('Comcast')).toBeInTheDocument();
   });
 });
 
@@ -157,11 +215,10 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
   });
 });
 
-// Same jsdom-hang rationale as the Ookla suite above: the picker's fetch
-// wiring is checked here without ever focusing the field (which would
-// mount the Popover); the visible list rendering is covered separately by
+// The Popover mock at the top of this file means these are safe from the
+// jsdom hang; the visible list rendering is covered separately by
 // "Iperf3ResultsList (tested directly, no Popover)".
-describe('Iperf3Fields: picker wiring (popover stays closed)', () => {
+describe('Iperf3Fields: picker wiring', () => {
   it('fetches the public server list (debounced) without needing a query', async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
     wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
@@ -180,6 +237,25 @@ describe('Iperf3Fields: picker wiring (popover stays closed)', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
     const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
     expect(String(url)).toContain('q=denver');
+  });
+
+  // Same regression as OoklaFields' "reopens the results list..." test
+  // above: closing (simulated via the mock's force-close button) must not
+  // permanently disable reopening on further typing.
+  it('reopens the results list once typing resumes after the popover was closed', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+
+    // The picker only opens once focused (see the jsdom-hang rationale
+    // above) — focus it to see the already-fetched default list.
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
+    expect(await screen.findByText('iperf.example.net:5201')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-popover-force-close'));
+    expect(screen.queryByText('iperf.example.net:5201')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText('Pick from public list'), { target: { value: 'frank' } });
+    expect(await screen.findByText('iperf.example.net:5201')).toBeInTheDocument();
   });
 
   it('keeps the host and port fields directly editable', () => {

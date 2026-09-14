@@ -139,3 +139,75 @@ func TestOoklaServerSearchRespectsLimit(t *testing.T) {
 		t.Errorf("search called with limit=%d, want 2", search.gotLimit)
 	}
 }
+
+// errServerList always fails, simulating e.g. the speedtest binary missing:
+// exec: "speedtest": executable file not found in $PATH.
+type errServerList struct{ err error }
+
+func (e errServerList) Servers(context.Context) ([]ookla.Server, error) { return nil, e.err }
+
+func TestOoklaServerSearchLocalErrorFallsBackToRemote(t *testing.T) {
+	search := &stubSearcher{servers: []ookla.Server{
+		{ID: "101", Name: "Comcast", Location: "Denver, CO"},
+	}}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.ServerList = errServerList{err: errors.New(`exec: "speedtest": executable file not found in $PATH`)}
+		d.OoklaSearch = search
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=denver", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (remote still served despite local failure)", rec.Code)
+	}
+	var got []ookla.Server
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].ID != "101" {
+		t.Fatalf("got = %+v, want remote-only hit", got)
+	}
+}
+
+func TestOoklaServerSearchBothSourcesFailIs502(t *testing.T) {
+	search := &stubSearcher{err: errors.New("upstream unreachable")}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.ServerList = errServerList{err: errors.New("local list unavailable")}
+		d.OoklaSearch = search
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=denver", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (both sources failed)", rec.Code)
+	}
+}
+
+func TestOoklaServerSearchLocalErrorWithNoSearcherIs502(t *testing.T) {
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.ServerList = errServerList{err: errors.New("local list unavailable")}
+		d.OoklaSearch = nil
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=denver", nil)
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (local failed, no remote to fall back on)", rec.Code)
+	}
+}
+
+func TestOoklaServerSearchLocalErrorWithEmptyQueryReturnsEmptyList(t *testing.T) {
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		d.ServerList = errServerList{err: errors.New("local list unavailable")}
+		d.OoklaSearch = nil
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (empty query never attempts remote, so this isn't a hard failure)", rec.Code)
+	}
+	var got []ookla.Server
+	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("got = %+v, want []", got)
+	}
+}

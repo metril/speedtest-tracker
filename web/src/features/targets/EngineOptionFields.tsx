@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useIperf3Servers, useOoklaServers } from '../../lib/queries';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
@@ -109,6 +109,11 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   // open it, so tests that don't focus the field never mount PopoverContent
   // (Radix's Popper positioning hangs jsdom for ~30s once mounted).
   const [focused, setFocused] = useState(false);
+  // Anchors the input so PopoverContent's onInteractOutside can tell "the
+  // user is still interacting with the search field" (already-focused
+  // click, a second click, Playwright's fill()) apart from a real
+  // outside interaction — see the onInteractOutside comment below.
+  const anchorRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
@@ -143,18 +148,28 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
         <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
           <PopoverAnchor asChild>
             <input
+              ref={anchorRef}
               id="ookla-server-search"
               className={field}
               value={search}
               autoComplete="off"
               placeholder="city, postcode, sponsor or host"
               onFocus={() => setFocused(true)}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setFocused(true); }}
             />
           </PopoverAnchor>
           <PopoverContent
             align="start"
             onOpenAutoFocus={(e) => e.preventDefault()}
+            // Radix treats any pointer-down outside PopoverContent as a
+            // dismiss, including a second click/fill() on the already-
+            // focused anchor input (jsdom aside, this reproduces in real
+            // browsers and Playwright): focus never changes, so the popover
+            // never reopens on its own. Interacting with the anchor itself
+            // must never count as "outside".
+            onInteractOutside={(e) => {
+              if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
+            }}
             className="w-[--radix-popover-trigger-width] p-0"
           >
             <OoklaResultsList
@@ -277,6 +292,9 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
   // the field is focused, never merely from typing.
   const [focused, setFocused] = useState(false);
   const [pickedHints, setPickedHints] = useState<{ reverse: boolean; udp: boolean } | null>(null);
+  // Same "interacting with the anchor isn't an outside interaction" need
+  // as OoklaFields — see its onInteractOutside comment.
+  const anchorRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
@@ -322,18 +340,22 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
         <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
           <PopoverAnchor asChild>
             <input
+              ref={anchorRef}
               id="iperf-public-search"
               className={field}
               value={search}
               autoComplete="off"
               placeholder="host, site, country or provider"
               onFocus={() => setFocused(true)}
-              onChange={(e) => setSearch(e.target.value)}
+              onChange={(e) => { setSearch(e.target.value); setFocused(true); }}
             />
           </PopoverAnchor>
           <PopoverContent
             align="start"
             onOpenAutoFocus={(e) => e.preventDefault()}
+            onInteractOutside={(e) => {
+              if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
+            }}
             className="w-[--radix-popover-trigger-width] p-0"
           >
             <Iperf3ResultsList
