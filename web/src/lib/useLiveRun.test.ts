@@ -127,4 +127,78 @@ describe('useLiveRun', () => {
       type: 'result', result: expect.objectContaining({ id: 5 }),
     }));
   });
+
+  it('ignores a queued event for a different run while one is in flight', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9 }));
+
+    act(() => emit('run', { run_id: 2, status: 'queued', targets_total: 1, targets_done: 0 }));
+
+    expect(result.current?.runId).toBe(1);
+    expect(result.current?.bps).toBe(10e6);
+  });
+
+  it('switches to a different run once it starts running or reaches a terminal status', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+
+    act(() => emit('run', { run_id: 2, status: 'running', targets_total: 1, targets_done: 0 }));
+    expect(result.current?.runId).toBe(2);
+  });
+
+  it('resets isp and serverName when the target changes within the same run', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9, server_name: 'fra' }));
+    act(() => emit('result', { id: 1, target_id: 2, isp: 'Comcast', server_name: 'fra' }));
+    expect(result.current?.isp).toBe('Comcast');
+
+    act(() => emit('progress', { run_id: 1, target_id: 3, engine: 'fake', phase: 'ping', progress: 0.1, bps: 0, ping_ms: 5 }));
+    expect(result.current?.isp).toBe('');
+    expect(result.current?.serverName).toBe('');
+  });
+
+  it('marks the run stale after 60s without any event', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useLiveRun());
+      act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9 }));
+      expect(result.current?.finished).toBe(false);
+
+      act(() => { vi.advanceTimersByTime(60_000); });
+
+      expect(result.current?.finished).toBe(true);
+      expect(result.current?.status).toBe('stale');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not go stale if events keep arriving', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useLiveRun());
+      act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9 }));
+      act(() => { vi.advanceTimersByTime(45_000); });
+      act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.6, bps: 11e6, ping_ms: 9 }));
+      act(() => { vi.advanceTimersByTime(45_000); });
+
+      expect(result.current?.finished).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not go stale once the run already finished normally', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useLiveRun());
+      act(() => emit('run', { run_id: 1, status: 'done', targets_total: 1, targets_done: 1 }));
+      act(() => { vi.advanceTimersByTime(60_000); });
+
+      expect(result.current?.status).toBe('done');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

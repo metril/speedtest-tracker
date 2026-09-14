@@ -4,6 +4,11 @@ import type { Result } from './api';
 /** How many instantaneous throughput samples the sparkline keeps. */
 const MAX_SAMPLES = 60;
 
+/** If no event arrives for this long while a run is unfinished, the stream
+ * is presumed stuck (dropped connection, backend restart) and the run is
+ * marked finished with status "stale" rather than spinning forever. */
+const STALE_TIMEOUT_MS = 60_000;
+
 export interface LiveRun {
   runId: number;
   targetId: number;
@@ -70,15 +75,33 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
   const [live, setLive] = useState<LiveRun | null>(null);
   const onEventRef = useRef(options?.onEvent);
   onEventRef.current = options?.onEvent;
+  // Mirrors `live` synchronously so the staleness timer (which fires
+  // outside React's render cycle) can check "still unfinished?" without a
+  // stale closure over state.
+  const liveRef = useRef<LiveRun | null>(null);
+  liveRef.current = live;
 
   useEffect(() => {
     const source = new EventSource('/api/v1/events');
+    let staleTimer: ReturnType<typeof setTimeout> | undefined;
+
+    const armStaleTimer = () => {
+      clearTimeout(staleTimer);
+      staleTimer = setTimeout(() => {
+        setLive((prev) => {
+          if (!prev || prev.finished) return prev;
+          return { ...prev, status: 'stale', finished: true };
+        });
+      }, STALE_TIMEOUT_MS);
+    };
 
     const onProgress = (e: MessageEvent) => {
+      armStaleTimer();
       const p = JSON.parse(e.data) as ProgressPayload;
       setLive((prev) => {
         const sameRun = prev && prev.runId === p.run_id;
-        const samePhase = sameRun && prev!.phase === p.phase && prev!.targetId === p.target_id;
+        const sameTarget = sameRun && prev!.targetId === p.target_id;
+        const samePhase = sameTarget && prev!.phase === p.phase;
         const samples = samePhase ? prev!.samples : [];
         const next = p.bps > 0 ? [...samples, p.bps].slice(-MAX_SAMPLES) : samples;
         return {
@@ -92,8 +115,10 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
           pingMs: p.ping_ms ?? 0,
           jitterMs: p.jitter_ms ?? 0,
           lossPct: p.loss_pct ?? 0,
-          serverName: p.server_name ?? (sameRun ? prev!.serverName : ''),
-          isp: sameRun ? prev!.isp : '',
+          // A target change within the same run means a new speedtest
+          // process with its own ISP/server, so these must not linger.
+          serverName: p.server_name ?? (sameTarget ? prev!.serverName : ''),
+          isp: sameTarget ? prev!.isp : '',
           status: 'running',
           targetsTotal: sameRun ? prev!.targetsTotal : 1,
           targetsDone: sameRun ? prev!.targetsDone : 0,
@@ -104,6 +129,7 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
     };
 
     const onResult = (e: MessageEvent) => {
+      armStaleTimer();
       const result = JSON.parse(e.data) as Result;
       onEventRef.current?.({ type: 'result', result });
       setLive((prev) => {
@@ -122,6 +148,15 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
       if (TERMINAL.has(r.status)) {
         onEventRef.current?.({ type: 'run', status: r.status });
       }
+      const prevBefore = liveRef.current;
+      if (prevBefore && prevBefore.runId !== r.run_id && !prevBefore.finished
+        && r.status !== 'running' && !TERMINAL.has(r.status)) {
+        // A queued/pending event for some other run must not stomp the run
+        // currently in flight; e.g. the next cron fire being queued while
+        // this one still streams progress.
+        return;
+      }
+      armStaleTimer();
       setLive((prev) => {
         if (!prev || prev.runId !== r.run_id) {
           // A `run` event can arrive before the first `progress` event (or
@@ -161,6 +196,7 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
     source.addEventListener('result', onResult);
     source.addEventListener('run', onRun);
     return () => {
+      clearTimeout(staleTimer);
       source.removeEventListener('progress', onProgress);
       source.removeEventListener('result', onResult);
       source.removeEventListener('run', onRun);
