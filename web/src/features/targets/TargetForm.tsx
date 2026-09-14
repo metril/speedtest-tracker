@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { Target, TargetInput } from '../../lib/api';
-import { EngineOptionFields, type Options } from './EngineOptionFields';
+import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
 
 const ENGINES = ['ookla', 'cloudflare', 'iperf3', 'fake'] as const;
 const LANES = ['wan', 'lan'] as const;
@@ -26,6 +26,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   const [touched, setTouched] = useState(false);
 
   const nameInvalid = name.trim() === '';
+  const optionsError = validateEngineOptions(engine, options);
 
   return (
     <form
@@ -33,7 +34,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
       onSubmit={(e) => {
         e.preventDefault();
         setTouched(true);
-        if (nameInvalid) return;
+        if (nameInvalid || optionsError) return;
         onSubmit({ name: name.trim(), engine, enabled, lane, options });
       }}
     >

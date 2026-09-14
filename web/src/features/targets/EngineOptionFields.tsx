@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useOoklaServers } from '../../lib/queries';
 
 export type Options = Record<string, unknown>;
@@ -29,6 +29,20 @@ function numberOr(value: string): number | '' {
   return Number.isFinite(n) ? n : '';
 }
 
+/** validateEngineOptions returns a blocking error message for the current options, if any. */
+export function validateEngineOptions(engine: string, options: Options): string | undefined {
+  if (engine !== 'iperf3') return undefined;
+  const password = options.password;
+  if (typeof password === 'string' && password !== '') {
+    if (!options.username || !options.rsa_public_key_path) {
+      return 'Password requires a username and RSA public key path';
+    }
+  }
+  return undefined;
+}
+
+const DEBOUNCE_MS = 300;
+
 /** EngineOptionFields renders the option form for one engine. */
 export function EngineOptionFields({ engine, options, onChange }: Props) {
   if (engine === 'ookla') return <OoklaFields options={options} onChange={onChange} />;
@@ -43,7 +57,14 @@ export function EngineOptionFields({ engine, options, onChange }: Props) {
 
 function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   const [search, setSearch] = useState('');
-  const servers = useOoklaServers(search, search.trim().length >= 2);
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const servers = useOoklaServers(debouncedSearch, debouncedSearch.trim().length >= 2);
   const serverId = options.server_id === undefined ? '' : String(options.server_id);
 
   return (
@@ -143,6 +164,13 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
   const text = (key: string) => (options[key] === undefined ? '' : String(options[key]));
   const checked = (key: string) => options[key] === true;
 
+  const protocol = text('protocol') || 'tcp';
+  const isUdp = protocol === 'udp';
+  const reverseOn = checked('reverse');
+  const bidirOn = checked('bidir');
+  const passwordSet = typeof options.password === 'string' && options.password !== '';
+  const passwordNeedsAuth = passwordSet && (!options.username || !options.rsa_public_key_path);
+
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
@@ -157,8 +185,14 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
       </div>
       <div>
         <label className={label} htmlFor="iperf-protocol">Protocol</label>
-        <select id="iperf-protocol" className={field} value={text('protocol') || 'tcp'}
-          onChange={(e) => onChange(setOption(options, 'protocol', e.target.value === 'tcp' ? '' : e.target.value))}>
+        <select id="iperf-protocol" className={field} value={protocol}
+          onChange={(e) => {
+            const nextProtocol = e.target.value;
+            let next = setOption(options, 'protocol', nextProtocol === 'tcp' ? '' : nextProtocol);
+            if (nextProtocol === 'udp' && bidirOn) next = setOption(next, 'bidir', false);
+            if (nextProtocol === 'tcp' && options.udp_bitrate !== undefined) next = setOption(next, 'udp_bitrate', '');
+            onChange(next);
+          }}>
           <option value="tcp">TCP</option>
           <option value="udp">UDP</option>
         </select>
@@ -176,6 +210,7 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
       <div>
         <label className={label} htmlFor="iperf-bitrate">UDP bitrate</label>
         <input id="iperf-bitrate" className={field} value={text('udp_bitrate')} placeholder="100M"
+          disabled={!isUdp} title={isUdp ? undefined : 'Only applies to UDP'}
           onChange={(e) => onChange(setOption(options, 'udp_bitrate', e.target.value))} />
       </div>
       <div>
@@ -193,13 +228,23 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
         <input id="iperf-rsa" className={field} value={text('rsa_public_key_path')}
           onChange={(e) => onChange(setOption(options, 'rsa_public_key_path', e.target.value))} />
       </div>
+      <div>
+        <label className={label} htmlFor="iperf-password">Password</label>
+        <input id="iperf-password" type="password" className={field} value={text('password')}
+          onChange={(e) => onChange(setOption(options, 'password', e.target.value))} />
+        {passwordNeedsAuth && (
+          <p className="mt-1 text-xs text-amber-400">
+            Password requires a username and RSA public key path
+          </p>
+        )}
+      </div>
       <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-reverse">
-        <input id="iperf-reverse" type="checkbox" checked={checked('reverse')}
+        <input id="iperf-reverse" type="checkbox" checked={reverseOn} disabled={bidirOn}
           onChange={(e) => onChange(setOption(options, 'reverse', e.target.checked))} />
         Reverse (-R)
       </label>
       <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-bidir">
-        <input id="iperf-bidir" type="checkbox" checked={checked('bidir')}
+        <input id="iperf-bidir" type="checkbox" checked={bidirOn} disabled={reverseOn || isUdp}
           onChange={(e) => onChange(setOption(options, 'bidir', e.target.checked))} />
         Bidirectional (--bidir)
       </label>
