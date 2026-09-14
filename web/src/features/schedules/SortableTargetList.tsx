@@ -141,7 +141,16 @@ export function SortableTargetList({ selected, byID, onChange }: Props) {
               key={id}
               ref={virtualizer.measureElement}
               id={id} label={label(id)} index={vi.index} count={selected.length}
-              style={{ position: 'absolute', top: 0, left: 0, right: 0, transform: `translateY(${vi.start}px)` }}
+              // Position with `top`, not `transform: translateY(...)`: dnd-kit
+              // measures droppable rects with `ignoreTransform: true` by
+              // default, so a transform-only position makes every virtualized
+              // row measure at the same rect (all at top: 0) and `over` never
+              // resolves to a different item — drag looked live (the dragged
+              // row followed the pointer, aria-pressed flipped) but never
+              // committed a reorder past the threshold. `top` is real layout
+              // position dnd-kit's rect measurement sees; `transform` stays
+              // reserved for dnd-kit's own drag-offset styling in Row.
+              style={{ position: 'absolute', top: vi.start, left: 0, right: 0 }}
               onMove={move} onRemove={remove}
             />
           );

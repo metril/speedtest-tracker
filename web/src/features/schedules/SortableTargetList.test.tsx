@@ -74,6 +74,30 @@ describe('SortableTargetList', () => {
       }
     });
 
+    it('positions virtualized rows with top, not a translateY transform', () => {
+      // Regression: dnd-kit measures droppable rects with transforms
+      // ignored, so a transform-only position made every virtualized row
+      // measure at the same rect and drag never committed a reorder past
+      // the threshold (though it visually looked live). Rows must be
+      // positioned with real `top`, leaving `transform` free for dnd-kit's
+      // own drag-offset styling.
+      const many = Array.from({ length: 60 }, (_, i) => i + 1);
+      const manyByID = new Map(many.map((id) => [id, target(id, `t${id}`)]));
+      render(<SortableTargetList selected={many} byID={manyByID} onChange={vi.fn()} />);
+
+      const rows = Array.from(screen.getByRole('list').children) as HTMLElement[];
+      expect(rows.length).toBeGreaterThan(1);
+      const tops = rows.map((row) => {
+        expect(row.style.position).toBe('absolute');
+        expect(row.style.transform).not.toMatch(/translateY/);
+        expect(row.style.top).not.toBe('');
+        return row.style.top;
+      });
+      // Successive rows must land at distinct, increasing `top` offsets —
+      // the bug this guards against left every row at the same rect.
+      expect(new Set(tops).size).toBe(tops.length);
+    });
+
     it('keeps the ↑/↓ buttons working past the threshold', async () => {
       const many = Array.from({ length: 60 }, (_, i) => i + 1);
       const manyByID = new Map(many.map((id) => [id, target(id, `t${id}`)]));

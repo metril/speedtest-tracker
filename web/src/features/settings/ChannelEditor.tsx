@@ -1,6 +1,8 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
 import type { NotifyChannel, NotifyChannelType } from '../../lib/api';
-import { buttonClass, fieldClass, inputClass, labelClass } from './styles';
+import { fieldClass, inputClass, labelClass } from './styles';
 
 interface Props {
   value: NotifyChannel;
@@ -31,7 +33,7 @@ export function ChannelEditor({
     <div className="grid gap-3 rounded border border-line p-3">
       <div className={fieldClass}>
         <label htmlFor={`channel-${id}-name`} className={labelClass}>Name</label>
-        <input id={`channel-${id}-name`} className={inputClass} value={value.name}
+        <Input id={`channel-${id}-name`} value={value.name}
           onChange={(e) => onChange({ ...value, name: e.target.value })} />
       </div>
 
@@ -53,7 +55,7 @@ export function ChannelEditor({
 
       <div className={fieldClass}>
         <label htmlFor={`channel-${id}-url`} className={labelClass}>URL</label>
-        <input id={`channel-${id}-url`} className={inputClass} value={value.url}
+        <Input id={`channel-${id}-url`} value={value.url}
           onChange={(e) => onChange({ ...value, url: e.target.value })} />
       </div>
 
@@ -70,7 +72,7 @@ export function ChannelEditor({
       {(value.type === 'ntfy' || value.type === 'apprise') && (
         <div className={fieldClass}>
           <label htmlFor={`channel-${id}-token`} className={labelClass}>Token</label>
-          <input id={`channel-${id}-token`} type="password" placeholder="leave unchanged" className={inputClass}
+          <Input id={`channel-${id}-token`} type="password" placeholder="leave unchanged"
             value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} />
         </div>
       )}
@@ -92,7 +94,7 @@ export function ChannelEditor({
       {(value.type === 'ntfy' || value.type === 'apprise') && (
         <div className={fieldClass}>
           <label htmlFor={`channel-${id}-tags`} className={labelClass}>Tags</label>
-          <input id={`channel-${id}-tags`} className={inputClass}
+          <Input id={`channel-${id}-tags`}
             value={(value.tags ?? []).join(', ')}
             onChange={(e) => onChange({
               ...value,
@@ -111,13 +113,13 @@ export function ChannelEditor({
       )}
 
       <div className="flex items-center gap-3">
-        <button type="button" className={buttonClass} disabled={testPending || unsaved}
+        <Button type="button" variant="outline" disabled={testPending || unsaved}
           title={unsaved ? 'Save first to test this channel' : undefined} onClick={onTest}>
           Test {value.name}
-        </button>
-        <button type="button" className="text-muted hover:text-bad" onClick={onRemove}>
+        </Button>
+        <Button type="button" variant="ghost" className="text-muted hover:text-bad" onClick={onRemove}>
           Remove {value.name}
-        </button>
+        </Button>
         {unsaved && <p className="text-sm text-faint">Save first to test this channel</p>}
         {testResult && (
           <p className={testResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{testResult.message}</p>

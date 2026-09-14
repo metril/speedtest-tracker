@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { CreatedToken } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
 import { useCreateToken, useDeleteToken, useTokens } from '../../lib/queries';
-import { buttonClass, fieldClass, inputClass, labelClass } from './styles';
+import { fieldClass, labelClass } from './styles';
 
 function message(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Request failed.';
@@ -82,27 +84,27 @@ export function TokenPanel() {
         <div className="grid gap-2 rounded border border-line bg-raised p-3">
           <p ref={tokenTextRef} className="break-all font-mono text-sm text-fg">{created.token}</p>
           <div className="flex items-center gap-3">
-            <button type="button" className={buttonClass} onClick={copy}>Copy</button>
+            <Button type="button" onClick={copy}>Copy</Button>
             {copied && <span className="text-sm text-ok">Copied</span>}
           </div>
           <p className="text-sm text-warn">
             This token is shown only once. Store it now; it cannot be retrieved later.
           </p>
           <div>
-            <button type="button" className={buttonClass} onClick={() => setCreated(null)}>Done</button>
+            <Button type="button" onClick={() => setCreated(null)}>Done</Button>
           </div>
         </div>
       ) : (
         <div className="flex items-end gap-3">
           <div className={fieldClass}>
             <label htmlFor="token-name" className={labelClass}>Token name</label>
-            <input id="token-name" className={inputClass} value={name}
+            <Input id="token-name" value={name}
               onChange={(e) => setName(e.target.value)} />
           </div>
-          <button type="button" className={buttonClass} disabled={create.isPending || !name.trim()}
+          <Button type="button" disabled={create.isPending || !name.trim()}
             onClick={submit}>
             Create token
-          </button>
+          </Button>
         </div>
       )}
 
@@ -119,21 +121,19 @@ export function TokenPanel() {
             </div>
             {confirmId === t.id ? (
               <div className="flex items-center gap-2">
-                <button type="button"
-                  className="rounded border border-bad px-2 py-1 text-xs text-bad hover:bg-bad/20"
+                <Button type="button" variant="outline" size="sm" className="text-bad hover:bg-bad/10"
                   disabled={del.isPending} onClick={() => revoke(t.id)}>
                   Confirm revoke
-                </button>
-                <button type="button" className="text-xs text-muted hover:text-fg" onClick={() => setConfirmId(null)}>
+                </Button>
+                <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmId(null)}>
                   Cancel
-                </button>
+                </Button>
               </div>
             ) : (
-              <button type="button"
-                className="rounded border border-line px-2 py-1 text-xs text-muted hover:text-bad"
+              <Button type="button" variant="outline" size="sm" className="text-muted hover:text-bad"
                 onClick={() => setConfirmId(t.id)}>
                 Revoke {t.name}
-              </button>
+              </Button>
             )}
           </div>
         ))}

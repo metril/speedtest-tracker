@@ -221,12 +221,18 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
 describe('Iperf3Fields: picker wiring', () => {
   it('does not query until the picker is focused or searched', async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
-    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    vi.useFakeTimers();
+    try {
+      wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
 
-    // Merely mounting the form (picker never opened) must not fire a
-    // request — see EngineOptionFields.tsx's `enabled` gate.
-    await new Promise((r) => { setTimeout(r, 50); });
-    expect(fetchMock).not.toHaveBeenCalled();
+      // Merely mounting the form (picker never opened) must not fire a
+      // request — see EngineOptionFields.tsx's `enabled` gate. Advance past
+      // the debounce window so a delayed fetch would have fired by now.
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(fetchMock).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('fetches the public server list (debounced) once focused, without needing a query', async () => {
