@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/metril/speedtest-tracker/internal/engine"
+	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -55,6 +56,10 @@ type Deps struct {
 
 	// Metrics counts cache behaviour. Optional: nil disables counting.
 	Metrics CacheMetrics
+
+	// Settings is the typed settings store backing GET/PUT
+	// /api/v1/settings. Optional: nil means those routes are not mounted.
+	Settings *settings.Store
 
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
@@ -158,6 +163,10 @@ func New(deps Deps) http.Handler {
 		})
 		v1.Get("/outages", deps.outages)
 		v1.Get("/stats/summary", deps.statsSummary)
+		if deps.Settings != nil {
+			v1.Get("/settings", deps.getSettings)
+			v1.Put("/settings", deps.putSettings)
+		}
 	})
 
 	if deps.UI != nil {
