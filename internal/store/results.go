@@ -126,6 +126,7 @@ type ResultFilter struct {
 	Status   string
 	From     string
 	To       string
+	Tag      string
 	Limit    int
 	Cursor   int64
 }
@@ -155,6 +156,12 @@ func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int6
 	if f.To != "" {
 		where = append(where, `started_at<=?`)
 		args = append(args, f.To)
+	}
+	if tag := strings.ToLower(strings.TrimSpace(f.Tag)); tag != "" {
+		where = append(where, `EXISTS (SELECT 1 FROM result_tags rt
+			JOIN tags t ON t.id = rt.tag_id
+			WHERE rt.result_id = results.id AND t.name = ?)`)
+		args = append(args, tag)
 	}
 	if f.Cursor > 0 {
 		where = append(where, `id<?`)

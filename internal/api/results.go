@@ -1,11 +1,38 @@
 package api
 
 import (
+	"encoding/json"
 	"net/http"
+	"strconv"
+	"strings"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// dbTimeFormat is the timestamp layout stored in started_at (matches
+// nowExpr's strftime format), so from/to filters compare correctly.
+const dbTimeFormat = "2006-01-02T15:04:05.000Z"
+
+// timeQuery parses a from/to query parameter, accepting either RFC3339 (any
+// fractional-second precision) or unix seconds, and converts it to the
+// DB's stored timestamp format. It answers 400 on anything else.
+func timeQuery(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
+	raw := r.URL.Query().Get(name)
+	if raw == "" {
+		return "", true
+	}
+	if sec, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return time.Unix(sec, 0).UTC().Format(dbTimeFormat), true
+	}
+	t, err := time.Parse(time.RFC3339Nano, raw)
+	if err != nil {
+		errBadRequest(w, name+" must be RFC3339 or unix seconds")
+		return "", false
+	}
+	return t.UTC().Format(dbTimeFormat), true
+}
 
 // listResults answers GET /results with filters and a keyset cursor.
 func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
@@ -13,9 +40,18 @@ func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
 	f := store.ResultFilter{
 		Engine: q.Get("engine"),
 		Status: q.Get("status"),
-		From:   q.Get("from"),
-		To:     q.Get("to"),
+		Tag:    q.Get("tag"),
 	}
+	from, ok := timeQuery(w, r, "from")
+	if !ok {
+		return
+	}
+	f.From = from
+	to, ok := timeQuery(w, r, "to")
+	if !ok {
+		return
+	}
+	f.To = to
 	if raw := q.Get("target_id"); raw != "" {
 		id, ok := int64Query(w, r, "target_id", 0)
 		if !ok {
@@ -67,10 +103,9 @@ func (d Deps) deleteResult(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// reexecuteResult replays a stored result. The runner's RunRequest cannot
-// yet carry an options snapshot, so this re-runs the result's target with
-// its current (live) options rather than the snapshot captured at result
-// time; a result whose target is gone cannot be replayed.
+// reexecuteResult replays a stored result by re-running its target with
+// the exact options_snapshot captured at result time (not the target's
+// current live options); a result whose target is gone cannot be replayed.
 func (d Deps) reexecuteResult(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -89,7 +124,10 @@ func (d Deps) reexecuteResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
-		Trigger: "reexec", TargetIDs: []int64{*res.TargetID}})
+		Trigger:   "reexec",
+		TargetIDs: []int64{*res.TargetID},
+		Snapshots: map[int64]json.RawMessage{*res.TargetID: res.OptionsSnapshot},
+	})
 	if err != nil {
 		enqueueError(w, d.Logger, err)
 		return
@@ -109,11 +147,38 @@ func (d Deps) setResultTags(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &body) {
 		return
 	}
+	if !validTagList(w, body.Tags) {
+		return
+	}
 	tags, err := d.Store.SetResultTags(r.Context(), id, body.Tags)
 	if storeError(w, d.Logger, "result", err) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"id": id, "tags": tags})
+}
+
+// validTagList enforces at most 20 distinct tags, each 1-40 characters
+// after normalisation (trim + lowercase, matching the store's own
+// normalisation). It answers 400 and reports false on a violation.
+func validTagList(w http.ResponseWriter, tags []string) bool {
+	seen := map[string]bool{}
+	distinct := 0
+	for _, t := range tags {
+		norm := strings.ToLower(strings.TrimSpace(t))
+		if len(norm) < 1 || len(norm) > 40 {
+			errBadRequest(w, "each tag must be 1-40 characters after trimming")
+			return false
+		}
+		if !seen[norm] {
+			seen[norm] = true
+			distinct++
+		}
+	}
+	if distinct > 20 {
+		errBadRequest(w, "at most 20 tags allowed")
+		return false
+	}
+	return true
 }
 
 func (d Deps) listTags(w http.ResponseWriter, r *http.Request) {

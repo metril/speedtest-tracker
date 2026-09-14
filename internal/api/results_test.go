@@ -94,6 +94,59 @@ func TestListResultsFilters(t *testing.T) {
 	}
 }
 
+func TestListResultsTagFilter(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	_, ids := seedResults(t, db, 2)
+
+	rec := do(t, h, http.MethodPut, "/api/v1/results/"+itoa(ids[0])+"/tags", map[string]any{"tags": []string{"night"}})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT tags = %d body=%s", rec.Code, rec.Body)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/results?tag=night", nil)
+	var page resultsPage
+	json.NewDecoder(rec.Body).Decode(&page)
+	if len(page.Results) != 1 || page.Results[0].ID != ids[0] {
+		t.Fatalf("tag filter = %+v", page.Results)
+	}
+
+	// Normalisation: mixed case/whitespace still matches.
+	rec = do(t, h, http.MethodGet, "/api/v1/results?tag=%20NIGHT%20", nil)
+	json.NewDecoder(rec.Body).Decode(&page)
+	if len(page.Results) != 1 {
+		t.Errorf("normalised tag filter = %+v", page.Results)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/results?tag=nonexistent", nil)
+	var none resultsPage
+	json.NewDecoder(rec.Body).Decode(&none)
+	if len(none.Results) != 0 {
+		t.Errorf("unknown tag = %+v", none.Results)
+	}
+}
+
+func TestListResultsFromToValidation(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	seedResults(t, db, 3)
+
+	// RFC3339 without fractional seconds and unix seconds both work.
+	rec := do(t, h, http.MethodGet, "/api/v1/results?from=2026-09-13T00:00:00Z", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("rfc3339 from = %d body=%s", rec.Code, rec.Body)
+	}
+	rec = do(t, h, http.MethodGet, "/api/v1/results?from=1789084800", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unix seconds from = %d body=%s", rec.Code, rec.Body)
+	}
+
+	if rec := do(t, h, http.MethodGet, "/api/v1/results?from=not-a-time", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad from = %d, want 400", rec.Code)
+	}
+	if rec := do(t, h, http.MethodGet, "/api/v1/results?to=also-not-a-time", nil); rec.Code != http.StatusBadRequest {
+		t.Errorf("bad to = %d, want 400", rec.Code)
+	}
+}
+
 func TestGetDeleteAndTagResult(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	_, ids := seedResults(t, db, 1)
@@ -131,9 +184,44 @@ func TestGetDeleteAndTagResult(t *testing.T) {
 	}
 }
 
+func TestSetResultTagsValidation(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	_, ids := seedResults(t, db, 1)
+	path := "/api/v1/results/" + itoa(ids[0]) + "/tags"
+
+	tooLong := ""
+	for i := 0; i < 41; i++ {
+		tooLong += "a"
+	}
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": []string{tooLong}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("tag too long = %d, want 400", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": []string{"   "}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("blank tag = %d, want 400", rec.Code)
+	}
+
+	many := make([]string, 21)
+	for i := range many {
+		many[i] = "tag" + strconv.Itoa(i)
+	}
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": many}); rec.Code != http.StatusBadRequest {
+		t.Errorf("21 tags = %d, want 400", rec.Code)
+	}
+
+	ok := many[:20]
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": ok}); rec.Code != http.StatusOK {
+		t.Errorf("20 tags = %d, want 200", rec.Code)
+	}
+}
+
 func TestReexecuteResultEnqueuesTarget(t *testing.T) {
 	h, db, run := newTestAPI(t)
 	tid, ids := seedResults(t, db, 1)
+
+	original, err := db.GetResult(context.Background(), ids[0])
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rec := do(t, h, http.MethodPost, "/api/v1/results/"+itoa(ids[0])+"/reexecute", nil)
 	if rec.Code != http.StatusAccepted {
@@ -144,6 +232,9 @@ func TestReexecuteResultEnqueuesTarget(t *testing.T) {
 	}
 	if len(run.lastReq.TargetIDs) != 1 || run.lastReq.TargetIDs[0] != tid {
 		t.Errorf("targets = %v, want [%d]", run.lastReq.TargetIDs, tid)
+	}
+	if string(run.lastReq.Snapshots[tid]) != string(original.OptionsSnapshot) {
+		t.Errorf("snapshot = %s, want %s", run.lastReq.Snapshots[tid], original.OptionsSnapshot)
 	}
 
 	// A result whose target has been deleted cannot be replayed.

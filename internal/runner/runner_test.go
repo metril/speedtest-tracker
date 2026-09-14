@@ -132,6 +132,57 @@ func TestEnqueueRunsTargetAndWritesResult(t *testing.T) {
 	}
 }
 
+// TestEnqueueSnapshotOverridesLiveOptions covers re-execute: when the
+// request carries a Snapshots entry for a target, the run uses that
+// options document (and stores it as options_snapshot) even though the
+// target's live options have since changed.
+func TestEnqueueSnapshotOverridesLiveOptions(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Options: json.RawMessage(`{"download_bps":1000}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := json.RawMessage(`{"download_bps":1000}`)
+
+	// Simulate the target being edited after the original result was
+	// captured: the snapshot must still win over the new live options.
+	if err := db.UpdateTarget(ctx, &store.Target{
+		ID: tid, Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Options: json.RawMessage(`{"download_bps":9999}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	runID, err := r.Enqueue(ctx, RunRequest{
+		Trigger:   "reexec",
+		TargetIDs: []int64{tid},
+		Snapshots: map[int64]json.RawMessage{tid: original},
+	})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	run := waitForRun(t, db, runID)
+	if run.Status != "done" {
+		t.Fatalf("run status = %q, want done (err=%v)", run.Status, run.Error)
+	}
+
+	res, err := db.LatestResultForTarget(ctx, tid)
+	if err != nil {
+		t.Fatalf("LatestResultForTarget: %v", err)
+	}
+	if string(res.OptionsSnapshot) != string(original) {
+		t.Errorf("options_snapshot = %s, want %s (live options must not win)", res.OptionsSnapshot, original)
+	}
+	if res.DownloadBps != 1000 {
+		t.Errorf("download_bps = %v, want 1000 (engine must have run with the snapshot, not live options)", res.DownloadBps)
+	}
+}
+
 func TestEnqueueFailedTestMarksRunFailed(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()

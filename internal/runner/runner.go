@@ -42,11 +42,15 @@ type Config struct {
 	Now         func() time.Time
 }
 
-// RunRequest asks for one run over the given targets.
+// RunRequest asks for one run over the given targets. Snapshots optionally
+// maps a target id to an exact options document to replay (re-execute)
+// instead of the target's current live options; a target absent from the
+// map runs with its live options as usual.
 type RunRequest struct {
 	Trigger    string
 	ScheduleID *int64
 	TargetIDs  []int64
+	Snapshots  map[int64]json.RawMessage
 }
 
 // ProgressEvent is the payload of the SSE progress event. ResultID stays 0
@@ -66,8 +70,9 @@ const progressInterval = 100 * time.Millisecond
 
 // job is one lane's share of a run.
 type job struct {
-	runID   int64
-	targets []store.Target
+	runID     int64
+	targets   []store.Target
+	snapshots map[int64]json.RawMessage
 }
 
 // runState tracks a run across its lane jobs.
@@ -209,7 +214,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	queueFull := false
 	for i, lane := range order {
 		select {
-		case chans[i] <- job{runID: runID, targets: byLane[lane]}:
+		case chans[i] <- job{runID: runID, targets: byLane[lane], snapshots: req.Snapshots}:
 		default:
 			queueFull = true
 		}
@@ -297,7 +302,7 @@ func (r *Runner) execute(j job) {
 		if ctx.Err() != nil {
 			break
 		}
-		if failed := r.runTarget(ctx, j.runID, t); failed {
+		if failed := r.runTarget(ctx, j.runID, t, j.snapshots[t.ID]); failed {
 			laneFailed = true
 		}
 	}
@@ -305,10 +310,16 @@ func (r *Runner) execute(j job) {
 }
 
 // runTarget executes one target and writes exactly one result row. It
-// reports whether the result failed.
-func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target) bool {
+// reports whether the result failed. When override is non-empty (a
+// re-execute replaying a stored result's options_snapshot), it is used as
+// the run's options instead of the target's current live options.
+func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target, override json.RawMessage) bool {
 	started := r.cfg.Now().UTC()
-	snapshot := t.Options
+	options := t.Options
+	if len(override) > 0 {
+		options = override
+	}
+	snapshot := options
 	if len(snapshot) == 0 {
 		snapshot = json.RawMessage(`{}`)
 	}
@@ -350,7 +361,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target) boo
 		}))
 	}
 
-	out, err := eng.Run(testCtx, t.Options, prog)
+	out, err := eng.Run(testCtx, options, prog)
 	res.DurationMs = r.cfg.Now().UTC().Sub(started).Milliseconds()
 	if err != nil {
 		res.Status, res.Error = "failed", err.Error()
