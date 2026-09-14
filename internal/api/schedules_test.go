@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -423,5 +424,67 @@ func TestScheduleNextReturnsEmptyForDisabledSchedule(t *testing.T) {
 	json.Unmarshal(got.Body.Bytes(), &body)
 	if len(body.Next) != 0 {
 		t.Fatalf("next = %v, want empty", body.Next)
+	}
+}
+
+type stubScheduler struct {
+	at time.Time
+	ok bool
+}
+
+func (s stubScheduler) Next(int64) (time.Time, bool) { return s.at, s.ok }
+
+func TestScheduleNextRunPrefersTheRegisteredScheduler(t *testing.T) {
+	h, db, _ := newTestAPIWith(t, func(d *Deps) {
+		d.Scheduler = stubScheduler{at: time.Date(2031, 1, 2, 3, 4, 5, 0, time.UTC), ok: true}
+	})
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	if _, err := db.CreateSchedule(t.Context(), &store.Schedule{
+		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/schedules", nil)
+	var body struct {
+		Schedules []struct {
+			NextRun string             `json:"next_run"`
+			LastRun *store.ScheduleRun `json:"last_run"`
+		} `json:"schedules"`
+	}
+	json.NewDecoder(rec.Body).Decode(&body)
+	if len(body.Schedules) != 1 {
+		t.Fatalf("schedules = %+v", body.Schedules)
+	}
+	if !strings.HasPrefix(body.Schedules[0].NextRun, "2031-01-02T03:04:05") {
+		t.Errorf("next_run = %q, want the scheduler's answer", body.Schedules[0].NextRun)
+	}
+	if body.Schedules[0].LastRun != nil {
+		t.Errorf("last_run = %+v, want nil for a schedule that never ran", body.Schedules[0].LastRun)
+	}
+}
+
+func TestScheduleNextRunFallsBackToTheExpression(t *testing.T) {
+	h, db, _ := newTestAPI(t) // no Scheduler wired
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	id, _ := db.CreateSchedule(t.Context(), &store.Schedule{
+		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}})
+	runID, _ := db.CreateRun(t.Context(), "cron", &id)
+	if err := db.SetRunStatus(t.Context(), runID, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/schedules", nil)
+	var body struct {
+		Schedules []struct {
+			NextRun string             `json:"next_run"`
+			LastRun *store.ScheduleRun `json:"last_run"`
+		} `json:"schedules"`
+	}
+	json.NewDecoder(rec.Body).Decode(&body)
+	if body.Schedules[0].NextRun == "" {
+		t.Error("next_run empty without a scheduler; expected the parsed expression")
+	}
+	if body.Schedules[0].LastRun == nil || body.Schedules[0].LastRun.Status != "running" {
+		t.Errorf("last_run = %+v", body.Schedules[0].LastRun)
 	}
 }

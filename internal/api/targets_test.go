@@ -45,6 +45,12 @@ func (s stubServers) Servers(context.Context) ([]ookla.Server, error) { return s
 
 func newTestAPI(t *testing.T) (http.Handler, *store.Store, *stubRunner) {
 	t.Helper()
+	return newTestAPIWith(t, nil)
+}
+
+// newTestAPIWith is newTestAPI with a hook to tweak Deps before New runs.
+func newTestAPIWith(t *testing.T, tweak func(*Deps)) (http.Handler, *store.Store, *stubRunner) {
+	t.Helper()
 	db, err := store.Open(filepath.Join(t.TempDir(), "api.db"))
 	if err != nil {
 		t.Fatal(err)
@@ -57,7 +63,7 @@ func newTestAPI(t *testing.T) (http.Handler, *store.Store, *stubRunner) {
 
 	t.Cleanup(func() { reloadHook = nil })
 
-	h := New(Deps{
+	deps := Deps{
 		Pinger:   db,
 		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
 		Hub:      sse.NewHub(),
@@ -74,7 +80,11 @@ func newTestAPI(t *testing.T) (http.Handler, *store.Store, *stubRunner) {
 			}
 			return nil
 		},
-	})
+	}
+	if tweak != nil {
+		tweak(&deps)
+	}
+	h := New(deps)
 	return h, db, run
 }
 

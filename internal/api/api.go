@@ -20,6 +20,14 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
+// NextRunner reports a registered schedule's next fire time. The running
+// scheduler is the authority: it knows which schedules are actually
+// registered, and its cron entries account for the reload history that a
+// bare expression parse cannot see.
+type NextRunner interface {
+	Next(scheduleID int64) (time.Time, bool)
+}
+
 // Deps are the router's collaborators.
 type Deps struct {
 	Pinger     Pinger
@@ -34,6 +42,10 @@ type Deps struct {
 	// ReloadSchedules asks the scheduler to rebuild its cron entries after
 	// a schedule mutation. Optional: nil means no scheduler is running.
 	ReloadSchedules func(context.Context) error
+
+	// Scheduler reports registered schedules' next fire times. Optional:
+	// nil falls back to parsing the schedule's cron expression.
+	Scheduler NextRunner
 
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache

@@ -31,11 +31,18 @@ type scheduleView struct {
 	NextRun string `json:"next_run"`
 }
 
-// viewSchedule computes next_run for one schedule.
-func viewSchedule(sc store.Schedule, now time.Time) scheduleView {
+// viewSchedule computes next_run: from the running scheduler when the
+// schedule is registered, otherwise by parsing its expression.
+func (d Deps) viewSchedule(sc store.Schedule, now time.Time) scheduleView {
 	v := scheduleView{Schedule: sc}
 	if !sc.Enabled {
 		return v
+	}
+	if d.Scheduler != nil {
+		if at, ok := d.Scheduler.Next(sc.ID); ok {
+			v.NextRun = at.Format(time.RFC3339)
+			return v
+		}
 	}
 	times, err := scheduler.NextFireTimes(sc.Cron, sc.Timezone, 1, now)
 	if err == nil && len(times) > 0 {
@@ -129,7 +136,7 @@ func (d Deps) listSchedules(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	views := make([]scheduleView, 0, len(list))
 	for _, sc := range list {
-		views = append(views, viewSchedule(sc, now))
+		views = append(views, d.viewSchedule(sc, now))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"schedules": views})
 }
@@ -143,7 +150,7 @@ func (d Deps) getSchedule(w http.ResponseWriter, r *http.Request) {
 	if d.scheduleStoreError(w, err) {
 		return
 	}
-	writeJSON(w, http.StatusOK, viewSchedule(*sc, time.Now()))
+	writeJSON(w, http.StatusOK, d.viewSchedule(*sc, time.Now()))
 }
 
 func (d Deps) createSchedule(w http.ResponseWriter, r *http.Request) {
@@ -187,7 +194,7 @@ func (d Deps) respondSchedule(w http.ResponseWriter, r *http.Request, id int64, 
 		return
 	}
 	writeJSON(w, status, map[string]any{
-		"schedule": viewSchedule(*saved, time.Now()),
+		"schedule": d.viewSchedule(*saved, time.Now()),
 		"warnings": d.overlapWarnings(r.Context(), *saved),
 	})
 }

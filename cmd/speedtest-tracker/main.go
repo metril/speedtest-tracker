@@ -202,6 +202,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Runner:          rn,
 			ServerList:      servers,
 			ReloadSchedules: sch.Reload,
+			Scheduler:       sch,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
