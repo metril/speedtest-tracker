@@ -8,10 +8,12 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
 
@@ -66,6 +68,18 @@ type integrationsBody struct {
 	MetricsEnabled *bool              `json:"metrics_enabled"`
 }
 
+// notificationsBody is the partial PUT document for the Notifications
+// section, matching the existing pointer-field style.
+type notificationsBody struct {
+	Enabled           *bool                `json:"enabled"`
+	Channels          *[]settings.Channel  `json:"channels"`
+	DefaultThresholds *settings.Thresholds `json:"default_thresholds"`
+	CooldownMinutes   *int                 `json:"cooldown_minutes"`
+	QuietHoursStart   *string              `json:"quiet_hours_start"`
+	QuietHoursEnd     *string              `json:"quiet_hours_end"`
+	NotifyRecovery    *bool                `json:"notify_recovery"`
+}
+
 // settingsBody is the partial PUT document. Every field is a pointer: a
 // nil field is left alone, a non-nil one is written — which is what makes
 // clearing a secret (explicit "") different from omitting it.
@@ -79,8 +93,9 @@ type settingsBody struct {
 		RetentionDaysRuns             *int    `json:"retention_days_runs"`
 		RetentionPruneIntervalMinutes *int    `json:"retention_prune_interval_minutes"`
 	} `json:"general"`
-	Engines      *enginesBody      `json:"engines"`
-	Integrations *integrationsBody `json:"integrations"`
+	Engines       *enginesBody       `json:"engines"`
+	Integrations  *integrationsBody  `json:"integrations"`
+	Notifications *notificationsBody `json:"notifications"`
 }
 
 // getSettings returns the full sectioned settings document, masking the
@@ -103,11 +118,28 @@ func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	maskSecrets(&i)
+	n, err := d.Settings.Notifications(ctx)
+	if err != nil {
+		internalError(w, d.Logger, "load notifications settings", err)
+		return
+	}
+	maskChannelTokens(&n)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"general":      g,
-		"engines":      e,
-		"integrations": i,
+		"general":       g,
+		"engines":       e,
+		"integrations":  i,
+		"notifications": n,
 	})
+}
+
+// maskChannelTokens replaces every set channel token with
+// settings.MaskedSecret, leaving an unset one as the empty string.
+func maskChannelTokens(n *settings.Notifications) {
+	for i := range n.Channels {
+		if n.Channels[i].Token != "" {
+			n.Channels[i].Token = settings.MaskedSecret
+		}
+	}
 }
 
 // maskSecrets replaces a set auth header with settings.MaskedSecret,
@@ -134,6 +166,11 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	current, err := d.Settings.Integrations(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "load integrations settings", err)
+		return
+	}
+	currentNotify, err := d.Settings.Notifications(ctx)
+	if err != nil {
+		internalError(w, d.Logger, "load notifications settings", err)
 		return
 	}
 	if err := validateSettings(body, current); err != nil {
@@ -219,6 +256,33 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if n := body.Notifications; n != nil {
+		var channels *[]settings.Channel
+		if n.Channels != nil {
+			merged := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
+			channels = &merged
+		}
+		writes := []func() error{
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyEnabled, n.Enabled) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyChannels, channels) },
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyNotifyDefaultThresholds, n.DefaultThresholds)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyNotifyCooldownMinutes, n.CooldownMinutes)
+			},
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyQuietStart, n.QuietHoursStart) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyQuietEnd, n.QuietHoursEnd) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyRecovery, n.NotifyRecovery) },
+		}
+		for _, w2 := range writes {
+			if err := w2(); err != nil {
+				internalError(w, d.Logger, "write notifications settings", err)
+				return
+			}
+		}
+	}
+
 	d.getSettings(w, r)
 }
 
@@ -228,6 +292,25 @@ func setPtr[T any](ctx context.Context, s *settings.Store, key string, v *T) err
 		return nil
 	}
 	return s.Set(ctx, key, *v)
+}
+
+// mergeChannelSecrets replaces a channel's masked token with the one
+// already stored for the same channel id. A brand-new channel that
+// somehow carries the mask gets an empty token rather than the literal
+// "***".
+func mergeChannelSecrets(incoming []settings.Channel, current []settings.Channel) []settings.Channel {
+	stored := make(map[string]string, len(current))
+	for _, c := range current {
+		stored[c.ID] = c.Token
+	}
+	out := make([]settings.Channel, len(incoming))
+	copy(out, incoming)
+	for i := range out {
+		if out[i].Token == settings.MaskedSecret {
+			out[i].Token = stored[out[i].ID]
+		}
+	}
+	return out
 }
 
 // setSecret writes *v under key when v is non-nil, unless it equals
@@ -312,8 +395,81 @@ func validateSettings(body settingsBody, current settings.Integrations) error {
 		}
 	}
 
+	if n := body.Notifications; n != nil {
+		if n.Channels != nil {
+			seen := make(map[string]bool, len(*n.Channels))
+			for _, ch := range *n.Channels {
+				if err := notify.ValidateChannel(ch); err != nil {
+					return err
+				}
+				if seen[ch.ID] {
+					return fmt.Errorf("duplicate channel id %s", ch.ID)
+				}
+				seen[ch.ID] = true
+			}
+		}
+		if n.CooldownMinutes != nil && *n.CooldownMinutes < 1 {
+			return fmt.Errorf("cooldown_minutes must be at least 1")
+		}
+		start, end := "", ""
+		if n.QuietHoursStart != nil {
+			start = *n.QuietHoursStart
+		}
+		if n.QuietHoursEnd != nil {
+			end = *n.QuietHoursEnd
+		}
+		if (n.QuietHoursStart != nil) != (n.QuietHoursEnd != nil) {
+			return fmt.Errorf("quiet_hours_start and quiet_hours_end must be set together")
+		}
+		if n.QuietHoursStart != nil && n.QuietHoursEnd != nil && start != "" && end != "" {
+			if _, err := time.Parse("15:04", start); err != nil {
+				return fmt.Errorf("quiet_hours_start must be HH:MM")
+			}
+			if _, err := time.Parse("15:04", end); err != nil {
+				return fmt.Errorf("quiet_hours_end must be HH:MM")
+			}
+		}
+		if n.DefaultThresholds != nil {
+			if err := validateThresholds(*n.DefaultThresholds); err != nil {
+				return fmt.Errorf("default_thresholds: %w", err)
+			}
+		}
+	}
+
 	return nil
 }
+
+// validateThresholds checks that every set field is non-negative, and that
+// a set loss percentage is at most 100. The error names the offending JSON
+// field so a form can highlight it.
+func validateThresholds(t settings.Thresholds) error {
+	fields := []struct {
+		name string
+		v    *float64
+		max  *float64
+	}{
+		{"download_mbps_min", t.DownloadMbpsMin, nil},
+		{"upload_mbps_min", t.UploadMbpsMin, nil},
+		{"ping_ms_max", t.PingMsMax, nil},
+		{"jitter_ms_max", t.JitterMsMax, nil},
+		{"loss_pct_max", t.LossPctMax, float64Ptr(100)},
+	}
+	for _, f := range fields {
+		if f.v == nil {
+			continue
+		}
+		if *f.v < 0 {
+			return fmt.Errorf("%s must be >= 0", f.name)
+		}
+		if f.max != nil && *f.v > *f.max {
+			return fmt.Errorf("%s must be <= %g", f.name, *f.max)
+		}
+	}
+	return nil
+}
+
+// float64Ptr returns a pointer to v, for use in a struct literal.
+func float64Ptr(v float64) *float64 { return &v }
 
 // validateEndpointURL enforces the vm_url/vl_url rule: empty is only
 // allowed when the integration is disabled; otherwise it must parse as an
@@ -448,4 +604,35 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		"status":     resp.StatusCode,
 		"latency_ms": latency.Milliseconds(),
 	})
+}
+
+// testNotifyChannel probes one stored notification channel. The channel is
+// always taken from stored settings, never from the request body — that is
+// what keeps this endpoint from being an SSRF primitive, and it matches
+// the same-origin rule testIntegration uses. The user must save the
+// channel before testing it.
+func (d Deps) testNotifyChannel(w http.ResponseWriter, r *http.Request) {
+	if d.Notifier == nil {
+		writeError(w, http.StatusServiceUnavailable, "unavailable", "notifications are not wired")
+		return
+	}
+	id := chi.URLParam(r, "channel_id")
+	n, err := d.Settings.Notifications(r.Context())
+	if err != nil {
+		internalError(w, d.Logger, "load notifications", err)
+		return
+	}
+	idx := slices.IndexFunc(n.Channels, func(c settings.Channel) bool { return c.ID == id })
+	if idx < 0 {
+		errNotFound(w, "unknown channel "+id)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	defer cancel()
+	start := time.Now()
+	if err := d.Notifier.TestChannel(ctx, n.Channels[idx]); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "latency_ms": time.Since(start).Milliseconds()})
 }

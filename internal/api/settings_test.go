@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -273,5 +274,130 @@ func TestSettingsTestRejectsUnknownTargetAndBadURL(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{"url": "ftp://x"}); rec.Code != http.StatusBadRequest {
 		t.Fatalf("bad url = %d, want 400", rec.Code)
+	}
+}
+
+// settingsAPIOption tweaks Deps for newSettingsAPI.
+type settingsAPIOption func(*Deps)
+
+// withNotifier installs a ChannelTester for POST
+// /api/v1/settings/test/notify/{channel_id}.
+func withNotifier(ct ChannelTester) settingsAPIOption {
+	return func(d *Deps) { d.Notifier = ct }
+}
+
+// newSettingsAPI is newTestAPIWithSettings with room for options such as
+// withNotifier.
+func newSettingsAPI(t *testing.T, opts ...settingsAPIOption) (http.Handler, *settings.Store) {
+	t.Helper()
+	var st *settings.Store
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		s, err := settings.New(context.Background(), d.Store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		st = s
+		d.Settings = s
+		for _, opt := range opts {
+			opt(d)
+		}
+	})
+	return h, st
+}
+
+// stubTester is a ChannelTester that always returns err (nil means success).
+type stubTester struct{ err error }
+
+func (s stubTester) TestChannel(context.Context, settings.Channel) error { return s.err }
+
+func TestGetSettingsMasksChannelTokens(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"},
+		{ID: "c2", Type: "webhook", URL: "https://hook"},
+	})
+	var body struct {
+		Notifications settings.Notifications `json:"notifications"`
+	}
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Notifications.Channels[0].Token != settings.MaskedSecret {
+		t.Errorf("token = %q, want masked", body.Notifications.Channels[0].Token)
+	}
+	if body.Notifications.Channels[1].Token != "" {
+		t.Errorf("unset token = %q, want empty", body.Notifications.Channels[1].Token)
+	}
+}
+
+func TestPutNotificationsKeepsMaskedTokenByID(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"}})
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"notifications": map[string]any{"channels": []map[string]any{
+			{"id": "c1", "type": "ntfy", "url": "https://ntfy.sh/y", "token": settings.MaskedSecret}}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
+	}
+	got, _ := st.Notifications(context.Background())
+	if got.Channels[0].Token != "tk_1" || got.Channels[0].URL != "https://ntfy.sh/y" {
+		t.Fatalf("channel = %+v, want the stored token kept and the URL updated", got.Channels[0])
+	}
+}
+
+func TestPutNotificationsValidation(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	for _, tc := range []struct {
+		name, want string
+		body       map[string]any
+	}{
+		{"bad channel type", "type", map[string]any{"channels": []map[string]any{
+			{"id": "c1", "type": "pigeon", "url": "https://x"}}}},
+		{"duplicate id", "duplicate", map[string]any{"channels": []map[string]any{
+			{"id": "c1", "type": "ntfy", "url": "https://x"},
+			{"id": "c1", "type": "ntfy", "url": "https://y"}}}},
+		{"cooldown", "cooldown_minutes", map[string]any{"cooldown_minutes": 0}},
+		{"quiet hours", "quiet_hours", map[string]any{"quiet_hours_start": "25:00"}},
+		{"half-set quiet hours", "quiet_hours", map[string]any{"quiet_hours_start": "22:00"}},
+		{"negative threshold", "download_mbps_min", map[string]any{
+			"default_thresholds": map[string]any{"download_mbps_min": -1}}},
+	} {
+		rec := do(t, h, http.MethodPut, "/api/v1/settings",
+			map[string]any{"notifications": tc.body})
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d body=%s, want 400 mentioning %q", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+}
+
+func TestTestNotifyChannel(t *testing.T) {
+	h, st := newSettingsAPI(t, withNotifier(stubTester{err: errors.New("connection refused")}))
+	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x"}})
+
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/notify/c1", nil)
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if rec.Code != http.StatusOK || body.OK || !strings.Contains(body.Error, "connection refused") {
+		t.Fatalf("= %d %+v, want 200 with ok=false and the reason inline", rec.Code, body)
+	}
+
+	rec = do(t, h, http.MethodPost, "/api/v1/settings/test/notify/nope", nil)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown channel = %d, want 404", rec.Code)
+	}
+}
+
+func TestTestUnknownTargetStillRejected(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	if rec := do(t, h, http.MethodPost, "/api/v1/settings/test/notify", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("POST /settings/test/notify = %d, want 404 (it is not a test target)", rec.Code)
 	}
 }

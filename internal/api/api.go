@@ -66,8 +66,19 @@ type Deps struct {
 	// with a probeTimeout timeout is used.
 	TestClient *http.Client
 
+	// Notifier probes one notification channel for
+	// POST /api/v1/settings/test/notify/{channel_id}. Optional: nil means
+	// that route answers 503.
+	Notifier ChannelTester
+
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
+}
+
+// ChannelTester probes one notification channel for
+// POST /api/v1/settings/test/notify/{channel_id}.
+type ChannelTester interface {
+	TestChannel(ctx context.Context, ch settings.Channel) error
 }
 
 // CacheMetrics records /stats/summary cache behaviour.
@@ -171,6 +182,7 @@ func New(deps Deps) http.Handler {
 		if deps.Settings != nil {
 			v1.Get("/settings", deps.getSettings)
 			v1.Put("/settings", deps.putSettings)
+			v1.Post("/settings/test/notify/{channel_id}", deps.testNotifyChannel)
 			v1.Post("/settings/test/{target}", deps.testIntegration)
 		}
 	})
