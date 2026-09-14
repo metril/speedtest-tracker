@@ -256,3 +256,73 @@ func TestStopIsSafeBeforeAnyReload(t *testing.T) {
 		t.Fatalf("Stop = %v", err)
 	}
 }
+
+// TestConcurrentReloadsLeaveExactlyOneLiveCron guards against R2 stopping
+// R1's not-yet-started cron (a leak) or two Reloads racing to swap s.cron.
+// reloadMu serializes them, so after all finish exactly one cron survives
+// with the right entry count.
+func TestConcurrentReloadsLeaveExactlyOneLiveCron(t *testing.T) {
+	s, db, _ := newTestScheduler(t)
+	seed(t, db, "one", "@hourly", true)
+	seed(t, db, "two", "@hourly", true)
+
+	const n = 10
+	var wg sync.WaitGroup
+	wg.Add(n)
+	for i := 0; i < n; i++ {
+		go func() {
+			defer wg.Done()
+			if err := s.Reload(context.Background()); err != nil {
+				t.Error(err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if got := s.Entries(); got != 2 {
+		t.Fatalf("entries = %d, want 2", got)
+	}
+	s.mu.Lock()
+	c := s.cron
+	entries := len(s.entries)
+	s.mu.Unlock()
+	if c == nil {
+		t.Fatal("cron is nil after concurrent reloads")
+	}
+	if got := len(c.Entries()); got != entries {
+		t.Fatalf("live cron entries = %d, want %d (map: %d)", got, entries, entries)
+	}
+}
+
+// TestReloadAfterStopIsNoop ensures a Reload racing with (or arriving
+// after) Stop never starts a cron post-shutdown.
+func TestReloadAfterStopIsNoop(t *testing.T) {
+	s, db, _ := newTestScheduler(t)
+	seed(t, db, "one", "@hourly", true)
+
+	ctx := context.Background()
+	if err := s.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	stopCtx, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := s.Stop(stopCtx); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.Reload(ctx); err != nil {
+		t.Fatalf("Reload after Stop = %v, want nil", err)
+	}
+	s.mu.Lock()
+	c, stopped := s.cron, s.stopped
+	s.mu.Unlock()
+	if c != nil {
+		t.Fatal("Reload after Stop started a cron")
+	}
+	if !stopped {
+		t.Fatal("stopped flag cleared by Reload")
+	}
+	if got := s.Entries(); got != 0 {
+		t.Fatalf("entries after reload post-stop = %d, want 0", got)
+	}
+}

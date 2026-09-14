@@ -36,9 +36,16 @@ type Config struct {
 type Scheduler struct {
 	cfg Config
 
+	// reloadMu serializes Reload (and Reload against Stop) end to end, so a
+	// second Reload can't Stop a first Reload's not-yet-started cron
+	// (leaking it running forever) and a Reload can't resurrect a cron
+	// after Stop has shut the scheduler down.
+	reloadMu sync.Mutex
+
 	mu      sync.Mutex
 	cron    *cron.Cron
 	entries map[int64]cron.EntryID
+	stopped bool
 }
 
 // New returns a Scheduler. Nothing is scheduled until Reload is called.
@@ -56,11 +63,17 @@ func New(cfg Config) *Scheduler {
 // after any schedule mutation and when general.timezone changes. The store
 // read happens before the lock is taken, so no lock is ever held across I/O.
 func (s *Scheduler) Reload(ctx context.Context) error {
+	s.reloadMu.Lock()
+	defer s.reloadMu.Unlock()
+
 	schedules, err := s.cfg.Store.ListSchedules(ctx)
 	if err != nil {
 		return fmt.Errorf("scheduler: load schedules: %w", err)
 	}
 
+	// next.Schedule below registers closures that capture sc by value, so
+	// every cron callback this Reload creates always fires against the
+	// schedule snapshot read by *this* Reload, never a later one's.
 	next := cron.New(cron.WithChain(cron.Recover(cron.DefaultLogger)))
 	entries := map[int64]cron.EntryID{}
 	for _, sc := range schedules {
@@ -86,6 +99,13 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 	}
 
 	s.mu.Lock()
+	if s.stopped {
+		// Stop() ran while we were building next. next was never started,
+		// so just drop it instead of starting a cron after shutdown.
+		s.mu.Unlock()
+		s.cfg.Logger.Warn("scheduler: reload after stop, discarding new cron")
+		return nil
+	}
 	old := s.cron
 	s.cron, s.entries = next, entries
 	s.mu.Unlock()
@@ -174,6 +194,7 @@ func (s *Scheduler) Stop(ctx context.Context) error {
 	s.mu.Lock()
 	c := s.cron
 	s.cron, s.entries = nil, map[int64]cron.EntryID{}
+	s.stopped = true
 	s.mu.Unlock()
 	if c == nil {
 		return nil
