@@ -23,15 +23,15 @@ export function Results() {
     <section className="grid gap-4">
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Results</h1>
-        <span className="text-sm text-slate-500">{rows.length} loaded</span>
+        <span className="text-sm text-faint">{rows.length} loaded</span>
       </header>
 
       <ResultFiltersBar value={filters} onChange={setFilters} targets={targets.data ?? []} />
 
-      {results.isLoading && <p className="text-sm text-slate-400">Loading results…</p>}
-      {results.isError && <p className="text-sm text-rose-400">Could not load results.</p>}
+      {results.isLoading && <p className="text-sm text-muted">Loading results…</p>}
+      {results.isError && <p className="text-sm text-bad">Could not load results.</p>}
       {rows.length === 0 && !results.isLoading && (
-        <p className="rounded border border-dashed border-slate-800 p-6 text-center text-sm text-slate-400">
+        <p className="rounded border border-dashed border-line p-6 text-center text-sm text-muted">
           No results match these filters.
         </p>
       )}
@@ -47,7 +47,7 @@ export function Results() {
 
       {results.hasNextPage && (
         <button
-          className="mx-auto rounded border border-slate-700 px-4 py-1.5 text-sm text-slate-300 hover:bg-slate-800 disabled:opacity-50"
+          className="mx-auto rounded border border-line px-4 py-1.5 text-sm text-muted hover:bg-raised disabled:opacity-50"
           disabled={results.isFetchingNextPage}
           onClick={() => results.fetchNextPage()}
         >

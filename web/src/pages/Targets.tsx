@@ -43,7 +43,7 @@ export function Targets() {
         <h1 className="text-xl font-semibold tracking-tight">Targets</h1>
         {editing.mode === 'none' && (
           <button
-            className="rounded bg-sky-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
+            className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90"
             onClick={() => setEditing({ mode: 'new' })}
           >
             New target
@@ -51,7 +51,7 @@ export function Targets() {
         )}
       </header>
 
-      {notice && <p className="text-sm text-sky-300">{notice}</p>}
+      {notice && <p className="text-sm text-accent">{notice}</p>}
 
       {editing.mode !== 'none' && (
         <TargetForm
@@ -63,13 +63,13 @@ export function Targets() {
         />
       )}
 
-      {targets.isLoading && <p className="text-sm text-slate-400">Loading targets…</p>}
+      {targets.isLoading && <p className="text-sm text-muted">Loading targets…</p>}
       {targets.isError && (
-        <p className="text-sm text-rose-400">{mutationError(targets.error)}</p>
+        <p className="text-sm text-bad">{mutationError(targets.error)}</p>
       )}
 
       {targets.data && targets.data.length === 0 && (
-        <p className="rounded border border-dashed border-slate-800 p-6 text-center text-sm text-slate-400">
+        <p className="rounded border border-dashed border-line p-6 text-center text-sm text-muted">
           No targets yet. Create one to start measuring.
         </p>
       )}
@@ -77,7 +77,7 @@ export function Targets() {
       {targets.data && targets.data.length > 0 && (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
               <th className="py-2 pr-3 font-medium">Name</th>
               <th className="py-2 pr-3 font-medium">Engine</th>
               <th className="py-2 pr-3 font-medium">Lane</th>
@@ -87,23 +87,23 @@ export function Targets() {
           </thead>
           <tbody>
             {targets.data.map((t) => (
-              <tr key={t.id} className="border-b border-slate-900 hover:bg-slate-900/50">
-                <td className="py-2 pr-3 text-slate-100">{t.name}</td>
+              <tr key={t.id} className="border-b border-line hover:hover:bg-raised">
+                <td className="py-2 pr-3 text-fg">{t.name}</td>
                 <td className="py-2 pr-3">
-                  <span className="rounded bg-slate-800 px-1.5 py-0.5 font-mono text-xs uppercase text-slate-300">
+                  <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs uppercase text-muted">
                     {t.engine}
                   </span>
                 </td>
-                <td className="py-2 pr-3 text-slate-400">{t.lane}</td>
+                <td className="py-2 pr-3 text-muted">{t.lane}</td>
                 <td className="py-2 pr-3">
-                  <span className={t.enabled ? 'text-emerald-400' : 'text-slate-500'}>
+                  <span className={t.enabled ? 'text-ok' : 'text-faint'}>
                     {t.enabled ? 'enabled' : 'disabled'}
                   </span>
                 </td>
                 <td className="py-2 text-right">
                   <div className="flex justify-end gap-2">
                     <button
-                      className="rounded border border-sky-700 px-2 py-1 text-xs text-sky-300 hover:bg-sky-900/40 disabled:opacity-50"
+                      className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
                       disabled={runningTargetID === t.id}
                       onClick={() =>
                         run.mutate(t.id, {
@@ -114,13 +114,13 @@ export function Targets() {
                       {runningTargetID === t.id ? 'Running…' : 'Run now'}
                     </button>
                     <button
-                      className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                      className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
                       onClick={() => setEditing({ mode: 'edit', target: t })}
                     >
                       Edit
                     </button>
                     <button
-                      className="rounded border border-rose-800 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40"
+                      className="rounded border border-bad px-2 py-1 text-xs text-bad hover:bg-bad/20"
                       onClick={() => {
                         if (window.confirm(`Delete target "${t.name}"? This cannot be undone.`)) {
                           remove.mutate(t.id);

@@ -15,14 +15,14 @@ type Editing = { mode: 'none' } | { mode: 'new' } | { mode: 'edit'; schedule: Sc
 function LastRun({ scheduleId }: { scheduleId: number }) {
   const runs = useScheduleRuns(scheduleId);
   const last = runs.data?.runs[0];
-  if (!last) return <span className="text-slate-600">never run</span>;
-  const tone = last.status === 'done' ? 'text-emerald-400'
-    : last.status === 'skipped' ? 'text-amber-400'
-      : last.status === 'running' || last.status === 'queued' ? 'text-sky-400' : 'text-rose-400';
+  if (!last) return <span className="text-faint">never run</span>;
+  const tone = last.status === 'done' ? 'text-ok'
+    : last.status === 'skipped' ? 'text-warn'
+      : last.status === 'running' || last.status === 'queued' ? 'text-accent' : 'text-bad';
   return (
     <span className={tone}>
       {last.status}
-      {last.started_at && <span className="text-slate-500"> · {formatRelative(last.started_at)}</span>}
+      {last.started_at && <span className="text-faint"> · {formatRelative(last.started_at)}</span>}
     </span>
   );
 }
@@ -57,7 +57,7 @@ export function Schedules() {
       <header className="flex items-center justify-between">
         <h1 className="text-xl font-semibold tracking-tight">Schedules</h1>
         {editing.mode === 'none' && (
-          <button className="rounded bg-sky-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400"
+          <button className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90"
             onClick={() => { setWarnings([]); setEditing({ mode: 'new' }); }}>
             New schedule
           </button>
@@ -65,9 +65,9 @@ export function Schedules() {
       </header>
 
       {warnings.length > 0 && (
-        <div role="status" className="flex items-start justify-between gap-3 rounded border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
+        <div role="status" className="flex items-start justify-between gap-3 rounded border border-warn/60 bg-warn/10 px-3 py-2 text-sm text-warn">
           <div>{warnings.map((wmsg) => <p key={wmsg}>{wmsg}</p>)}</div>
-          <button type="button" aria-label="Dismiss warnings" className="text-amber-400 hover:text-amber-200"
+          <button type="button" aria-label="Dismiss warnings" className="text-warn hover:text-warn"
             onClick={() => setWarnings([])}>
             ×
           </button>
@@ -86,9 +86,9 @@ export function Schedules() {
         />
       )}
 
-      {schedules.isLoading && <p className="text-sm text-slate-400">Loading schedules…</p>}
+      {schedules.isLoading && <p className="text-sm text-muted">Loading schedules…</p>}
       {schedules.data?.length === 0 && (
-        <p className="rounded border border-dashed border-slate-800 p-6 text-center text-sm text-slate-400">
+        <p className="rounded border border-dashed border-line p-6 text-center text-sm text-muted">
           No schedules yet. Create one to run targets automatically.
         </p>
       )}
@@ -96,7 +96,7 @@ export function Schedules() {
       {schedules.data && schedules.data.length > 0 && (
         <table className="w-full border-collapse text-sm">
           <thead>
-            <tr className="border-b border-slate-800 text-left text-xs uppercase tracking-wide text-slate-500">
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
               <th className="py-2 pr-3 font-medium">Name</th>
               <th className="py-2 pr-3 font-medium">Cron</th>
               <th className="py-2 pr-3 font-medium">Next run</th>
@@ -106,30 +106,30 @@ export function Schedules() {
           </thead>
           <tbody>
             {schedules.data.map((s) => (
-              <tr key={s.id} className="border-b border-slate-900 hover:bg-slate-900/50">
-                <td className="py-2 pr-3 text-slate-100">
+              <tr key={s.id} className="border-b border-line hover:hover:bg-raised">
+                <td className="py-2 pr-3 text-fg">
                   {s.name}
-                  {!s.enabled && <span className="ml-2 text-xs text-slate-500">disabled</span>}
+                  {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}
                 </td>
-                <td className="py-2 pr-3 font-mono text-xs text-slate-400">{s.cron}</td>
-                <td className="py-2 pr-3 text-slate-400">
+                <td className="py-2 pr-3 font-mono text-xs text-muted">{s.cron}</td>
+                <td className="py-2 pr-3 text-muted">
                   {s.next_run ? formatDateTime(s.next_run) : '—'}
-                  <span className="ml-2 text-xs text-slate-600">{s.timezone}</span>
+                  <span className="ml-2 text-xs text-faint">{s.timezone}</span>
                 </td>
                 <td className="py-2 pr-3"><LastRun scheduleId={s.id} /></td>
                 <td className="py-2 text-right">
                   <div className="flex justify-end gap-2">
                     <button
-                      className="rounded border border-sky-700 px-2 py-1 text-xs text-sky-300 hover:bg-sky-900/40 disabled:opacity-50"
+                      className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
                       disabled={run.isPending && run.variables === s.id}
                       onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
                       Run now
                     </button>
-                    <button className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
+                    <button className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
                       onClick={() => { setWarnings([]); setEditing({ mode: 'edit', schedule: s }); }}>
                       Edit
                     </button>
-                    <button className="rounded border border-slate-800 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40"
+                    <button className="rounded border border-line px-2 py-1 text-xs text-bad hover:bg-bad/20"
                       onClick={() => { if (window.confirm(`Delete schedule "${s.name}"?`)) remove.mutate(s.id); }}>
                       Delete
                     </button>

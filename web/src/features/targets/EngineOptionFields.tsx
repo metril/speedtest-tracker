@@ -9,8 +9,8 @@ interface Props {
   onChange: (next: Options) => void;
 }
 
-const field = 'w-full rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 focus:border-sky-500 focus:outline-none';
-const label = 'block text-xs font-medium uppercase tracking-wide text-slate-400';
+const field = 'w-full rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
+const label = 'block text-xs font-medium uppercase tracking-wide text-muted';
 
 /** setOption writes a key, deleting it when the value is empty. */
 function setOption(options: Options, key: string, value: unknown): Options {
@@ -49,7 +49,7 @@ export function EngineOptionFields({ engine, options, onChange }: Props) {
   if (engine === 'cloudflare') return <CloudflareFields options={options} onChange={onChange} />;
   if (engine === 'iperf3') return <Iperf3Fields options={options} onChange={onChange} />;
   return (
-    <p className="text-sm text-slate-400">
+    <p className="text-sm text-muted">
       The <span className="font-mono">{engine}</span> engine takes no configuration.
     </p>
   );
@@ -88,25 +88,25 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
           placeholder="city, country or host"
           onChange={(e) => setSearch(e.target.value)}
         />
-        {servers.isFetching && <p className="mt-1 text-xs text-slate-500">Searching…</p>}
+        {servers.isFetching && <p className="mt-1 text-xs text-faint">Searching…</p>}
         {servers.data && servers.data.length > 0 && (
-          <ul className="mt-1 max-h-48 divide-y divide-slate-800 overflow-y-auto rounded border border-slate-800">
+          <ul className="mt-1 max-h-48 divide-y divide-line overflow-y-auto rounded border border-line">
             {servers.data.slice(0, 50).map((s) => (
               <li key={s.id}>
                 <button
                   type="button"
-                  className="flex w-full items-baseline justify-between px-2 py-1 text-left text-sm hover:bg-slate-800"
+                  className="flex w-full items-baseline justify-between px-2 py-1 text-left text-sm hover:bg-raised"
                   onClick={() => onChange(setOption(options, 'server_id', Number(s.id)))}
                 >
-                  <span className="text-slate-200">{s.name}</span>
-                  <span className="text-xs text-slate-500">{s.location}, {s.country}</span>
+                  <span className="text-fg">{s.name}</span>
+                  <span className="text-xs text-faint">{s.location}, {s.country}</span>
                 </button>
               </li>
             ))}
           </ul>
         )}
         {servers.isError && (
-          <p className="mt-1 text-xs text-amber-400">Server list unavailable — enter an ID manually.</p>
+          <p className="mt-1 text-xs text-warn">Server list unavailable — enter an ID manually.</p>
         )}
       </div>
     </div>
@@ -233,7 +233,7 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
         <input id="iperf-password" type="password" className={field} value={text('password')}
           onChange={(e) => onChange(setOption(options, 'password', e.target.value))} />
         {passwordNeedsAuth && (
-          <p className="mt-1 text-xs text-amber-400">
+          <p className="mt-1 text-xs text-warn">
             Password requires a username and RSA public key path
           </p>
         )}
@@ -243,12 +243,12 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
           true (an invalid combination the engine would reject); if that
           happened, disabling both here would make it impossible to ever
           uncheck either one. */}
-      <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-reverse">
+      <label className="flex items-center gap-2 text-sm text-muted" htmlFor="iperf-reverse">
         <input id="iperf-reverse" type="checkbox" checked={reverseOn} disabled={bidirOn && !reverseOn}
           onChange={(e) => onChange(setOption(options, 'reverse', e.target.checked))} />
         Reverse (-R)
       </label>
-      <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-bidir">
+      <label className="flex items-center gap-2 text-sm text-muted" htmlFor="iperf-bidir">
         <input id="iperf-bidir" type="checkbox" checked={bidirOn} disabled={(reverseOn && !bidirOn) || isUdp}
           onChange={(e) => onChange(setOption(options, 'bidir', e.target.checked))} />
         Bidirectional (--bidir)

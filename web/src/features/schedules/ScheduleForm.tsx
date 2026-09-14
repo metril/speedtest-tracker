@@ -90,12 +90,12 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
   const previewError = preview.error instanceof ApiError ? preview.error.message : undefined;
 
   return (
-    <form onSubmit={submit} className="grid gap-4 rounded border border-slate-800 bg-slate-900/40 p-4">
+    <form onSubmit={submit} className="grid gap-4 rounded border border-line bg-raised p-4">
       <div className="grid gap-1">
-        <label htmlFor="schedule-name" className="text-xs uppercase tracking-wide text-slate-500">Name</label>
+        <label htmlFor="schedule-name" className="text-xs uppercase tracking-wide text-faint">Name</label>
         <input
           id="schedule-name" value={name} onChange={(e) => setName(e.target.value)}
-          className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+          className="rounded border border-line bg-app px-2 py-1.5 text-sm text-fg"
         />
       </div>
 
@@ -104,30 +104,30 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
           {PRESETS.map((p) => (
             <button
               key={p.expr} type="button" onClick={() => setCron(p.expr)}
-              className={`rounded border px-2 py-1 text-xs ${cron === p.expr ? 'border-sky-600 text-sky-300' : 'border-slate-800 text-slate-400 hover:bg-slate-900'}`}
+              className={`rounded border px-2 py-1 text-xs ${cron === p.expr ? 'border-accent text-accent' : 'border-line text-muted hover:bg-surface'}`}
             >
               {p.label}
             </button>
           ))}
         </div>
-        <label htmlFor="schedule-cron" className="text-xs uppercase tracking-wide text-slate-500">Cron expression</label>
+        <label htmlFor="schedule-cron" className="text-xs uppercase tracking-wide text-faint">Cron expression</label>
         <input
           id="schedule-cron" value={cron} onChange={(e) => setCron(e.target.value)}
-          className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 font-mono text-sm text-slate-100"
+          className="rounded border border-line bg-app px-2 py-1.5 font-mono text-sm text-fg"
         />
-        <p data-testid="cron-preview" className="text-xs text-slate-400">
+        <p data-testid="cron-preview" className="text-xs text-muted">
           {previewError
-            ? <span className="text-rose-400">{previewError}</span>
+            ? <span className="text-bad">{previewError}</span>
             : (preview.data ?? []).map((t) => formatDateTime(t)).join(' · ') || 'Next runs appear here.'}
         </p>
       </div>
 
       <div className="grid gap-1">
-        <label htmlFor="schedule-tz" className="text-xs uppercase tracking-wide text-slate-500">Timezone</label>
+        <label htmlFor="schedule-tz" className="text-xs uppercase tracking-wide text-faint">Timezone</label>
         <select
           id="schedule-tz" value={isCustomTimezone ? '__custom__' : timezone}
           onChange={(e) => setTimezone(e.target.value)}
-          className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
+          className="rounded border border-line bg-app px-2 py-1.5 text-sm text-fg"
         >
           {CURATED_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
           {isCustomTimezone && <option value="__custom__" disabled>Custom…</option>}
@@ -137,25 +137,25 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
           placeholder="Or type an IANA zone, e.g. Europe/Zurich"
           value={isCustomTimezone ? timezone : ''}
           onChange={(e) => setTimezone(e.target.value)}
-          className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-300"
+          className="rounded border border-line bg-app px-2 py-1.5 text-xs text-muted"
         />
       </div>
 
       <fieldset className="grid gap-2">
-        <legend className="text-xs uppercase tracking-wide text-slate-500">Targets, in run order</legend>
+        <legend className="text-xs uppercase tracking-wide text-faint">Targets, in run order</legend>
         <ol className="grid gap-1">
           {selected.map((id, i) => (
-            <li key={id} className="flex items-center gap-2 rounded border border-slate-800 px-2 py-1 text-sm">
-              <span className="w-5 text-right font-mono text-xs text-slate-500">{i + 1}</span>
-              <span className="flex-1 text-slate-200">{byID.get(id)?.name ?? `#${id}`}</span>
+            <li key={id} className="flex items-center gap-2 rounded border border-line px-2 py-1 text-sm">
+              <span className="w-5 text-right font-mono text-xs text-faint">{i + 1}</span>
+              <span className="flex-1 text-fg">{byID.get(id)?.name ?? `#${id}`}</span>
               <button type="button" aria-label={`Move ${byID.get(id)?.name ?? id} up`} disabled={i === 0}
-                className="rounded border border-slate-800 px-1.5 text-xs text-slate-400 disabled:opacity-40"
+                className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
                 onClick={() => move(i, -1)}>↑</button>
               <button type="button" aria-label={`Move ${byID.get(id)?.name ?? id} down`} disabled={i === selected.length - 1}
-                className="rounded border border-slate-800 px-1.5 text-xs text-slate-400 disabled:opacity-40"
+                className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
                 onClick={() => move(i, 1)}>↓</button>
               <button type="button" aria-label={`Remove ${byID.get(id)?.name ?? id}`}
-                className="rounded border border-slate-800 px-1.5 text-xs text-slate-400"
+                className="rounded border border-line px-1.5 text-xs text-muted"
                 onClick={() => setSelected((prev) => prev.filter((x) => x !== id))}>×</button>
             </li>
           ))}
@@ -163,7 +163,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
         <div className="flex flex-wrap gap-2">
           {available.map((t) => (
             <button key={t.id} type="button" aria-label={`Add ${t.name}`}
-              className="rounded border border-slate-800 px-2 py-1 text-xs text-slate-300 hover:bg-slate-900"
+              className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-surface"
               onClick={() => setSelected((prev) => [...prev, t.id])}>
               + {t.name}
             </button>
@@ -171,20 +171,20 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
         </div>
       </fieldset>
 
-      <label className="flex items-center gap-2 text-sm text-slate-300">
+      <label className="flex items-center gap-2 text-sm text-muted">
         <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
         Enabled
       </label>
 
-      {(localError || error) && <p className="text-sm text-rose-400">{localError || error}</p>}
+      {(localError || error) && <p className="text-sm text-bad">{localError || error}</p>}
 
       <div className="flex gap-2">
         <button type="submit" disabled={submitting}
-          className="rounded bg-sky-500 px-3 py-1.5 text-sm font-medium text-slate-950 hover:bg-sky-400 disabled:opacity-50">
+          className="rounded bg-accent px-3 py-1.5 text-sm font-medium text-accent-fg hover:opacity-90 disabled:opacity-50">
           Save schedule
         </button>
         <button type="button" onClick={onCancel}
-          className="rounded border border-slate-700 px-3 py-1.5 text-sm text-slate-300 hover:bg-slate-900">
+          className="rounded border border-line px-3 py-1.5 text-sm text-muted hover:bg-surface">
           Cancel
         </button>
       </div>

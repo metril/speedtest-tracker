@@ -7,7 +7,7 @@ interface Props {
   targets: Target[];
 }
 
-const control = 'rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 focus:border-sky-500 focus:outline-none';
+const control = 'rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -67,7 +67,7 @@ export function ResultFiltersBar({ value, onChange, targets }: Props) {
       <input className={control} type="datetime-local" aria-label="To"
         value={isoToLocalInput(value.to)}
         onChange={(e) => set({ to: localInputToISO(e.target.value) })} />
-      <button className="rounded border border-slate-700 px-2 py-1 text-sm text-slate-300 hover:bg-slate-800"
+      <button className="rounded border border-line px-2 py-1 text-sm text-muted hover:bg-raised"
         onClick={() => onChange({})}>
         Clear
       </button>

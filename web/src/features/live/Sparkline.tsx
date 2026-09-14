@@ -37,7 +37,7 @@ export function Sparkline({ samples, width = 320, height = 48 }: SparklineProps)
       aria-hidden="true"
       focusable="false"
     >
-      <path d={d} fill="none" stroke="#38bdf8" strokeWidth={1.5} strokeLinejoin="round" />
+      <path d={d} fill="none" stroke="var(--color-series-download)" strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   );
 }

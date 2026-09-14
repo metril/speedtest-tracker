@@ -1,1 +1,50 @@
 @import "tailwindcss";
+
+/* Tailwind v4's dark: variant keys off a class on <html>, not the media
+   query, so an explicit light/dark choice can override the OS. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --color-app: #f8fafc;
+  --color-surface: #ffffff;
+  --color-raised: #f1f5f9;
+  --color-line: #e2e8f0;
+  --color-fg: #0f172a;
+  --color-muted: #475569;
+  --color-faint: #94a3b8;
+  --color-accent: #0369a1;
+  --color-accent-fg: #ffffff;
+  --color-ok: #047857;
+  --color-warn: #b45309;
+  --color-bad: #be123c;
+
+  /* Chart series. One palette, used by every chart; each pair is
+     distinguishable in both themes and above 3:1 against its ground. */
+  --color-series-download: #0369a1;
+  --color-series-upload: #7c3aed;
+  --color-series-ping: #b45309;
+  --color-series-jitter: #0f766e;
+}
+
+.dark {
+  --color-app: #020617;
+  --color-surface: #0f172a;
+  --color-raised: #1e293b;
+  --color-line: #1e293b;
+  --color-fg: #f1f5f9;
+  --color-muted: #94a3b8;
+  --color-faint: #64748b;
+  --color-accent: #38bdf8;
+  --color-accent-fg: #020617;
+  --color-ok: #34d399;
+  --color-warn: #fbbf24;
+  --color-bad: #fb7185;
+
+  --color-series-download: #38bdf8;
+  --color-series-upload: #c084fc;
+  --color-series-ping: #fbbf24;
+  --color-series-jitter: #2dd4bf;
+}
+
+:root { color-scheme: light; }
+.dark { color-scheme: dark; }

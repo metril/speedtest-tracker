@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router';
 import { LivePanel } from '../features/live/LivePanel';
 import { LiveRunProvider } from '../features/live/LiveRunProvider';
+import { ThemeToggle } from './ThemeToggle';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
@@ -13,8 +14,8 @@ const NAV = [
 export function Layout() {
   return (
     <LiveRunProvider>
-      <div className="min-h-screen bg-slate-950 text-slate-100">
-        <header className="border-b border-slate-800">
+      <div className="min-h-screen bg-app text-fg">
+        <header className="border-b border-line">
           <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
             <span className="font-semibold tracking-tight">speedtest-tracker</span>
             <nav className="flex gap-4 text-sm">
@@ -24,13 +25,14 @@ export function Layout() {
                   to={to}
                   end={to === '/'}
                   className={({ isActive }) =>
-                    isActive ? 'text-sky-400' : 'text-slate-400 hover:text-slate-200'
+                    isActive ? 'text-accent' : 'text-muted hover:text-fg'
                   }
                 >
                   {label}
                 </NavLink>
               ))}
             </nav>
+            <div className="ml-auto"><ThemeToggle /></div>
           </div>
         </header>
         <LivePanel />

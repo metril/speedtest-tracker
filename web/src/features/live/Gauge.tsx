@@ -6,15 +6,17 @@ const DEFAULT_MAX_MBPS = 1000;
 /** The phases a run can report progress for. */
 export type GaugePhase = 'connecting' | 'ping' | 'download' | 'upload' | 'done' | 'error';
 
-/** Per-phase accent. The dial is the one loud element in the live panel,
- * so the phase is carried by colour rather than another label. */
+/** Per-phase accent, as CSS custom properties so the dial stays readable
+ * when the theme's palette swaps between light and dark. The dial is the
+ * one loud element in the live panel, so the phase is carried by colour
+ * rather than another label. */
 const PHASE_STROKE: Record<GaugePhase, string> = {
-  connecting: '#64748b',
-  ping: '#a78bfa',
-  download: '#38bdf8',
-  upload: '#34d399',
-  done: '#38bdf8',
-  error: '#fb7185',
+  connecting: 'var(--color-faint)',
+  ping: 'var(--color-series-ping)',
+  download: 'var(--color-series-download)',
+  upload: 'var(--color-series-upload)',
+  done: 'var(--color-ok)',
+  error: 'var(--color-bad)',
 };
 
 /**
@@ -72,7 +74,7 @@ export function Gauge({ bps, phase, maxMbps = DEFAULT_MAX_MBPS }: GaugeProps) {
         aria-valuetext={`${mbps.toFixed(1)} Mbps`}
         aria-label="current throughput"
       >
-        <path d={track} fill="none" stroke="#1e293b" strokeWidth={14} strokeLinecap="round" />
+        <path d={track} fill="none" stroke="var(--color-line)" strokeWidth={14} strokeLinecap="round" />
         {value && (
           <path
             d={value}
@@ -85,10 +87,10 @@ export function Gauge({ bps, phase, maxMbps = DEFAULT_MAX_MBPS }: GaugeProps) {
         )}
       </svg>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center pt-4">
-        <span className="font-mono text-5xl tabular-nums tracking-tight text-slate-50">
+        <span className="font-mono text-5xl tabular-nums tracking-tight text-fg">
           {mbps.toFixed(1)}
         </span>
-        <span className="text-xs uppercase tracking-[0.2em] text-slate-500">Mbps</span>
+        <span className="text-xs uppercase tracking-[0.2em] text-fg0">Mbps</span>
         <span className="mt-2 text-sm capitalize" style={{ color: stroke }}>
           {phase}
         </span>
