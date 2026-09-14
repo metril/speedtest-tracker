@@ -25,7 +25,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -trimpath \
 # ---- stage 3: runtime -----------------------------------------------------
 # trixie-slim carries iperf3 >= 3.17 (--json-stream support), unlike
 # bookworm-slim's 3.12.
-FROM debian:trixie-slim
+# Pinned to the debian:trixie-slim tag as of 2026-09-14; bump by re-pulling
+# the tag and updating both the digest and this date.
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
 ARG TARGETARCH
 ARG OOKLA_VERSION=1.2.0
 # Pinned checksums for the Ookla CLI tarballs; recompute when bumping

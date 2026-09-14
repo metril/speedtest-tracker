@@ -26,13 +26,157 @@ make build
 
 ## Configuration
 
-Only two settings come from the environment; everything else is edited in the UI
-and stored in the database.
+Almost everything is edited in the UI and stored in the database; a handful
+of environment variables configure the process itself or seed settings on
+first boot.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `ST_DB_PATH` | `/data/speedtest.db` in a container, else `./data/speedtest.db` | SQLite file |
-| `ST_LISTEN` | `:8080` | HTTP listen address |
+| `ST_LISTEN` | `:8080` | HTTP listen address (bootstrap-only: read once at startup, not a settings key) |
+| `ST_LOCK_ENV` | `false` | When `true`, every `ST_<SECTION>_<KEY>` variable below becomes authoritative — see below |
+
+### Environment variables
+
+Any settings key can also be seeded from the environment as
+`ST_<SECTION>_<KEY>` (uppercased, with `.` replaced by `_`), for example
+`auth.mode` becomes `ST_AUTH_MODE`. Values are parsed as JSON, falling back
+to a plain string if that fails, so booleans, numbers and arrays don't need
+quoting tricks beyond normal shell escaping:
+
+```bash
+ST_AUTH_MODE=token
+ST_AUTH_TRUSTED_PROXIES='["172.16.0.0/12"]'
+ST_INTEGRATIONS_VM_URL=http://victoria-metrics:8428
+ST_GENERAL_TIMEZONE=Europe/Zurich
+```
+
+Semantics:
+
+- **`ST_LOCK_ENV=false` (default)** — an env value only *seeds* a key the
+  database has never seen (i.e. still at its built-in default). It never
+  overwrites a value already set via the UI or a previous env seed, so a
+  fresh container comes up configured but the operator's later changes in
+  the UI always win.
+- **`ST_LOCK_ENV=true`** — every matching env value is rewritten into the
+  database on every boot, authoritative over the UI. `PUT /api/v1/settings`
+  rejects a write to a locked key with `400`, and the UI shows the field as
+  *set by environment* and disables it.
+
+## Authentication
+
+Three modes, set via `auth.mode` (Settings → Auth or `ST_AUTH_MODE`):
+
+- **`open`** (default) — no authentication; anyone who can reach the port
+  has full control. The UI shows a permanent banner while this mode is
+  active as a reminder that the instance is unprotected.
+- **`forward_auth`** — identity comes from headers set by a reverse proxy in
+  front of speedtest-tracker. Can additionally accept bearer tokens via
+  *Accept API tokens as well* (`auth.allow_tokens`), which is how scripts
+  reach an instance sitting behind SSO.
+- **`token`** — every request needs a bearer API token.
+
+### Forward auth
+
+Forward auth trusts the `Remote-User` / `Remote-Groups` headers (configurable,
+defaults shown) set by whatever sits in front of the app — but **only** when
+the connecting peer's address is inside one of the configured trusted-proxy
+CIDRs (`auth.trusted_proxies`). An empty CIDR list denies every request; that
+is deliberate, since without it any client could set those headers itself
+and walk straight in.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `auth.user_header` | `Remote-User` | Header carrying the username |
+| `auth.groups_header` | `Remote-Groups` | Header carrying the user's groups |
+| `auth.groups_separator` | `,` | Separator used to split the groups header |
+| `auth.trusted_proxies` | `[]` | CIDRs the identity headers are trusted from |
+| `auth.admin_group` | (unset) | Group required for admin access |
+
+When `admin_group` is set, only members of that group are admins; when it is
+unset, everyone who authenticates via forward auth is an admin.
+
+**Reverse-proxy examples:**
+
+*Traefik + Authelia* — a `forwardAuth` middleware pointed at Authelia, with
+the trusted CIDR set to Traefik's own Docker network (e.g. `172.16.0.0/12`),
+not the client's:
+
+```yaml
+http:
+  middlewares:
+    authelia:
+      forwardAuth:
+        address: http://authelia:9091/api/authz/forward-auth
+        trustForwardHeader: true
+        authResponseHeaders:
+          - Remote-User
+          - Remote-Groups
+          - Remote-Name
+          - Remote-Email
+```
+
+```yaml
+# ST_AUTH_TRUSTED_PROXIES='["172.16.0.0/12"]'
+```
+
+*Authelia standalone* — an `access_control` rule for the host, and the
+headers it emits on a successful auth:
+
+```yaml
+access_control:
+  rules:
+    - domain: speedtest.example.com
+      policy: two_factor
+```
+
+Authelia emits `Remote-User`, `Remote-Groups`, `Remote-Name` and
+`Remote-Email` on the proxied request.
+
+*Caddy* — a `forward_auth` directive, copying just the headers this app
+needs:
+
+```
+speedtest.example.com {
+    forward_auth authelia:9091 {
+        uri /api/authz/forward-auth
+        copy_headers Remote-User Remote-Groups
+    }
+    reverse_proxy speedtest-tracker:8080
+}
+```
+
+If Caddy shares the host with the app (rather than running in its own
+container network), the trusted CIDR is `127.0.0.1/32` — the loopback
+address Caddy connects from, not the client's.
+
+### API tokens
+
+Create tokens in Settings → Auth. The plaintext is shown exactly once; only
+a SHA-256 digest is stored. Send it as `Authorization: Bearer <token>`.
+`GET /api/v1/events` additionally accepts `?token=` because `EventSource`
+cannot set headers — prefer the header everywhere else, since query strings
+land in proxy access logs. Revoking the last token while in `token` mode is
+refused, to avoid locking yourself out.
+
+### Exempt endpoints
+
+`/healthz` and `/metrics` are never authenticated, so probes and Prometheus
+keep working regardless of mode. If the instance is public, put `/metrics`
+behind the proxy or disable it (Settings → Integrations).
+
+### Locked out?
+
+Restart the container with `ST_AUTH_MODE=open` (add `ST_LOCK_ENV=true` to
+keep it that way while you fix the configuration in the UI), then switch
+back once it's correct.
+
+### Security notes
+
+- Run behind TLS; credentials and tokens are sent in the clear otherwise.
+- The SPA shell itself is served without authentication — it contains no
+  data and calls `GET /api/v1/me` on load to decide what to render.
+- Tokens are full-access in this release; there is no per-token scoping.
 
 ## Engines
 
@@ -145,14 +289,27 @@ the shared chart palette.
 
 `/api/v1` follows a few consistent shapes:
 
-- Paginated lists (`/results`, `/runs`) return `{"<plural>": [...], "next_cursor": "..."}`;
-  pass `next_cursor` back as `?cursor=` to fetch the next page, and an empty
-  string means the listing is exhausted.
-- Every other list (`/targets`, `/tags`, `/ookla/servers`) returns a bare JSON array.
+- **Paginated endpoints** (`/results`, `/runs`) return
+  `{"<plural>": [...], "next_cursor": "..."}`; pass `next_cursor` back as
+  `?cursor=` to fetch the next page, and an empty string means the listing
+  is exhausted.
+- **Collection endpoints** (`/targets`, `/tags`, `/ookla/servers`) return
+  `{"<plural>": [...]}`.
+- **Single-resource endpoints** return the bare object (e.g.
+  `GET /api/v1/targets/{id}` returns the target directly, not wrapped).
 - Errors always use the envelope `{"error": {"code": "...", "message": "..."}}`,
   with a matching HTTP status code (400 invalid_request, 404 not_found, 500 internal_error, etc).
 - `/results`, `/targets`, `/schedules` and `/runs` send an `ETag`; a matching
   `If-None-Match` gets back `304 Not Modified` with no body.
+
+Identity and auth endpoints:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/me` | The caller's resolved identity (mode, user, groups, admin) |
+| `GET` | `/api/v1/settings/tokens` | List API tokens (metadata only, never the plaintext or hash) |
+| `POST` | `/api/v1/settings/tokens` | Create a token; the response is the only time the plaintext is returned |
+| `DELETE` | `/api/v1/settings/tokens/{id}` | Revoke a token (refused for the last token while in `token` mode) |
 
 ## Observability
 

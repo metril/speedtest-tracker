@@ -5,6 +5,16 @@ services:
     environment:
       ST_DB_PATH: /data/speedtest.db
       ST_LISTEN: 0.0.0.0:8080
+    # Ships open by default (no auth). To put this instance behind a
+    # reverse proxy doing forward auth, see the README's Authentication
+    # section and uncomment the block below.
+    # environment:
+    #   ST_LOCK_ENV: "true"
+    #   ST_AUTH_MODE: forward_auth
+    #   ST_AUTH_USER_HEADER: Remote-User
+    #   ST_AUTH_GROUPS_HEADER: Remote-Groups
+    #   ST_AUTH_TRUSTED_PROXIES: '["172.16.0.0/12"]'
+    #   ST_AUTH_ADMIN_GROUP: admins
     ports: ["8080:8080"]
     volumes: ["speedtest-data:/data"]
     restart: unless-stopped
