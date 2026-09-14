@@ -66,8 +66,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := s2.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("schema_migrations rows = %d, want 5", n)
+	if n != 6 {
+		t.Errorf("schema_migrations rows = %d, want 6", n)
 	}
 }
 
@@ -144,8 +144,8 @@ func TestOpenEscapesSpecialPathCharacters(t *testing.T) {
 	if err := s.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if n != 5 {
-		t.Errorf("schema_migrations rows = %d, want 5", n)
+	if n != 6 {
+		t.Errorf("schema_migrations rows = %d, want 6", n)
 	}
 }
 

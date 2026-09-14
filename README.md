@@ -230,6 +230,17 @@ capped at 1/second and always carry an identifying `User-Agent`
 (`speedtest-tracker/<version> (+https://github.com/metril/speedtest-tracker)`),
 per its usage policy.
 
+### Public iperf3 server list
+
+`GET /api/v1/iperf3/servers?q=&limit=` searches a cached copy of
+[export.iperf3serverlist.net](https://export.iperf3serverlist.net)
+(refreshed daily, or on demand via `POST /api/v1/iperf3/servers/refresh`).
+Each entry carries `port_end` (the end of the server's advertised port
+range, omitted when it only offers a single port), `supports_reverse`,
+`supports_udp` and `supports_ipv6` (parsed from the feed's `OPTIONS`
+column: `-R`, `-u`, `-6`), plus `gbs`, `continent`, `country`, `site` and
+`provider` for display/search.
+
 ## Schedules
 
 A schedule is a name, a cron expression, a timezone and an **ordered** list of

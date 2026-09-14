@@ -14,7 +14,7 @@ func TestFetchParsesWellFormedRows(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`[
-			{"IP/HOST":"iperf.example.net","PORT":"5201","OPTIONS":"-R,-u","GB/S":"1","CONTINENT":"EU","COUNTRY":"DE","SITE":"Frankfurt","PROVIDER":"Example Net"},
+			{"IP/HOST":"iperf.example.net","PORT":"5201","OPTIONS":"-R,-u,-6","GB/S":"1","CONTINENT":"EU","COUNTRY":"DE","SITE":"Frankfurt","PROVIDER":"Example Net"},
 			{"IP/HOST":"range.example.net","PORT":"9205-9240","OPTIONS":"","GB/S":"10","CONTINENT":"NA","COUNTRY":"US","SITE":"Denver","PROVIDER":"Other Net"}
 		]`))
 	}))
@@ -27,14 +27,16 @@ func TestFetchParsesWellFormedRows(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("got %d servers, want 2: %+v", len(got), got)
 	}
-	if got[0].Host != "iperf.example.net" || got[0].Port != 5201 || !got[0].SupportsReverse || !got[0].SupportsUDP {
+	if got[0].Host != "iperf.example.net" || got[0].Port != 5201 || got[0].PortEnd != 0 ||
+		!got[0].SupportsReverse || !got[0].SupportsUDP || !got[0].SupportsIPv6 {
 		t.Errorf("row 0 = %+v", got[0])
 	}
 	if got[0].Site != "Frankfurt" || got[0].Country != "DE" || got[0].Provider != "Example Net" || got[0].Continent != "EU" || got[0].GBs != "1" {
 		t.Errorf("row 0 metadata = %+v", got[0])
 	}
-	// A port range takes its first port.
-	if got[1].Host != "range.example.net" || got[1].Port != 9205 || got[1].SupportsReverse || got[1].SupportsUDP {
+	// A port range keeps both the start and the end port.
+	if got[1].Host != "range.example.net" || got[1].Port != 9205 || got[1].PortEnd != 9240 ||
+		got[1].SupportsReverse || got[1].SupportsUDP || got[1].SupportsIPv6 {
 		t.Errorf("row 1 = %+v", got[1])
 	}
 }
@@ -113,44 +115,47 @@ func TestFetchRespectsContextCancellation(t *testing.T) {
 	}
 }
 
-func TestParsePort(t *testing.T) {
+func TestParsePortRange(t *testing.T) {
 	cases := []struct {
-		in   string
-		want int
-		ok   bool
+		in             string
+		wantStart, end int
+		ok             bool
 	}{
-		{"5201", 5201, true},
-		{"9205-9240", 9205, true},
-		{"", 0, false},
-		{"abc", 0, false},
-		{"0", 0, false},
-		{"-5", 0, false},
-		{" 5201 ", 5201, true},
+		{"5201", 5201, 0, true},
+		{"9205-9240", 9205, 9240, true},
+		{"", 0, 0, false},
+		{"abc", 0, 0, false},
+		{"0", 0, 0, false},
+		{"-5", 0, 0, false},
+		{" 5201 ", 5201, 0, true},
+		{"5201-abc", 5201, 0, true}, // malformed end still leaves the start usable
 	}
 	for _, c := range cases {
-		got, ok := parsePort(c.in)
-		if got != c.want || ok != c.ok {
-			t.Errorf("parsePort(%q) = %d,%v want %d,%v", c.in, got, ok, c.want, c.ok)
+		start, end, ok := parsePortRange(c.in)
+		if start != c.wantStart || end != c.end || ok != c.ok {
+			t.Errorf("parsePortRange(%q) = %d,%d,%v want %d,%d,%v", c.in, start, end, ok, c.wantStart, c.end, c.ok)
 		}
 	}
 }
 
 func TestParseOptions(t *testing.T) {
 	cases := []struct {
-		in           string
-		reverse, udp bool
+		in                 string
+		reverse, udp, ipv6 bool
 	}{
-		{"-R,-u", true, true},
-		{"-R", true, false},
-		{"-u", false, true},
-		{"", false, false},
-		{"-Z", false, false},
-		{" -R , -u ", true, true},
+		{"-R,-u", true, true, false},
+		{"-R", true, false, false},
+		{"-u", false, true, false},
+		{"-6", false, false, true},
+		{"-R,-u,-6", true, true, true},
+		{"", false, false, false},
+		{"-Z", false, false, false},
+		{" -R , -u , -6 ", true, true, true},
 	}
 	for _, c := range cases {
-		reverse, udp := parseOptions(c.in)
-		if reverse != c.reverse || udp != c.udp {
-			t.Errorf("parseOptions(%q) = %v,%v want %v,%v", c.in, reverse, udp, c.reverse, c.udp)
+		reverse, udp, ipv6 := parseOptions(c.in)
+		if reverse != c.reverse || udp != c.udp || ipv6 != c.ipv6 {
+			t.Errorf("parseOptions(%q) = %v,%v,%v want %v,%v,%v", c.in, reverse, udp, ipv6, c.reverse, c.udp, c.ipv6)
 		}
 	}
 }

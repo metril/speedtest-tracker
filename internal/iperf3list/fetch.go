@@ -97,17 +97,19 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]store.Iperf3
 		if host == "" {
 			continue
 		}
-		port, ok := parsePort(r.Port)
+		port, portEnd, ok := parsePortRange(r.Port)
 		if !ok {
 			continue
 		}
-		reverse, udp := parseOptions(r.Options)
+		reverse, udp, ipv6 := parseOptions(r.Options)
 		out = append(out, store.Iperf3Server{
 			Host:            host,
 			Port:            port,
+			PortEnd:         portEnd,
 			Options:         r.Options,
 			SupportsReverse: reverse,
 			SupportsUDP:     udp,
+			SupportsIPv6:    ipv6,
 			GBs:             r.GBs,
 			Continent:       r.Continent,
 			Country:         r.Country,
@@ -118,35 +120,47 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]store.Iperf3
 	return out, nil
 }
 
-// parsePort parses a PORT field, which is either a single port ("5201")
-// or a range ("9205-9240"), returning the first port in either case. It
-// reports false for empty, unparsable or non-positive values.
-func parsePort(raw string) (int, bool) {
+// parsePortRange parses a PORT field, which is either a single port
+// ("5201") or a range ("9205-9240"). For a single port, end is 0 (no
+// range). It reports false for empty, unparsable or non-positive values.
+func parsePortRange(raw string) (start, end int, ok bool) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {
-		return 0, false
+		return 0, 0, false
 	}
 	first := raw
+	var last string
 	if idx := strings.Index(raw, "-"); idx > 0 {
 		first = raw[:idx]
+		last = raw[idx+1:]
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(first))
 	if err != nil || n <= 0 {
-		return 0, false
+		return 0, 0, false
 	}
-	return n, true
+	if last == "" {
+		return n, 0, true
+	}
+	e, err := strconv.Atoi(strings.TrimSpace(last))
+	if err != nil || e <= 0 {
+		// A malformed end still leaves the start port usable.
+		return n, 0, true
+	}
+	return n, e, true
 }
 
-// parseOptions parses a comma-separated OPTIONS field (e.g. "-R,-u") into
-// whether the server supports reverse mode and UDP.
-func parseOptions(raw string) (reverse, udp bool) {
+// parseOptions parses a comma-separated OPTIONS field (e.g. "-R,-u,-6")
+// into whether the server supports reverse mode, UDP and IPv6.
+func parseOptions(raw string) (reverse, udp, ipv6 bool) {
 	for _, part := range strings.Split(raw, ",") {
 		switch strings.ToLower(strings.TrimSpace(part)) {
 		case "-r":
 			reverse = true
 		case "-u":
 			udp = true
+		case "-6":
+			ipv6 = true
 		}
 	}
-	return reverse, udp
+	return reverse, udp, ipv6
 }

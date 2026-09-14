@@ -7,9 +7,9 @@ import (
 
 func sampleIperf3Servers() []Iperf3Server {
 	return []Iperf3Server{
-		{Host: "iperf.example.net", Port: 5201, Options: "-R,-u", SupportsReverse: true, SupportsUDP: true,
+		{Host: "iperf.example.net", Port: 5201, PortEnd: 5210, Options: "-R,-u,-6", SupportsReverse: true, SupportsUDP: true, SupportsIPv6: true,
 			GBs: "1", Continent: "EU", Country: "DE", Site: "Frankfurt", Provider: "Example Net"},
-		{Host: "speed.other.net", Port: 5202, Options: "", SupportsReverse: false, SupportsUDP: false,
+		{Host: "speed.other.net", Port: 5202, Options: "", SupportsReverse: false, SupportsUDP: false, SupportsIPv6: false,
 			GBs: "10", Continent: "NA", Country: "US", Site: "Denver", Provider: "Other Net"},
 	}
 }
@@ -67,6 +67,33 @@ func TestReplaceIperf3ServersIgnoresDuplicateHostPort(t *testing.T) {
 	n, err := db.CountIperf3Servers(ctx)
 	if err != nil || n != 1 {
 		t.Fatalf("CountIperf3Servers = %d, %v, want 1 (duplicate ignored)", n, err)
+	}
+}
+
+// TestReplaceIperf3ServersRoundTripsPortEndAndIPv6 covers the columns added
+// by migration 0006: PortEnd and SupportsIPv6 must survive a write/read
+// round trip, and a server without a port range keeps PortEnd at 0.
+func TestReplaceIperf3ServersRoundTripsPortEndAndIPv6(t *testing.T) {
+	db := newTestStore(t)
+	ctx := context.Background()
+	if err := db.ReplaceIperf3Servers(ctx, sampleIperf3Servers()); err != nil {
+		t.Fatal(err)
+	}
+	got, err := db.SearchIperf3Servers(ctx, "", 50)
+	if err != nil || len(got) != 2 {
+		t.Fatalf("SearchIperf3Servers = %+v, %v, want 2 rows", got, err)
+	}
+	byHost := map[string]Iperf3Server{}
+	for _, s := range got {
+		byHost[s.Host] = s
+	}
+	ranged := byHost["iperf.example.net"]
+	if ranged.PortEnd != 5210 || !ranged.SupportsIPv6 {
+		t.Errorf("ranged server = %+v, want PortEnd=5210 SupportsIPv6=true", ranged)
+	}
+	single := byHost["speed.other.net"]
+	if single.PortEnd != 0 || single.SupportsIPv6 {
+		t.Errorf("single-port server = %+v, want PortEnd=0 SupportsIPv6=false", single)
 	}
 }
 
