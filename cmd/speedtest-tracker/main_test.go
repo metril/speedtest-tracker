@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"testing"
 	"time"
@@ -19,6 +20,8 @@ import (
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
+	"github.com/metril/speedtest-tracker/internal/vlpush"
+	"github.com/metril/speedtest-tracker/internal/vmpush"
 )
 
 // freePort asks the OS for an unused port.
@@ -143,8 +146,16 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	servers := ookla.NewServerList("speedtest", time.Hour)
 	sch := scheduler.New(scheduler.Config{Store: db, Runner: runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(), Logger: logger}), Logger: logger})
+	vm := vmpush.New(vmpush.Config{})
+	vm.Start()
+	defer vm.Close(context.Background())
+	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
+	vl.Start()
+	defer vl.Close(context.Background())
 
-	go watchSettings(ctx, st, level, reg, servers, sch, logger)
+	changes, unsubscribe := st.Subscribe()
+	defer unsubscribe()
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -239,4 +250,46 @@ func TestSchedulerRunsScheduleEndToEnd(t *testing.T) {
 		time.Sleep(25 * time.Millisecond)
 	}
 	t.Fatal("schedule never produced a result within 6s")
+}
+
+func TestApplyIntegrationsConfiguresClients(t *testing.T) {
+	hits := make(chan string, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits <- r.URL.Path
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+
+	db, err := store.Open(filepath.Join(t.TempDir(), "wire.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	st, err := settings.New(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Set(ctx, settings.KeyVMEnabled, true)
+	st.Set(ctx, settings.KeyVMURL, srv.URL)
+
+	vm := vmpush.New(vmpush.Config{})
+	vm.Start()
+	defer vm.Close(ctx)
+	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
+	vl.Start()
+	defer vl.Close(ctx)
+
+	if err := applyIntegrations(ctx, st, vm, vl, slog.New(slog.NewTextHandler(io.Discard, nil))); err != nil {
+		t.Fatal(err)
+	}
+	vm.OnResult(ctx, &store.Result{Status: "ok", StartedAt: "2026-09-14T10:00:00.000Z"}, vmpush.Meta{})
+	select {
+	case p := <-hits:
+		if p != "/api/v1/import/prometheus" {
+			t.Fatalf("path = %s", p)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("applyIntegrations did not enable the VM writer")
+	}
 }

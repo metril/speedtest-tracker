@@ -18,11 +18,15 @@ import (
 	"github.com/metril/speedtest-tracker/internal/config"
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/metrics"
+	"github.com/metril/speedtest-tracker/internal/prune"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
+	"github.com/metril/speedtest-tracker/internal/vlpush"
+	"github.com/metril/speedtest-tracker/internal/vmpush"
 	"github.com/metril/speedtest-tracker/internal/web"
 )
 
@@ -102,12 +106,16 @@ func parseLevel(s string) slog.Level {
 // watchSettings applies live settings changes: general.log_level retunes
 // the logger in place and any engines.* change rebuilds the engine
 // registry and invalidates the Ookla server-list cache. It returns when
-// ctx is done.
-func watchSettings(ctx context.Context, st *settings.Store, level *slog.LevelVar,
-	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler, logger *slog.Logger) {
-	changes, unsubscribe := st.Subscribe()
-	defer unsubscribe()
-
+// ctx is done or changes is closed.
+//
+// The caller subscribes (st.Subscribe) and passes the resulting channel in,
+// rather than watchSettings subscribing itself: that makes the subscription
+// exist synchronously before this goroutine is even started, so a caller
+// (or test) that writes a setting right after starting watchSettings can
+// never race the notification past a subscriber that isn't listening yet.
+func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
+	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
+	vm *vmpush.Writer, vl *vlpush.Handler, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -142,9 +150,30 @@ func watchSettings(ctx context.Context, st *settings.Store, level *slog.LevelVar
 					continue
 				}
 				logger.Info("schedules reloaded after timezone change")
+			case strings.HasPrefix(key, "integrations."):
+				if err := applyIntegrations(ctx, st, vm, vl, logger); err != nil {
+					logger.Error("reload integrations", "error", err)
+					continue
+				}
+				logger.Info("integrations reloaded", "changed_key", key)
 			}
 		}
 	}
+}
+
+// applyIntegrations pushes the stored Integrations section into the live
+// VictoriaMetrics and VictoriaLogs clients. It is called once at startup
+// and again on every integrations.* settings change, which is what makes
+// the toggles take effect without a restart.
+func applyIntegrations(ctx context.Context, st *settings.Store, vm *vmpush.Writer, vl *vlpush.Handler, logger *slog.Logger) error {
+	i, err := st.Integrations(ctx)
+	if err != nil {
+		return err
+	}
+	vm.Configure(i.VMEnabled, i.VMURL, i.VMAuthHeader, i.VMExtraLabels)
+	vl.Configure(i.VLEnabled, i.VLURL, i.VLAuthHeader, i.VLStreamFields)
+	logger.Debug("integrations applied", "vm_enabled", i.VMEnabled, "vl_enabled", i.VLEnabled)
+	return nil
 }
 
 func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
@@ -167,6 +196,26 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	}
 	level.Set(parseLevel(general.LogLevel))
 
+	// Logger chain: every subsequent log record flows through the
+	// VictoriaLogs handler, which mirrors to stdout JSON and ships a copy
+	// to VictoriaLogs when configured.
+	vlHandler := vlpush.New(vlpush.Config{
+		Next: slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: level}),
+		App:  "speedtest-tracker",
+	})
+	vlHandler.Start()
+	logger = slog.New(vlHandler)
+	slog.SetDefault(logger)
+
+	m := metrics.New()
+
+	vm := vmpush.New(vmpush.Config{Logger: logger})
+	vm.Start()
+
+	if err := applyIntegrations(ctx, st, vm, vlHandler, logger); err != nil {
+		return err
+	}
+
 	engineCfg, err := st.Engines(ctx)
 	if err != nil {
 		return err
@@ -178,17 +227,49 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	hub := sse.NewHub()
 	rn := runner.New(runner.Config{
 		Store: db, Registry: reg, Hub: hub, Logger: logger,
+		Sink: runner.Sinks{
+			runner.SinkFunc(func(ctx context.Context, res *store.Result, meta runner.ResultMeta) {
+				vm.OnResult(ctx, res, vmpush.Meta{Schedule: meta.ScheduleName})
+			}),
+			runner.SinkFunc(func(_ context.Context, res *store.Result, meta runner.ResultMeta) {
+				m.ObserveResult(res, meta.ScheduleName)
+			}),
+		},
 	})
 	rn.Start()
+
+	m.AddLabelledGaugeFunc("speedtest_runner_queue_depth", "jobs queued per lane", "lane",
+		func() map[string]float64 {
+			out := map[string]float64{}
+			for lane, n := range rn.QueueDepths() {
+				out[lane] = float64(n)
+			}
+			return out
+		})
+	m.AddGaugeFunc("speedtest_vm_push_pushed_total", "batches accepted by VictoriaMetrics",
+		func() float64 { return float64(vm.Stats().Pushed) })
+	m.AddGaugeFunc("speedtest_vm_push_failed_total", "batches rejected by VictoriaMetrics",
+		func() float64 { return float64(vm.Stats().Failed) })
+	m.AddGaugeFunc("speedtest_vm_push_dropped_total", "results dropped from the VictoriaMetrics ring buffer",
+		func() float64 { return float64(vm.Stats().Dropped) })
+	m.AddGaugeFunc("speedtest_vm_push_queued", "results currently queued for VictoriaMetrics",
+		func() float64 { return float64(vm.Stats().Queued) })
+	m.AddGaugeFunc("speedtest_vl_lines_dropped_total", "log lines dropped from the VictoriaLogs queue",
+		func() float64 { return float64(vlHandler.Dropped()) })
 
 	sch := scheduler.New(scheduler.Config{Store: db, Runner: rn, Logger: logger})
 	if err := sch.Reload(ctx); err != nil {
 		return err
 	}
 
+	pj := prune.New(prune.Config{Store: db, Settings: st, Logger: logger})
+
+	changes, unsubscribe := st.Subscribe()
+	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
-	go watchSettings(watchCtx, st, level, reg, servers, sch, logger)
+	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, logger)
+	go pj.Run(watchCtx)
 
 	srv := &http.Server{
 		Addr: cfg.Listen,
@@ -203,6 +284,16 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			ServerList:      servers,
 			ReloadSchedules: sch.Reload,
 			Scheduler:       sch,
+			Settings:        st,
+			Metrics:         m,
+			MetricsHandler:  m.Handler(),
+			MetricsEnabled: func() bool {
+				i, err := st.Integrations(context.Background())
+				if err != nil {
+					return false
+				}
+				return i.MetricsEnabled
+			},
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -238,6 +329,14 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		defer cancelRunner()
 		if err := rn.Shutdown(runnerCtx); err != nil {
 			logger.Error("runner shutdown", "error", err)
+		}
+		flushCtx, cancelFlush := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancelFlush()
+		if err := vm.Close(flushCtx); err != nil {
+			logger.Error("victoriametrics flush", "error", err)
+		}
+		if err := vlHandler.Close(flushCtx); err != nil {
+			fmt.Fprintln(os.Stderr, "victorialogs flush:", err) // the logger is going away
 		}
 		return <-errCh
 	}
