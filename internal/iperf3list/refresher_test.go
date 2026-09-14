@@ -207,6 +207,80 @@ func TestRunSkipsRefreshWhenURLEmptyAndLogsOnce(t *testing.T) {
 	}
 }
 
+// TestKickTriggersImmediateRefreshBeforeTickerFires covers the "settings
+// change takes effect live" fix: with a long Interval, only a Kick (not
+// the ticker) should be able to produce a refresh within the test window.
+func TestKickTriggersImmediateRefreshBeforeTickerFires(t *testing.T) {
+	db := newTestStore(t)
+	srv, calls := countingServer(t, oneServerFixture)
+
+	rf := New(Config{Store: db, URLFunc: func() string { return srv.URL }, Interval: time.Hour})
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rf.Run(ctx)
+	}()
+
+	// Give Run's startup refresh (table is empty, so it always fires once)
+	// time to complete and reset the counter's meaning, then kick and
+	// confirm a second refresh happens well before the 1h ticker could.
+	time.Sleep(50 * time.Millisecond)
+	before := atomic.LoadInt32(calls)
+	rf.Kick()
+	time.Sleep(100 * time.Millisecond)
+	after := atomic.LoadInt32(calls)
+	cancel()
+	<-done
+
+	if after <= before {
+		t.Fatalf("calls before kick=%d, after=%d; want a kick-triggered refresh (Interval is 1h)", before, after)
+	}
+}
+
+// TestKickWhileDisabledLogsOnceAndDoesNotFetch covers the fix's other
+// requirement: kicking a disabled refresher must not fetch, and must not
+// duplicate the "refresh disabled" log line RefreshNow already emits once.
+func TestKickWhileDisabledLogsOnceAndDoesNotFetch(t *testing.T) {
+	db := newTestStore(t)
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&calls, 1)
+		w.Write([]byte(oneServerFixture))
+	}))
+	defer srv.Close()
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	rf := New(Config{Store: db, URLFunc: func() string { return "" }, Interval: time.Hour, Logger: logger})
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		rf.Run(ctx)
+	}()
+
+	time.Sleep(20 * time.Millisecond) // let the startup refresh (disabled) log once
+	rf.Kick()
+	time.Sleep(50 * time.Millisecond)
+	cancel()
+	<-done
+
+	if atomic.LoadInt32(&calls) != 0 {
+		t.Fatalf("upstream was called %d times, want 0 while disabled", calls)
+	}
+	n := strings.Count(buf.String(), "refresh disabled")
+	if n != 1 {
+		t.Fatalf("logged %q %d times, want exactly once (startup + kick while disabled must not duplicate it)",
+			"refresh disabled", n)
+	}
+}
+
 func TestRunStopsOnContextCancel(t *testing.T) {
 	db := newTestStore(t)
 	srv, _ := countingServer(t, oneServerFixture)

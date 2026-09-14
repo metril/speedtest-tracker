@@ -176,7 +176,9 @@ func parseLevel(s string) slog.Level {
 
 // watchSettings applies live settings changes: general.log_level retunes
 // the logger in place and any engines.* change rebuilds the engine
-// registry and invalidates the Ookla server-list cache. It returns when
+// registry, invalidates the Ookla server-list cache, and kicks the iperf3
+// list refresher (so a cleared/changed engines.iperf3_list_url takes
+// effect immediately rather than on the next 24h tick). It returns when
 // ctx is done or changes is closed.
 //
 // The caller subscribes (st.Subscribe) and passes the resulting channel in,
@@ -186,7 +188,8 @@ func parseLevel(s string) slog.Level {
 // never race the notification past a subscriber that isn't listening yet.
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
-	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, metricsEnabled *atomic.Bool, logger *slog.Logger) {
+	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, metricsEnabled *atomic.Bool,
+	ir *iperf3list.Refresher, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -212,6 +215,11 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 				}
 				reg.Replace(buildEngines(eng))
 				servers.Invalidate()
+				// A kick is cheap (it just re-reads URLFunc and, at most,
+				// runs one refresh) and covers every engines.* change,
+				// not only KeyIperf3ListURL, so this doesn't need to
+				// special-case the key like the switch above does.
+				ir.Kick()
 				logger.Info("engines rebuilt", "changed_key", key)
 			case key == settings.KeyTimezone:
 				// Schedules with no explicit timezone follow the general
@@ -455,7 +463,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
-		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, &metricsEnabled, logger)
+		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, &metricsEnabled, iperf3Refresher, logger)
 	}()
 	go pj.Run(watchCtx)
 	go iperf3Refresher.Run(watchCtx)

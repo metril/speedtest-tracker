@@ -53,6 +53,14 @@ type Refresher struct {
 
 	mu             sync.Mutex
 	loggedDisabled bool
+
+	// kick lets a caller (main.go's settings watcher, on an engines.*
+	// change) ask Run to re-evaluate right away instead of waiting for
+	// the next Interval tick. Buffered 1 and only ever sent to
+	// non-blockingly by Kick, so a kick is never lost while Run is
+	// mid-refresh, but a burst of kicks still collapses to one
+	// re-evaluation.
+	kick chan struct{}
 }
 
 // New returns a ready-to-run Refresher, applying defaults for any
@@ -73,7 +81,20 @@ func New(cfg Config) *Refresher {
 	if cfg.URLFunc == nil {
 		cfg.URLFunc = func() string { return "" }
 	}
-	return &Refresher{cfg: cfg}
+	return &Refresher{cfg: cfg, kick: make(chan struct{}, 1)}
+}
+
+// Kick asks a running Run loop to re-evaluate (and, if enabled, refresh)
+// right away instead of waiting for the next Interval tick — e.g. after an
+// engines.iperf3_list_url settings change. Non-blocking: safe to call from
+// any goroutine, including before Run has started (the kick is buffered
+// and picked up once Run's select loop begins) or after ctx is done (the
+// send just lands in the buffer and is never read).
+func (r *Refresher) Kick() {
+	select {
+	case r.kick <- struct{}{}:
+	default:
+	}
 }
 
 // RefreshNow reads the current feed URL from URLFunc and, if set, fetches
@@ -146,6 +167,12 @@ func (r *Refresher) Run(ctx context.Context) {
 			return
 		case <-ticker.C:
 			r.refreshAndLog(ctx)
+		case <-r.kick:
+			r.refreshAndLog(ctx)
+			// A kick shouldn't also bring forward the *next* tick, so a
+			// disabled-then-kicked instance still only refreshes as
+			// often as Interval once re-enabled without another kick.
+			ticker.Reset(r.cfg.Interval)
 		}
 	}
 }

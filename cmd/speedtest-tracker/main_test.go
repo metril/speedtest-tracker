@@ -17,6 +17,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/fake"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/iperf3list"
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
@@ -184,10 +185,12 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 
 	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
 
+	ir := iperf3list.New(iperf3list.Config{Store: db, Logger: logger})
+
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -408,10 +411,12 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	defer nt.Close(context.Background())
 	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
 
+	ir := iperf3list.New(iperf3list.Config{Store: db, Logger: logger})
+
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
 
 	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeToken); err != nil {
 		t.Fatal(err)
@@ -454,13 +459,15 @@ func TestWatchSettingsStopsOnContextCancel(t *testing.T) {
 	defer nt.Close(context.Background())
 	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
 
+	ir := iperf3list.New(iperf3list.Config{Store: db, Logger: logger})
+
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
+		watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
 	}()
 
 	cancel()
