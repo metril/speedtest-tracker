@@ -141,6 +141,84 @@ describe('Targets page delete confirmation', () => {
   });
 });
 
+describe('Targets page recently deleted section', () => {
+  it('shows the restore hint and only disables the row being restored', async () => {
+    let isDeleted1 = false;
+    let isDeleted2 = false;
+    let resolveRestore: (() => void) | undefined;
+    const targets = [target({ id: 1, name: 'home' }), target({ id: 2, name: 'office' })];
+    const deletedRow = (id: number, name: string) => ({
+      id, name, engine: 'ookla', lane: 'wan', deleted_at: '2026-01-01T00:00:00Z', version: 1,
+    });
+
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/targets') && !init?.method) {
+        return jsonResponse(targets.filter((t) => (t.id === 1 ? !isDeleted1 : !isDeleted2)));
+      }
+      if (url.endsWith('/targets/deleted')) {
+        const rows = [];
+        if (isDeleted1) rows.push(deletedRow(1, 'home'));
+        if (isDeleted2) rows.push(deletedRow(2, 'office'));
+        return jsonResponse(rows);
+      }
+      if (url.endsWith('/targets/1') && init?.method === 'DELETE') {
+        isDeleted1 = true;
+        return { ok: true, status: 204, statusText: 'no content', text: async () => '' } as Response;
+      }
+      if (url.endsWith('/targets/2') && init?.method === 'DELETE') {
+        isDeleted2 = true;
+        return { ok: true, status: 204, statusText: 'no content', text: async () => '' } as Response;
+      }
+      if (url.endsWith('/targets/deleted/1/restore') && init?.method === 'POST') {
+        await new Promise<void>((resolve) => { resolveRestore = resolve; });
+        return jsonResponse(deletedRow(1, 'home'));
+      }
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+    await screen.findByText('office');
+
+    // Delete both targets so Recently deleted has two rows.
+    const deleteButtons = screen.getAllByRole('button', { name: 'Delete' });
+    fireEvent.click(deleteButtons[0]);
+    let dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    await screen.findByRole('button', { name: /Recently deleted \(1\)/ });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+    const toggle = await screen.findByRole('button', { name: /Recently deleted \(2\)/ });
+
+    fireEvent.click(toggle);
+    expect(screen.getByText(
+      'Restored targets keep their history but must be re-added to any schedules.',
+    )).toBeInTheDocument();
+
+    const restoreButtons = await screen.findAllByRole('button', { name: 'Restore' });
+    expect(restoreButtons).toHaveLength(2);
+    fireEvent.click(restoreButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Restoring…' })).toBeInTheDocument();
+    });
+    // The other row's restore button must still read "Restore" and not
+    // be disabled.
+    const remaining = screen.getAllByRole('button', { name: 'Restore' });
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0]).not.toBeDisabled();
+
+    resolveRestore?.();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: 'Restoring…' })).not.toBeInTheDocument();
+    });
+  });
+});
+
 describe('Targets page per-row run pending state', () => {
   it('shows pending state only for the row being run', async () => {
     const targets = [target({ id: 1, name: 'home' }), target({ id: 2, name: 'office' })];

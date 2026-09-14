@@ -7,6 +7,7 @@
 package ooklaweb
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -38,6 +39,11 @@ const (
 
 	cacheTTL        = 15 * time.Minute
 	cacheMaxEntries = 256
+
+	// maxResponseBytes caps how much of an outbound response body (search
+	// or geocode) is read, guarding against a misbehaving or malicious
+	// upstream streaming an unbounded body.
+	maxResponseBytes = 4 << 20 // 4 MiB
 
 	// geocodeHitThreshold: a direct search returning fewer hits than this
 	// is treated as "thin" and widened via geocoding.
@@ -76,12 +82,26 @@ type cacheEntry struct {
 // perRequestTimeout.
 func NewClient() *Client {
 	return &Client{
-		HTTP:    &http.Client{Timeout: perRequestTimeout},
+		HTTP:    &http.Client{Timeout: perRequestTimeout, CheckRedirect: rejectCrossHostRedirect},
 		Base:    defaultSearchBase,
 		GeoBase: defaultGeoBase,
 		cache:   make(map[string]cacheEntry),
 		now:     time.Now,
 	}
+}
+
+// rejectCrossHostRedirect is a http.Client CheckRedirect func that refuses
+// to follow a redirect whose target host differs from the original
+// request's host, so a compromised or misconfigured upstream can't
+// redirect us at an arbitrary internal or third-party host.
+func rejectCrossHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	if req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("refusing redirect from %s to different host %s", via[0].URL.Host, req.URL.Host)
+	}
+	return nil
 }
 
 type geoPoint struct {
@@ -262,9 +282,12 @@ func (c *Client) search(ctx context.Context, q string) ([]ookla.Server, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("speedtest.net search: status %d", resp.StatusCode)
 	}
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
 	if err != nil {
 		return nil, fmt.Errorf("read speedtest.net search response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("speedtest.net search response exceeds %d bytes", maxResponseBytes)
 	}
 	var raw []rawServer
 	if err := json.Unmarshal(body, &raw); err != nil {
@@ -312,8 +335,15 @@ func (c *Client) geocode(ctx context.Context, q string) (*geoPoint, error) {
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("open-meteo geocode: status %d", resp.StatusCode)
 	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read open-meteo geocode response: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("open-meteo geocode response exceeds %d bytes", maxResponseBytes)
+	}
 	var gr geoResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gr); err != nil {
+	if err := json.NewDecoder(bytes.NewReader(body)).Decode(&gr); err != nil {
 		return nil, fmt.Errorf("parse open-meteo geocode response: %w", err)
 	}
 	if len(gr.Results) == 0 {

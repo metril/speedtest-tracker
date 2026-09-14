@@ -16,12 +16,15 @@ export interface KpiTileProps {
    * improvement -- true for more throughput or a higher success rate,
    * false for more ping or jitter (where a rise is worse). */
   favorable?: boolean;
+  /** subtext is a small line shown under the value, e.g. a supporting
+   * count ("1,234 tests"). Omit for none. */
+  subtext?: string;
 }
 
 /** KpiTile is one headline dashboard stat: a big value, an optional
  * previous-period delta (colored by whether the change is favorable, not
  * just by sign), and a small trend sparkline. */
-export function KpiTile({ label, value, spark, sparkColor, delta, favorable }: KpiTileProps) {
+export function KpiTile({ label, value, spark, sparkColor, delta, favorable, subtext }: KpiTileProps) {
   const showDelta = delta !== undefined && Number.isFinite(delta) && Math.abs(delta) > 0.0005;
   const isUp = (delta ?? 0) >= 0;
   const isGood = isUp === favorable;
@@ -46,6 +49,7 @@ export function KpiTile({ label, value, spark, sparkColor, delta, favorable }: K
             </span>
           )}
         </div>
+        {subtext && <p className="mt-0.5 text-xs text-muted">{subtext}</p>}
         {spark && spark.length > 1 && (
           <div className="mt-2">
             <MiniSparkline samples={spark} color={sparkColor} height={28} />

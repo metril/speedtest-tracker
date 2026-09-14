@@ -37,38 +37,43 @@ function RecentlyDeleted() {
       </button>
 
       {expanded && count > 0 && (
-        <div className="overflow-x-auto rounded-md border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Name</TableHead>
-                <TableHead>Engine</TableHead>
-                <TableHead>Lane</TableHead>
-                <TableHead>Deleted</TableHead>
-                <TableHead className="text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {deleted.data!.map((d) => (
-                <TableRow key={d.id}>
-                  <TableCell className="text-fg">{d.name}</TableCell>
-                  <TableCell className="text-muted">{d.engine}</TableCell>
-                  <TableCell className="text-muted">{d.lane}</TableCell>
-                  <TableCell className="text-muted">{new Date(d.deleted_at).toLocaleString()}</TableCell>
-                  <TableCell className="text-right">
-                    <Button
-                      type="button" variant="outline" size="sm"
-                      disabled={restore.isPending}
-                      onClick={() => restore.mutate(d.id)}
-                    >
-                      {restore.isPending ? 'Restoring…' : 'Restore'}
-                    </Button>
-                  </TableCell>
+        <>
+          <p className="text-xs text-muted">
+            Restored targets keep their history but must be re-added to any schedules.
+          </p>
+          <div className="overflow-x-auto rounded-md border border-border">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Engine</TableHead>
+                  <TableHead>Lane</TableHead>
+                  <TableHead>Deleted</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {deleted.data!.map((d) => (
+                  <TableRow key={d.id}>
+                    <TableCell className="text-fg">{d.name}</TableCell>
+                    <TableCell className="text-muted">{d.engine}</TableCell>
+                    <TableCell className="text-muted">{d.lane}</TableCell>
+                    <TableCell className="text-muted">{new Date(d.deleted_at).toLocaleString()}</TableCell>
+                    <TableCell className="text-right">
+                      <Button
+                        type="button" variant="outline" size="sm"
+                        disabled={restore.isPending && restore.variables === d.id}
+                        onClick={() => restore.mutate(d.id)}
+                      >
+                        {restore.isPending && restore.variables === d.id ? 'Restoring…' : 'Restore'}
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </>
       )}
     </section>
   );

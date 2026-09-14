@@ -22,6 +22,11 @@ it('shows success rate, average download, average upload and average ping', () =
   expect(screen.getByText('12.0 ms')).toBeInTheDocument();
 });
 
+it('shows the total test count as subtext on the success rate tile', () => {
+  render(<SummaryTiles stats={stats} />);
+  expect(screen.getByText('10 tests')).toBeInTheDocument();
+});
+
 it('shows a dash for average ping when no target has an ok reading in range', () => {
   const noOkReadings: SummaryStats = {
     ...stats,
@@ -29,6 +34,22 @@ it('shows a dash for average ping when no target has an ok reading in range', ()
   };
   render(<SummaryTiles stats={noOkReadings} />);
   expect(screen.getByText('—')).toBeInTheDocument();
+});
+
+it('excludes targets with no ok ping reading from the average ping instead of dragging it to 0', () => {
+  const mixed: SummaryStats = {
+    ...stats,
+    targets: [
+      stats.targets[0], // avg_ping_ms: 12, count: 10
+      { ...stats.targets[0], target_id: 2, target_name: 'office', avg_ping_ms: 0, count: 5 },
+    ],
+    total_results: 15,
+  };
+  render(<SummaryTiles stats={mixed} />);
+  // Only the first target's ping (12ms) counts; the second (no ok
+  // reading) must be excluded from both numerator and denominator rather
+  // than pulling the average toward 0.
+  expect(screen.getByText('12.0 ms')).toBeInTheDocument();
 });
 
 it('renders an empty state when nothing ran in the window', () => {

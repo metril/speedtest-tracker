@@ -23,8 +23,12 @@ type ServerSearcher interface {
 }
 
 // defaultOoklaSearchLimit bounds the merged result count when the request
-// doesn't specify one.
-const defaultOoklaSearchLimit = 20
+// doesn't specify one; maxOoklaSearchLimit caps an explicit one, mirroring
+// parseIperf3Limit.
+const (
+	defaultOoklaSearchLimit = 20
+	maxOoklaSearchLimit     = 200
+)
 
 // listOoklaServers answers GET /ookla/servers?q=&limit=. Local (`speedtest
 // -L`, filtered by matchesServer) and remote (OoklaSearch, when q is set)
@@ -106,6 +110,9 @@ func parseOoklaLimit(raw string) int {
 	n, err := strconv.Atoi(raw)
 	if err != nil || n <= 0 {
 		return defaultOoklaSearchLimit
+	}
+	if n > maxOoklaSearchLimit {
+		return maxOoklaSearchLimit
 	}
 	return n
 }

@@ -4,11 +4,21 @@ import { SERIES } from '../../lib/chart';
 import { KpiTile } from './KpiTile';
 
 /** weightedAvg returns the count-weighted average of a per-target metric,
- * 0 when nothing has run. */
-function weightedAvg(stats: SummaryStats, pick: (t: SummaryStats['targets'][number]) => number): number {
-  const totalCount = stats.targets.reduce((sum, t) => sum + t.count, 0);
+ * 0 when nothing has run. When excludeNonPositive is set, targets whose
+ * metric value is <= 0 (e.g. a target with no successful ping reading) are
+ * left out of both the numerator and denominator, rather than dragging
+ * the average toward 0. */
+function weightedAvg(
+  stats: SummaryStats,
+  pick: (t: SummaryStats['targets'][number]) => number,
+  excludeNonPositive = false,
+): number {
+  const targets = excludeNonPositive
+    ? stats.targets.filter((t) => pick(t) > 0)
+    : stats.targets;
+  const totalCount = targets.reduce((sum, t) => sum + t.count, 0);
   if (totalCount === 0) return 0;
-  return stats.targets.reduce((sum, t) => sum + pick(t) * t.count, 0) / totalCount;
+  return targets.reduce((sum, t) => sum + pick(t) * t.count, 0) / totalCount;
 }
 
 /** delta returns the signed fractional change from previous to current,
@@ -42,14 +52,14 @@ export function SummaryTiles({ stats, previousStats, spark }: {
 
   const avgDownload = weightedAvg(stats, (t) => t.avg_download_bps);
   const avgUpload = weightedAvg(stats, (t) => t.avg_upload_bps);
-  const avgPing = weightedAvg(stats, (t) => t.avg_ping_ms);
+  const avgPing = weightedAvg(stats, (t) => t.avg_ping_ms, true);
 
   const prevAvgDownload = previousStats && previousStats.total_results > 0
     ? weightedAvg(previousStats, (t) => t.avg_download_bps) : undefined;
   const prevAvgUpload = previousStats && previousStats.total_results > 0
     ? weightedAvg(previousStats, (t) => t.avg_upload_bps) : undefined;
   const prevAvgPing = previousStats && previousStats.total_results > 0
-    ? weightedAvg(previousStats, (t) => t.avg_ping_ms) : undefined;
+    ? weightedAvg(previousStats, (t) => t.avg_ping_ms, true) : undefined;
   const prevSuccessRate = previousStats && previousStats.total_results > 0
     ? previousStats.success_rate : undefined;
 
@@ -58,6 +68,7 @@ export function SummaryTiles({ stats, previousStats, spark }: {
       <KpiTile
         label="Success rate"
         value={formatPercent(stats.success_rate)}
+        subtext={`${stats.total_results.toLocaleString()} tests`}
         delta={prevSuccessRate !== undefined ? delta(stats.success_rate, prevSuccessRate) : undefined}
         favorable
       />

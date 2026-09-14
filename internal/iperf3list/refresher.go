@@ -42,7 +42,7 @@ type Refresher struct {
 // zero-valued Config field.
 func New(cfg Config) *Refresher {
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = &http.Client{Timeout: fetchTimeout}
+		cfg.HTTPClient = &http.Client{Timeout: fetchTimeout, CheckRedirect: rejectCrossHostRedirect}
 	}
 	if cfg.Interval <= 0 {
 		cfg.Interval = defaultInterval

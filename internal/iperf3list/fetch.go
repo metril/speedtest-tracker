@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,24 @@ import (
 
 // fetchTimeout bounds one Fetch call.
 const fetchTimeout = 30 * time.Second
+
+// maxResponseBytes caps how much of the outbound server-list body is
+// read, guarding against a misbehaving or malicious upstream streaming an
+// unbounded body.
+const maxResponseBytes = 32 << 20 // 32 MiB
+
+// rejectCrossHostRedirect is a http.Client CheckRedirect func that refuses
+// to follow a redirect whose target host differs from the original
+// request's host.
+func rejectCrossHostRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) == 0 {
+		return nil
+	}
+	if req.URL.Host != via[0].URL.Host {
+		return fmt.Errorf("refusing redirect from %s to different host %s", via[0].URL.Host, req.URL.Host)
+	}
+	return nil
+}
 
 // rawServer mirrors one row of export.iperf3serverlist.net's JSON, whose
 // keys are verified against the live feed (see the task brief).
@@ -59,8 +78,16 @@ func Fetch(ctx context.Context, client *http.Client, url string) ([]store.Iperf3
 		return nil, fmt.Errorf("fetch iperf3 server list: status %d", resp.StatusCode)
 	}
 
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read iperf3 server list: %w", err)
+	}
+	if len(body) > maxResponseBytes {
+		return nil, fmt.Errorf("iperf3 server list response exceeds %d bytes", maxResponseBytes)
+	}
+
 	var raw []rawServer
-	if err := json.NewDecoder(resp.Body).Decode(&raw); err != nil {
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return nil, fmt.Errorf("decode iperf3 server list: %w", err)
 	}
 

@@ -146,6 +146,19 @@ type errServerList struct{ err error }
 
 func (e errServerList) Servers(context.Context) ([]ookla.Server, error) { return nil, e.err }
 
+func TestOoklaServerSearchCapsLimit(t *testing.T) {
+	search := &stubSearcher{servers: []ookla.Server{{ID: "101", Name: "A"}}}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=x&limit=5000", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if search.gotLimit != maxOoklaSearchLimit {
+		t.Errorf("search called with limit=%d, want capped %d", search.gotLimit, maxOoklaSearchLimit)
+	}
+}
+
 func TestOoklaServerSearchLocalErrorFallsBackToRemote(t *testing.T) {
 	search := &stubSearcher{servers: []ookla.Server{
 		{ID: "101", Name: "Comcast", Location: "Denver, CO"},

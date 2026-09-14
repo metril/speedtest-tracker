@@ -296,6 +296,66 @@ func TestSearchLogsGeocodeFailureAtDebug(t *testing.T) {
 	}
 }
 
+// oversizedJSONServer answers every request with a JSON array opener
+// followed by more than maxResponseBytes of well-formed-looking but never
+// closed content, simulating a misbehaving or malicious upstream
+// streaming an unbounded body.
+func oversizedJSONServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[`))
+		chunk := bytes.Repeat([]byte(`{"id":1,"name":"x"},`), 4096)
+		for i := 0; i < (maxResponseBytes/len(chunk))+2; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+}
+
+func TestSearchRejectsOversizedResponse(t *testing.T) {
+	srv := oversizedJSONServer(t)
+	defer srv.Close()
+
+	c := NewClient()
+	c.Base = srv.URL
+
+	// A truncated body must fail cleanly, not succeed on a partial parse.
+	if _, err := c.search(context.Background(), "x"); err == nil {
+		t.Fatal("search: want error for oversized response, got nil")
+	}
+}
+
+func TestGeocodeRejectsOversizedResponse(t *testing.T) {
+	srv := oversizedJSONServer(t)
+	defer srv.Close()
+
+	c := NewClient()
+	c.GeoBase = srv.URL
+
+	if _, err := c.geocode(context.Background(), "x"); err == nil {
+		t.Fatal("geocode: want error for oversized response, got nil")
+	}
+}
+
+func TestSearchRefusesCrossHostRedirect(t *testing.T) {
+	target := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	c := NewClient()
+	c.Base = redirector.URL
+
+	if _, err := c.search(context.Background(), "comcast"); err == nil {
+		t.Fatal("search: want error for cross-host redirect, got nil")
+	}
+}
+
 func TestSearchWithNilLoggerDoesNotPanicOnGeocodeFailure(t *testing.T) {
 	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
 	defer sp.Close()

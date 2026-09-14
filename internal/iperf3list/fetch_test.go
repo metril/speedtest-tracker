@@ -1,6 +1,7 @@
 package iperf3list
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -151,6 +152,42 @@ func TestParseOptions(t *testing.T) {
 		if reverse != c.reverse || udp != c.udp {
 			t.Errorf("parseOptions(%q) = %v,%v want %v,%v", c.in, reverse, udp, c.reverse, c.udp)
 		}
+	}
+}
+
+func TestFetchRejectsOversizedResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[`))
+		chunk := bytes.Repeat([]byte(`{"IP/HOST":"x.example.net","PORT":"5201"},`), 4096)
+		for i := 0; i < (maxResponseBytes/len(chunk))+2; i++ {
+			if _, err := w.Write(chunk); err != nil {
+				return
+			}
+		}
+	}))
+	defer srv.Close()
+
+	// A truncated body must fail cleanly, not succeed on a partial parse.
+	if _, err := Fetch(context.Background(), srv.Client(), srv.URL); err == nil {
+		t.Fatal("Fetch: want error for oversized response, got nil")
+	}
+}
+
+func TestFetchRefusesCrossHostRedirect(t *testing.T) {
+	target := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[]`))
+	}))
+	defer target.Close()
+
+	redirector := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, target.URL+r.URL.RequestURI(), http.StatusFound)
+	}))
+	defer redirector.Close()
+
+	client := &http.Client{CheckRedirect: rejectCrossHostRedirect}
+	if _, err := Fetch(context.Background(), client, redirector.URL); err == nil {
+		t.Fatal("Fetch: want error for cross-host redirect, got nil")
 	}
 }
 
