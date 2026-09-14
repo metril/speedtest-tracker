@@ -379,6 +379,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	servers := ookla.NewServerList(engineCfg.SpeedtestBin,
 		time.Duration(engineCfg.ServerListTTLSeconds)*time.Second)
 	ooklaSearch := ooklaweb.NewClient()
+	ooklaSearch.Logger = logger
 
 	hub := sse.NewHub()
 	rn := runner.New(runner.Config{

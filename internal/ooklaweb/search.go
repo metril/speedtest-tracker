@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"net/http"
 	"net/url"
@@ -53,6 +54,12 @@ type Client struct {
 	HTTP    *http.Client
 	Base    string
 	GeoBase string
+
+	// Logger, when set, receives debug-level notes about geocode and
+	// geocoded-re-search failures (both are swallowed otherwise — Search
+	// still succeeds with the direct-search results). Optional; nil is
+	// safe and logs nothing.
+	Logger *slog.Logger
 
 	mu    sync.Mutex
 	cache map[string]cacheEntry
@@ -112,9 +119,14 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 
 	var point *geoPoint
 	if looksLikePostcode(q) || len(servers) < geocodeHitThreshold {
-		if gp, gerr := c.geocode(ctx, q); gerr == nil && gp != nil {
+		gp, gerr := c.geocode(ctx, q)
+		if gerr != nil {
+			c.logDebug("ooklaweb: geocode failed", "query", q, "error", gerr)
+		} else if gp != nil {
 			point = gp
-			if more, merr := c.search(ctx, gp.Name); merr == nil {
+			if more, merr := c.search(ctx, gp.Name); merr != nil {
+				c.logDebug("ooklaweb: geocoded re-search failed", "query", q, "place", gp.Name, "error", merr)
+			} else {
 				servers = mergeServers(servers, more)
 			}
 		}
@@ -122,7 +134,7 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 
 	if point != nil {
 		applyDistances(servers, *point)
-		sort.SliceStable(servers, func(i, j int) bool { return servers[i].DistanceKm < servers[j].DistanceKm })
+		sort.SliceStable(servers, func(i, j int) bool { return sortDistance(servers[i]) < sortDistance(servers[j]) })
 	}
 
 	c.cacheSet(key, servers)
@@ -131,11 +143,29 @@ func (c *Client) Search(ctx context.Context, q string, limit int) ([]ookla.Serve
 
 func applyDistances(servers []ookla.Server, point geoPoint) {
 	for i := range servers {
-		if servers[i].Lat == 0 && servers[i].Lon == 0 {
+		if !hasDistance(servers[i]) {
 			continue
 		}
 		servers[i].DistanceKm = haversineKm(point.Lat, point.Lon, servers[i].Lat, servers[i].Lon)
 	}
+}
+
+// hasDistance reports whether a server carries coordinates a distance can
+// be computed from. (0,0) is treated as "no coordinates" rather than a
+// legitimate point in the Gulf of Guinea — the speedtest.net search API
+// leaves lat/lon blank (which unmarshals to 0) for hits it can't place.
+func hasDistance(s ookla.Server) bool {
+	return s.Lat != 0 || s.Lon != 0
+}
+
+// sortDistance orders coordinate-less servers after every server with a
+// known distance, instead of ranking their zero-value DistanceKm as
+// nearest (see applyDistances).
+func sortDistance(s ookla.Server) float64 {
+	if !hasDistance(s) {
+		return math.Inf(1)
+	}
+	return s.DistanceKm
 }
 
 func capServers(servers []ookla.Server, limit int) []ookla.Server {
@@ -190,6 +220,12 @@ func (c *Client) cacheSet(key string, servers []ookla.Server) {
 		delete(c.cache, oldestKey)
 	}
 	c.cache[key] = cacheEntry{servers: servers, at: c.now()}
+}
+
+func (c *Client) logDebug(msg string, args ...any) {
+	if c.Logger != nil {
+		c.Logger.Debug(msg, args...)
+	}
 }
 
 func (c *Client) httpClient() *http.Client {

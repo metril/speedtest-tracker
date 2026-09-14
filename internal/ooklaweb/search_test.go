@@ -1,9 +1,12 @@
 package ooklaweb
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -114,6 +117,51 @@ func TestSearchSortsByDistanceFromGeocodedPoint(t *testing.T) {
 	}
 }
 
+// denverMetroWithUnplaceableFixture adds a 4th hit ("id":4) with no lat/lon
+// at all — speedtest.net returns this for servers it can't place. Its
+// distance is unknown, not zero, so it must not be ranked as the nearest
+// result.
+const denverMetroWithUnplaceableFixture = `[
+  {"id":1,"name":"Denver, CO","country":"United States","cc":"US","sponsor":"Comcast","host":"denver1.example.net:8080","lat":"39.74","lon":"-104.98","distance":"1.2"},
+  {"id":2,"name":"Aurora, CO","country":"United States","cc":"US","sponsor":"CenturyLink","host":"aurora1.example.net:8080","lat":"39.73","lon":"-104.83","distance":"9.9"},
+  {"id":3,"name":"Boulder, CO","country":"United States","cc":"US","sponsor":"Xfinity","host":"boulder1.example.net:8080","lat":"40.01","lon":"-105.27","distance":"25.5"},
+  {"id":4,"name":"Unknown","country":"United States","cc":"US","sponsor":"Mystery ISP","host":"mystery.example.net:8080"}
+]`
+
+func TestSearchSortsCoordinateLessServersLast(t *testing.T) {
+	sp := speedtestServer(t, map[string]string{
+		"denver": denverMetroWithUnplaceableFixture,
+		"Denver": denverMetroWithUnplaceableFixture,
+	}, nil)
+	defer sp.Close()
+	geo := geoServer(t, map[string]string{"denver": geoDenverFixture})
+	defer geo.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.GeoBase = geo.URL
+
+	got, err := c.Search(context.Background(), "denver", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 4 {
+		t.Fatalf("got %d servers, want 4: %+v", len(got), got)
+	}
+	last := got[len(got)-1]
+	if last.ID != "4" {
+		t.Fatalf("coordinate-less server not sorted last: got order %+v", got)
+	}
+	if last.DistanceKm != 0 {
+		t.Errorf("coordinate-less server DistanceKm = %v, want 0 (omitted)", last.DistanceKm)
+	}
+	for i := 1; i < len(got)-1; i++ {
+		if got[i-1].DistanceKm > got[i].DistanceKm {
+			t.Fatalf("known-distance servers not sorted ascending: %+v", got)
+		}
+	}
+}
+
 func TestSearchCachesWithinTTL(t *testing.T) {
 	var reqs int32
 	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, &reqs)
@@ -216,5 +264,51 @@ func TestSearchLimitCaps(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("got %d servers, want 1 (limit)", len(got))
+	}
+}
+
+func TestSearchLogsGeocodeFailureAtDebug(t *testing.T) {
+	// Fewer than geocodeHitThreshold hits, so a geocode is attempted; the
+	// geo server always answers 500, so gerr != nil and Search must not
+	// fail — it just logs the geocode error and returns the direct hits.
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	defer sp.Close()
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer geo.Close()
+
+	var buf bytes.Buffer
+	c := NewClient()
+	c.Base = sp.URL
+	c.GeoBase = geo.URL
+	c.Logger = slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	got, err := c.Search(context.Background(), "comcast", 10)
+	if err != nil {
+		t.Fatalf("Search: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d servers, want 1 (direct hit, geocode failure ignored)", len(got))
+	}
+	if !strings.Contains(buf.String(), "level=DEBUG") || !strings.Contains(buf.String(), "geocode failed") {
+		t.Errorf("log output = %q, want a DEBUG line about the geocode failure", buf.String())
+	}
+}
+
+func TestSearchWithNilLoggerDoesNotPanicOnGeocodeFailure(t *testing.T) {
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil)
+	defer sp.Close()
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer geo.Close()
+
+	c := NewClient() // c.Logger left nil
+	c.Base = sp.URL
+	c.GeoBase = geo.URL
+
+	if _, err := c.Search(context.Background(), "comcast", 10); err != nil {
+		t.Fatalf("Search: %v", err)
 	}
 }
