@@ -60,6 +60,17 @@ paths and the Ookla consent flags match whatever the server has configured.
 invocation. The Result JSON goes to stdout; progress events stream to
 stderr as JSON lines.
 
+## API conventions
+
+`/api/v1` follows a few consistent shapes:
+
+- Paginated lists (`/results`, `/runs`) return `{"<plural>": [...], "next_cursor": "..."}`;
+  pass `next_cursor` back as `?cursor=` to fetch the next page, and an empty
+  string means the listing is exhausted.
+- Every other list (`/targets`, `/tags`, `/ookla/servers`) returns a bare JSON array.
+- Errors always use the envelope `{"error": {"code": "...", "message": "..."}}`,
+  with a matching HTTP status code (400 invalid_request, 404 not_found, 500 internal_error, etc).
+
 ## Docker
 
 ```bash
