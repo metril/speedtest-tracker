@@ -26,9 +26,9 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   const [options, setOptions] = useState<Options>(initial?.options ?? {});
   const [thresholds, setThresholds] = useState<ThresholdSet>((initial?.thresholds as ThresholdSet) ?? {});
   const [touched, setTouched] = useState(false);
-  // Bumped on a failed submit blocked by optionsError, to force open the
-  // iperf3 advanced disclosure (see EngineOptionFields' forceOpenAdvancedSignal)
-  // so a collapsed section can't hide the reason Save silently did nothing.
+  // Bumped on a failed submit blocked by optionsError, to force iperf3's
+  // Custom section on (see EngineOptionFields' forceOpenAdvancedSignal) so
+  // a hidden field can't hide the reason Save silently did nothing.
   const [forceOpenAdvancedSignal, setForceOpenAdvancedSignal] = useState(0);
 
   const nameInvalid = name.trim() === '';

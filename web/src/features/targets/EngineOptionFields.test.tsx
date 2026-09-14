@@ -105,8 +105,10 @@ describe('EngineOptionFields: non-ookla engines unaffected', () => {
     expect(screen.getByLabelText('Download sizes (bytes, comma separated)')).toBeInTheDocument();
   });
 
-  it('still renders the iperf3 host field', () => {
+  it('renders the iperf3 host field once Custom is switched on', () => {
     wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByLabelText('Custom'));
     expect(screen.getByLabelText('Host')).toBeInTheDocument();
   });
 });
@@ -338,21 +340,30 @@ describe('Iperf3Fields: picker wiring', () => {
     expect(await screen.findByText('iperf.example.net:5201–5210')).toBeInTheDocument();
   });
 
-  it('keeps the host and port fields directly editable', () => {
+  it('keeps the host and port fields directly editable once Custom is on', () => {
+    // A username makes Custom start on (see the "Custom toggle" describe below).
     const onChange = vi.fn();
-    wrap(<EngineOptionFields engine="iperf3" options={{ host: 'manual.example.net' }} onChange={onChange} />);
+    wrap(<EngineOptionFields engine="iperf3" options={{ host: 'manual.example.net', username: 'u' }} onChange={onChange} />);
     expect(screen.getByLabelText('Host')).toHaveValue('manual.example.net');
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: 'changed.example.net' } });
-    expect(onChange).toHaveBeenCalledWith({ host: 'changed.example.net' });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    expect(onChange).toHaveBeenCalledWith({ host: 'changed.example.net', username: 'u' });
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5202' } });
-    expect(onChange).toHaveBeenCalledWith({ host: 'manual.example.net', port: 5202 });
+    expect(onChange).toHaveBeenCalledWith({ host: 'manual.example.net', username: 'u', port: 5202 });
   });
 
-  it('picking a server that supports -R sets reverse and shows the enabled hint', async () => {
+  it('picking a server that supports -R sets reverse and shows the read-only picked block with a hint', async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
     const onChange = vi.fn();
-    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={onChange} />);
+    function ControlledIperf3Fields() {
+      const [options, setOptions] = useState<Record<string, unknown>>({});
+      return (
+        <EngineOptionFields
+          engine="iperf3" options={options}
+          onChange={(next) => { setOptions(next); onChange(next); }}
+        />
+      );
+    }
+    wrap(<ControlledIperf3Fields />);
 
     fireEvent.focus(screen.getByLabelText('Pick from public list'));
     fireEvent.click(await screen.findByText('iperf.example.net:5201–5210'));
@@ -360,7 +371,11 @@ describe('Iperf3Fields: picker wiring', () => {
     expect(onChange).toHaveBeenCalledWith({
       host: 'iperf.example.net', port: 5201, reverse: true, port_range_end: 5210,
     });
-    expect(screen.getByText(/Reverse enabled: this server supports -R/)).toBeInTheDocument();
+    const picked = screen.getByTestId('iperf3-picked');
+    expect(picked).toHaveTextContent('iperf.example.net:5201');
+    expect(picked).toHaveTextContent(/Reverse \(-R\) supported/);
+    expect(picked).toHaveTextContent(/ports 5201–5210/);
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
   });
 
   it('picking a server without -R support does not set reverse or a port range', async () => {
@@ -402,55 +417,46 @@ describe('Iperf3Fields: picker wiring', () => {
   });
 });
 
-describe('Iperf3Fields: advanced options disclosure', () => {
-  it('starts closed on a fresh target, with a summary line and no advanced fields', () => {
+describe('Iperf3Fields: Custom toggle', () => {
+  it('starts off on a fresh target: no Host input, no advanced fields', () => {
     wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    const toggle = screen.getByLabelText('Custom');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
-    expect(screen.getByText('port 5201 · TCP · 10 s')).toBeInTheDocument();
   });
 
-  it('omits aria-controls while collapsed (nothing to point at) and sets it once open', () => {
-    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
-    expect(toggle).not.toHaveAttribute('aria-controls');
-    fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-controls', 'iperf-advanced-options');
-    expect(document.getElementById('iperf-advanced-options')).toBeInTheDocument();
-  });
-
-  it('starts open when editing a target with an advanced option already set', () => {
+  it('starts on when editing a target with a hand-set advanced option', () => {
     wrap(<EngineOptionFields engine="iperf3" options={{ parallel: 4 }} onChange={vi.fn()} />);
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Custom')).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('Parallel streams')).toHaveValue('4');
   });
 
-  it('does not treat explicit reverse:false/bidir:false as an advanced option being set', () => {
-    wrap(<EngineOptionFields engine="iperf3" options={{ reverse: false, bidir: false }} onChange={vi.fn()} />);
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  it('starts off for a target configured purely from the public-list pick (host/port/reverse)', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ host: 'a.example.net', port: 5202, reverse: true }} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Custom')).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+    expect(screen.getByTestId('iperf3-picked')).toBeInTheDocument();
   });
 
-  it('toggles open and closed on click', () => {
+  it('does not treat explicit reverse:false/bidir:false as a Custom-triggering option', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ reverse: false, bidir: false }} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Custom')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('toggles Host and advanced fields on and off', () => {
     wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    const toggle = screen.getByLabelText('Custom');
 
     fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('Host')).toBeInTheDocument();
     expect(screen.getByLabelText('Port')).toBeInTheDocument();
 
     fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
-  });
-
-  it('summarizes reverse and a non-default port in the closed state', () => {
-    wrap(<EngineOptionFields engine="iperf3" options={{ port: 5201, reverse: true }} onChange={vi.fn()} />);
-    // Editing a target with an advanced option set starts open; close it to see the summary.
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
-    expect(screen.getByText('port 5201 · TCP · 10 s · -R')).toBeInTheDocument();
   });
 });
 

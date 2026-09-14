@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
 import { useIperf3Servers, useOoklaServers } from '../../lib/queries';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
 import { regionFromLocale } from '../../lib/locale';
@@ -7,6 +6,7 @@ import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover'
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
 import { Checkbox } from '@/components/ui/checkbox';
 import { Badge } from '@/components/ui/badge';
+import { SwitchField } from '../../components/SwitchField';
 
 export type Options = Record<string, unknown>;
 
@@ -15,10 +15,10 @@ interface Props {
   options: Options;
   onChange: (next: Options) => void;
   /** Bumped by the parent form on a failed submit blocked by
-   * validateEngineOptions, to force the iperf3 advanced disclosure open so
-   * the blocking error (rendered next to the field it's about) isn't
-   * hidden behind a collapsed section. Ignored by engines other than
-   * iperf3. */
+   * validateEngineOptions, to force iperf3's Custom section on so the
+   * blocking error (rendered next to the field it's about) isn't hidden
+   * behind a field Custom-off would have hidden. Ignored by engines other
+   * than iperf3. */
   forceOpenAdvancedSignal?: number;
 }
 
@@ -56,12 +56,18 @@ export function validateEngineOptions(engine: string, options: Options): string 
 
 const DEBOUNCE_MS = 300;
 
-/** iperf3 option keys tucked behind the "Advanced options" disclosure —
- * everything but host and the public-list picker. */
+/** iperf3 option keys shown only when Custom is on — everything but host
+ * and the public-list picker. */
 const IPERF3_ADVANCED_KEYS = [
   'port', 'port_range_end', 'protocol', 'parallel', 'duration_s', 'udp_bitrate', 'bind',
   'username', 'rsa_public_key_path', 'password', 'reverse', 'bidir',
 ] as const;
+
+/** Keys the public-list picker writes itself (handlePick). A target that
+ * only has these set was configured entirely by picking from the list, so
+ * Custom should start off for it; anything else set means a person
+ * hand-configured it, so Custom should start on. */
+const PICK_WRITTEN_KEYS = ['port', 'port_range_end', 'reverse'] as const;
 
 /** COMMON_COUNTRIES is a short list of ISO 3166-1 alpha-2 codes covering
  * the countries most speedtest targets are likely to be in, shown as the
@@ -77,28 +83,31 @@ const COMMON_COUNTRIES: readonly [string, string][] = [
   ['SG', 'Singapore'],
 ];
 
-function hasAdvancedIperf3Options(options: Options): boolean {
+/** hasCustomIperf3Options decides Custom's initial state: on iff any
+ * advanced key other than the ones the public-list picker writes itself
+ * is set, so a target created purely by picking (host/port/reverse) opens
+ * with Custom off and a hand-configured one opens with it on. */
+function hasCustomIperf3Options(options: Options): boolean {
   return IPERF3_ADVANCED_KEYS.some((k) => {
+    if ((PICK_WRITTEN_KEYS as readonly string[]).includes(k)) return false;
     const v = options[k];
-    if (k === 'reverse' || k === 'bidir') return v === true;
+    if (k === 'bidir') return v === true;
     return v !== undefined && v !== '';
   });
 }
 
-/** summarizeIperf3Advanced renders the closed-disclosure summary line,
- * e.g. "port 5201 · TCP · 10 s · -R". */
-function summarizeIperf3Advanced(options: Options): string {
-  const port = options.port !== undefined ? options.port : 5201;
-  const protocol = (options.protocol === 'udp' ? 'udp' : 'tcp').toUpperCase();
-  const duration = options.duration_s !== undefined ? options.duration_s : 10;
-  const parts: string[] = [`port ${port}`, protocol, `${duration} s`];
-  if (options.parallel !== undefined) parts.push(`x${options.parallel}`);
-  if (protocol === 'UDP' && options.udp_bitrate) parts.push(String(options.udp_bitrate));
-  if (options.bind) parts.push(`bind ${options.bind}`);
-  if (options.username) parts.push('auth');
-  if (options.reverse === true) parts.push('-R');
-  if (options.bidir === true) parts.push('--bidir');
-  return parts.join(' · ');
+/** summarizePick renders the hints shown next to the read-only picked-
+ * server block when Custom is off, e.g. "Reverse (-R) supported · UDP". */
+function summarizePick(options: Options): string[] {
+  const hints: string[] = [];
+  if (options.reverse === true) hints.push('Reverse (-R) supported');
+  if (options.protocol === 'udp') hints.push('UDP');
+  const port = options.port;
+  const portEnd = options.port_range_end;
+  if (typeof port === 'number' && typeof portEnd === 'number' && portEnd > port) {
+    hints.push(`ports ${port}–${portEnd}`);
+  }
+  return hints;
 }
 
 /** EngineOptionFields renders the option form for one engine. */
@@ -416,21 +425,20 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
   // Same jsdom-hang rationale as OoklaFields: the popover only opens while
   // the field is focused, never merely from typing.
   const [focused, setFocused] = useState(false);
-  const [pickedHints, setPickedHints] = useState<{ reverse: boolean; udp: boolean } | null>(null);
   // Same "interacting with the anchor isn't an outside interaction" need
   // as OoklaFields — see its onInteractOutside comment.
   const anchorRef = useRef<HTMLInputElement>(null);
 
-  // Advanced options (everything but host/picker) start collapsed on a
-  // fresh target, but open by default when editing one that already has
-  // any of them set, so nothing configured is hidden from view.
-  const [advancedOpen, setAdvancedOpen] = useState(() => hasAdvancedIperf3Options(options));
+  // Custom starts off on a fresh target and for one configured purely by
+  // picking from the public list, and on when editing one with any
+  // hand-set advanced option — see hasCustomIperf3Options.
+  const [custom, setCustom] = useState(() => hasCustomIperf3Options(options));
 
   // A failed submit blocked by validateEngineOptions (e.g. a password with
-  // no username/RSA key) bumps this signal from the parent form; force the
-  // section open so the error isn't hidden behind a collapsed disclosure.
+  // no username/RSA key) bumps this signal from the parent form; force
+  // Custom on so the error isn't hidden behind a field Custom-off hides.
   useEffect(() => {
-    if (forceOpenAdvancedSignal) setAdvancedOpen(true);
+    if (forceOpenAdvancedSignal) setCustom(true);
   }, [forceOpenAdvancedSignal]);
 
   useEffect(() => {
@@ -460,28 +468,30 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
     next = setOption(next, 'reverse', s.supports_reverse);
     next = setOption(next, 'port_range_end', s.port_end && s.port_end > s.port ? s.port_end : '');
     onChange(next);
-    setPickedHints({ reverse: s.supports_reverse, udp: s.supports_udp });
     setSearch(`${s.host}:${s.port}`);
     setFocused(false);
-    // Surface the advanced section: reverse was just turned on for this
-    // pick, and a wider port range is worth showing too.
-    if (s.supports_reverse || (s.port_end && s.port_end > s.port)) setAdvancedOpen(true);
   };
 
-  const hints = pickedHints
-    ? [pickedHints.reverse && 'Reverse enabled: this server supports -R', pickedHints.udp && 'supports UDP'].filter(Boolean)
-    : [];
+  const pickedHost = typeof options.host === 'string' ? options.host : '';
+  const pickHints = summarizePick(options);
 
   return (
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="sm:col-span-2">
-        <label className={label} htmlFor="iperf-host">Host</label>
-        <input id="iperf-host" className={field} value={text('host')}
-          onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
-        {hints.length > 0 && (
-          <p className="mt-1 text-xs text-faint">{hints.join(' · ')}</p>
-        )}
+        <SwitchField
+          id="iperf-custom" label="Custom" checked={custom} onCheckedChange={setCustom}
+          hint="Enter a host and tune iperf3 flags yourself"
+        />
       </div>
+
+      {custom && (
+        <div className="sm:col-span-2">
+          <label className={label} htmlFor="iperf-host">Host</label>
+          <input id="iperf-host" className={field} value={text('host')}
+            onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
+        </div>
+      )}
+
       <div className="sm:col-span-2">
         <label className={label} htmlFor="iperf-public-search">Pick from public list</label>
         <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
@@ -513,26 +523,18 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
             />
           </PopoverContent>
         </Popover>
-      </div>
-
-      <div className="sm:col-span-2">
-        <button
-          type="button"
-          aria-expanded={advancedOpen}
-          aria-controls={advancedOpen ? 'iperf-advanced-options' : undefined}
-          onClick={() => setAdvancedOpen((o) => !o)}
-          className="flex items-center gap-1 text-sm font-medium text-muted hover:text-fg"
-        >
-          <ChevronRight className={`h-4 w-4 transition-transform ${advancedOpen ? 'rotate-90' : ''}`} />
-          Advanced options
-        </button>
-        {!advancedOpen && (
-          <p className="mt-1 text-xs text-faint">{summarizeIperf3Advanced(options)}</p>
+        {!custom && pickedHost !== '' && (
+          <div data-testid="iperf3-picked" className="mt-2 rounded border border-line bg-surface px-2 py-1.5 text-sm">
+            <span className="font-mono text-fg">{pickedHost}:{options.port !== undefined ? String(options.port) : '5201'}</span>
+            {pickHints.length > 0 && (
+              <p className="mt-1 text-xs text-faint">{pickHints.join(' · ')}</p>
+            )}
+          </div>
         )}
       </div>
 
-      {advancedOpen && (
-      <div id="iperf-advanced-options" className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
+      {custom && (
+      <div className="grid gap-3 sm:col-span-2 sm:grid-cols-2">
       <div>
         <label className={label} htmlFor="iperf-port">Port</label>
         <input id="iperf-port" className={field} value={text('port')} placeholder="5201"

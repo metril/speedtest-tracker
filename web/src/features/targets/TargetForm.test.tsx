@@ -33,14 +33,15 @@ function wrap(node: ReactNode) {
 }
 
 describe('TargetForm', () => {
-  it('shows the iperf3 option fields when iperf3 is chosen', () => {
+  it('shows the iperf3 option fields when iperf3 is chosen and Custom is switched on', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
 
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    expect(screen.getByLabelText('Host')).toBeInTheDocument();
-    // Advanced fields start collapsed behind the disclosure on a fresh target.
+    // Custom starts off on a fresh target: no Host input, no advanced fields.
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Port')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    fireEvent.click(screen.getByLabelText('Custom'));
+    expect(screen.getByLabelText('Host')).toBeInTheDocument();
     expect(screen.getByLabelText('Port')).toBeInTheDocument();
     expect(screen.getByLabelText('Parallel streams')).toBeInTheDocument();
     expect(screen.getByLabelText('Reverse (-R)')).toBeInTheDocument();
@@ -61,8 +62,8 @@ describe('TargetForm', () => {
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
     fireEvent.change(screen.getByLabelText('Lane'), { target: { value: 'lan' } });
+    fireEvent.click(screen.getByLabelText('Custom'));
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5201' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
 
@@ -109,8 +110,8 @@ describe('TargetForm', () => {
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
+    fireEvent.click(screen.getByLabelText('Custom'));
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
     fireEvent.change(screen.getByLabelText('Username'), { target: { value: 'alice' } });
     fireEvent.change(screen.getByLabelText('RSA public key path'), { target: { value: '/keys/pub.pem' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'sekrit' } });
@@ -124,14 +125,14 @@ describe('TargetForm', () => {
   it('exposes the iperf3 password field as a password input', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    fireEvent.click(screen.getByLabelText('Custom'));
     expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password');
   });
 
   it('disables reverse and bidir from being checked together', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    fireEvent.click(screen.getByLabelText('Custom'));
 
     fireEvent.click(screen.getByLabelText('Reverse (-R)'));
     expect(screen.getByLabelText('Bidirectional (--bidir)')).toBeDisabled();
@@ -167,7 +168,7 @@ describe('TargetForm', () => {
   it('only enables udp bitrate when protocol is udp, and disables bidir for udp', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
+    fireEvent.click(screen.getByLabelText('Custom'));
 
     expect(screen.getByLabelText('UDP bitrate')).toBeDisabled();
     expect(screen.getByLabelText('Bidirectional (--bidir)')).not.toBeDisabled();
@@ -183,8 +184,8 @@ describe('TargetForm', () => {
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
+    fireEvent.click(screen.getByLabelText('Custom'));
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'sekrit' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
 
@@ -194,27 +195,28 @@ describe('TargetForm', () => {
     expect(screen.getAllByText('Password requires a username and RSA public key path')).toHaveLength(2);
   });
 
-  it('shows the blocking options error next to Save and reopens a collapsed advanced disclosure on failed submit', () => {
+  it('shows the blocking options error next to Save and turns Custom back on after a failed submit', () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
 
-    // Open the disclosure just to set the password, then collapse it again
-    // -- Save must still surface the error and reopen it, not fail silently.
-    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    // Switch Custom on just to set the password, then switch it off again
+    // -- Save must still surface the error and turn Custom back on, not
+    // fail silently.
+    const toggle = screen.getByLabelText('Custom');
     fireEvent.click(toggle);
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
     fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'sekrit' } });
     fireEvent.click(toggle);
-    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
     expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
     expect(screen.getByLabelText('Password')).toHaveValue('sekrit');
     expect(screen.getAllByText('Password requires a username and RSA public key path')).toHaveLength(2);
   });
