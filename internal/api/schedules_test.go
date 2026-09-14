@@ -1,10 +1,20 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+
+	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// doJSON is an alias for do, used by tests that send/inspect JSON bodies.
+func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
+	return do(t, h, method, path, body)
+}
 
 // reloadHook lets tests count scheduler reloads triggered by handlers. The
 // handler built by newTestAPI calls whatever function is installed here.
@@ -194,5 +204,133 @@ func TestValidateCronEndpoint(t *testing.T) {
 		map[string]any{"cron": "nonsense", "timezone": "UTC"})
 	if bad.Code != http.StatusBadRequest {
 		t.Fatalf("bad cron status %d", bad.Code)
+	}
+}
+
+func TestRunScheduleEnqueuesManualRunWithOrderedTargets(t *testing.T) {
+	h, _, run := newTestAPI(t)
+	a := createTestTarget(t, h, "a")
+	b := createTestTarget(t, h, "b")
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "s", "cron": "@hourly", "enabled": true, "timezone": "UTC",
+		"target_ids": []int64{b, a}})
+	var created struct {
+		Schedule struct {
+			ID int64 `json:"id"`
+		} `json:"schedule"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	got := doJSON(t, h, http.MethodPost, "/api/v1/schedules/"+itoa(created.Schedule.ID)+"/run", nil)
+	if got.Code != http.StatusAccepted {
+		t.Fatalf("status %d body %s", got.Code, got.Body.String())
+	}
+	req := run.lastReq
+	if req.Trigger != "manual" || req.ScheduleID == nil || *req.ScheduleID != created.Schedule.ID {
+		t.Fatalf("request = %+v", req)
+	}
+	if len(req.TargetIDs) != 2 || req.TargetIDs[0] != b || req.TargetIDs[1] != a {
+		t.Fatalf("target ids = %v, want %v", req.TargetIDs, []int64{b, a})
+	}
+}
+
+func TestRunUnknownScheduleIs404(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules/4242/run", nil); rec.Code != http.StatusNotFound {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestScheduleNextReturnsFiveTimes(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	id := createTestTarget(t, h, "t")
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "s", "cron": "*/15 * * * *", "enabled": true, "timezone": "UTC", "target_ids": []int64{id}})
+	var created struct {
+		Schedule struct {
+			ID int64 `json:"id"`
+		} `json:"schedule"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	got := doJSON(t, h, http.MethodGet, "/api/v1/schedules/"+itoa(created.Schedule.ID)+"/next", nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", got.Code, got.Body.String())
+	}
+	var body struct {
+		Next []string `json:"next"`
+	}
+	json.Unmarshal(got.Body.Bytes(), &body)
+	if len(body.Next) != 5 {
+		t.Fatalf("next = %v", body.Next)
+	}
+}
+
+func TestSaveScheduleReturnsOverlapWarning(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	a := createTestTarget(t, h, "a")
+	b := createTestTarget(t, h, "b")
+	if rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "first", "cron": "0 * * * *", "enabled": true, "timezone": "UTC",
+		"target_ids": []int64{a}}); rec.Code != http.StatusCreated {
+		t.Fatalf("first: %d %s", rec.Code, rec.Body.String())
+	}
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "second", "cron": "0 * * * *", "enabled": true, "timezone": "UTC",
+		"target_ids": []int64{b}})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("second: %d %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Warnings []string `json:"warnings"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Warnings) != 1 || !strings.Contains(body.Warnings[0], "first") {
+		t.Fatalf("warnings = %v", body.Warnings)
+	}
+}
+
+func TestSaveDisabledScheduleHasNoWarnings(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	a := createTestTarget(t, h, "a")
+	b := createTestTarget(t, h, "b")
+	doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "first", "cron": "0 * * * *", "enabled": true, "timezone": "UTC", "target_ids": []int64{a}})
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "second", "cron": "0 * * * *", "enabled": false, "timezone": "UTC", "target_ids": []int64{b}})
+	var body struct {
+		Warnings []string `json:"warnings"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Warnings) != 0 {
+		t.Fatalf("warnings = %v, want none", body.Warnings)
+	}
+}
+
+func TestListRunsFilteredByScheduleID(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	ctx := context.Background()
+	tid := createTestTarget(t, h, "t")
+	sid, err := db.CreateSchedule(ctx, &store.Schedule{
+		Name: "s", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateRun(ctx, "manual", nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateRun(ctx, "cron", &sid); err != nil {
+		t.Fatal(err)
+	}
+	rec := doJSON(t, h, http.MethodGet, "/api/v1/runs?schedule_id="+itoa(sid), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	var body struct {
+		Runs []store.Run `json:"runs"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if len(body.Runs) != 1 || body.Runs[0].ScheduleID == nil || *body.Runs[0].ScheduleID != sid {
+		t.Fatalf("runs = %+v", body.Runs)
 	}
 }

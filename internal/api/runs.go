@@ -18,7 +18,15 @@ func (d Deps) listRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	runs, next, err := d.Store.ListRuns(r.Context(), store.RunFilter{Limit: limit, Cursor: cursor})
+	f := store.RunFilter{Limit: limit, Cursor: cursor}
+	if r.URL.Query().Get("schedule_id") != "" {
+		sid, ok := int64Query(w, r, "schedule_id", 0)
+		if !ok {
+			return
+		}
+		f.ScheduleID = &sid
+	}
+	runs, next, err := d.Store.ListRuns(r.Context(), f)
 	if err != nil {
 		internalError(w, d.Logger, "list runs failed", err)
 		return

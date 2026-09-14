@@ -78,6 +78,8 @@ func New(deps Deps) http.Handler {
 			s.Get("/{id}", deps.getSchedule)
 			s.Put("/{id}", deps.updateSchedule)
 			s.Delete("/{id}", deps.deleteSchedule)
+			s.Post("/{id}/run", deps.runSchedule)
+			s.Get("/{id}/next", deps.scheduleNext)
 		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
 		v1.Route("/runs", func(rt chi.Router) {

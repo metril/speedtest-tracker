@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -213,8 +214,94 @@ func formatTimes(times []time.Time) []string {
 	return out
 }
 
-// overlapWarnings reports schedules that would collide with sc. Task 5
-// implements the real computation.
-func (d Deps) overlapWarnings(_ context.Context, _ store.Schedule) []string {
-	return []string{}
+// overlapWarnings reports every other enabled schedule that shares a lane
+// with sc and fires within 60s of it in the next 24h. Overlapping tests on
+// one lane skew each other's numbers, so the UI shows these on save. A
+// disabled schedule cannot collide with anything.
+func (d Deps) overlapWarnings(ctx context.Context, sc store.Schedule) []string {
+	if !sc.Enabled {
+		return []string{}
+	}
+	all, err := d.Store.ListSchedules(ctx)
+	if err != nil {
+		d.Logger.Error("overlap check: list schedules", "error", err)
+		return []string{}
+	}
+	targets, err := d.Store.ListTargets(ctx)
+	if err != nil {
+		d.Logger.Error("overlap check: list targets", "error", err)
+		return []string{}
+	}
+	laneOf := make(map[int64]string, len(targets))
+	for _, t := range targets {
+		lane := t.Lane
+		if lane == "" {
+			lane = "wan"
+		}
+		laneOf[t.ID] = lane
+	}
+	candidate := func(s store.Schedule) scheduler.OverlapCandidate {
+		seen := map[string]bool{}
+		lanes := []string{}
+		for _, tid := range s.TargetIDs {
+			if lane, ok := laneOf[tid]; ok && !seen[lane] {
+				seen[lane] = true
+				lanes = append(lanes, lane)
+			}
+		}
+		return scheduler.OverlapCandidate{ID: s.ID, Name: s.Name, Cron: s.Cron,
+			Timezone: s.Timezone, Lanes: lanes}
+	}
+	others := make([]scheduler.OverlapCandidate, 0, len(all))
+	for _, other := range all {
+		if other.ID == sc.ID || !other.Enabled {
+			continue
+		}
+		others = append(others, candidate(other))
+	}
+	warnings := scheduler.FindOverlaps(candidate(sc), others, time.Now())
+	if warnings == nil {
+		return []string{}
+	}
+	return warnings
+}
+
+// runSchedule answers POST /schedules/{id}/run: a manual, immediate run of
+// the schedule's ordered targets, still tagged with the schedule id so the
+// run shows up in that schedule's history.
+func (d Deps) runSchedule(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	sc, err := d.Store.GetSchedule(r.Context(), id)
+	if d.scheduleStoreError(w, err) {
+		return
+	}
+	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
+		Trigger: "manual", ScheduleID: &sc.ID, TargetIDs: sc.TargetIDs})
+	if err != nil {
+		enqueueError(w, d.Logger, err)
+		return
+	}
+	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
+}
+
+// scheduleNext answers GET /schedules/{id}/next with the next five fire
+// times of the stored expression.
+func (d Deps) scheduleNext(w http.ResponseWriter, r *http.Request) {
+	id, ok := pathID(w, r)
+	if !ok {
+		return
+	}
+	sc, err := d.Store.GetSchedule(r.Context(), id)
+	if d.scheduleStoreError(w, err) {
+		return
+	}
+	times, err := scheduler.NextFireTimes(sc.Cron, sc.Timezone, nextRunCount, time.Now())
+	if err != nil {
+		errBadRequest(w, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"next": formatTimes(times)})
 }
