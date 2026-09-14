@@ -19,6 +19,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 	"github.com/metril/speedtest-tracker/internal/runner"
+	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -103,7 +104,7 @@ func parseLevel(s string) slog.Level {
 // registry and invalidates the Ookla server-list cache. It returns when
 // ctx is done.
 func watchSettings(ctx context.Context, st *settings.Store, level *slog.LevelVar,
-	reg *engine.Registry, servers *ookla.ServerList, logger *slog.Logger) {
+	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler, logger *slog.Logger) {
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 
@@ -133,6 +134,14 @@ func watchSettings(ctx context.Context, st *settings.Store, level *slog.LevelVar
 				reg.Replace(buildEngines(eng))
 				servers.Invalidate()
 				logger.Info("engines rebuilt", "changed_key", key)
+			case key == settings.KeyTimezone:
+				// Schedules with no explicit timezone follow the general
+				// setting, so a change means every cron entry is rebuilt.
+				if err := sch.Reload(ctx); err != nil {
+					logger.Error("reload schedules after timezone change", "error", err)
+					continue
+				}
+				logger.Info("schedules reloaded after timezone change")
 			}
 		}
 	}
@@ -166,27 +175,33 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	servers := ookla.NewServerList(engineCfg.SpeedtestBin,
 		time.Duration(engineCfg.ServerListTTLSeconds)*time.Second)
 
-	watchCtx, stopWatch := context.WithCancel(context.Background())
-	defer stopWatch()
-	go watchSettings(watchCtx, st, level, reg, servers, logger)
-
 	hub := sse.NewHub()
 	rn := runner.New(runner.Config{
 		Store: db, Registry: reg, Hub: hub, Logger: logger,
 	})
 	rn.Start()
 
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: rn, Logger: logger})
+	if err := sch.Reload(ctx); err != nil {
+		return err
+	}
+
+	watchCtx, stopWatch := context.WithCancel(context.Background())
+	defer stopWatch()
+	go watchSettings(watchCtx, st, level, reg, servers, sch, logger)
+
 	srv := &http.Server{
 		Addr: cfg.Listen,
 		Handler: api.New(api.Deps{
-			Pinger:     db,
-			Logger:     logger,
-			UI:         web.Handler(),
-			Hub:        hub,
-			Store:      db,
-			Registry:   reg,
-			Runner:     rn,
-			ServerList: servers,
+			Pinger:          db,
+			Logger:          logger,
+			UI:              web.Handler(),
+			Hub:             hub,
+			Store:           db,
+			Registry:        reg,
+			Runner:          rn,
+			ServerList:      servers,
+			ReloadSchedules: sch.Reload,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -213,6 +228,11 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			logger.Error("http shutdown", "error", err)
 		}
 		stopWatch()
+		schedCtx, cancelSched := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancelSched()
+		if err := sch.Stop(schedCtx); err != nil {
+			logger.Error("scheduler shutdown", "error", err)
+		}
 		runnerCtx, cancelRunner := context.WithTimeout(context.Background(), 70*time.Second)
 		defer cancelRunner()
 		if err := rn.Shutdown(runnerCtx); err != nil {

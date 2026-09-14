@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"net"
@@ -11,8 +12,12 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
+	"github.com/metril/speedtest-tracker/internal/engine/fake"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/runner"
+	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/settings"
+	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
@@ -137,8 +142,9 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 	reg := engine.NewRegistry()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	servers := ookla.NewServerList("speedtest", time.Hour)
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(), Logger: logger}), Logger: logger})
 
-	go watchSettings(ctx, st, level, reg, servers, logger)
+	go watchSettings(ctx, st, level, reg, servers, sch, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -171,4 +177,66 @@ func TestBuildEnginesRegistersAll(t *testing.T) {
 			t.Errorf("missing engine %q", name)
 		}
 	}
+}
+
+func TestSchedulerRunsScheduleEndToEnd(t *testing.T) {
+	dir := t.TempDir()
+	db, err := store.Open(filepath.Join(dir, "e2e.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "fake-target", Engine: "fake", Enabled: true, Lane: "wan",
+		Options: json.RawMessage(`{}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.CreateSchedule(ctx, &store.Schedule{
+		Name: "every-second", Cron: "@every 1s", Enabled: true, Timezone: "UTC",
+		TargetIDs: []int64{tid}}); err != nil {
+		t.Fatal(err)
+	}
+
+	reg := engine.NewRegistry()
+	reg.Register(fake.New())
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	rn := runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(),
+		Logger: logger, Grace: 2 * time.Second})
+	rn.Start()
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: rn, Logger: logger})
+	if err := sch.Reload(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = sch.Stop(stopCtx)
+		_ = rn.Shutdown(stopCtx)
+	}()
+
+	deadline := time.Now().Add(6 * time.Second)
+	for time.Now().Before(deadline) {
+		results, _, err := db.ListResults(ctx, store.ResultFilter{TargetID: &tid, Limit: 10})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(results) > 0 {
+			if results[0].Status != "ok" {
+				t.Fatalf("result status = %q, want ok", results[0].Status)
+			}
+			runs, _, err := db.ListRuns(ctx, store.RunFilter{Limit: 10})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(runs) == 0 || runs[len(runs)-1].Trigger != "cron" {
+				t.Fatalf("runs = %+v, want a cron run", runs)
+			}
+			return
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("schedule never produced a result within 6s")
 }
