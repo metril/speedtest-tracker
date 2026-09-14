@@ -3,6 +3,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -87,10 +88,15 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 			errBadRequest(w, "invalid window")
 			return
 		}
-		to = from
+		// Store.Summary is inclusive on both ends ([from,to]), matching
+		// history/outages; without this, a result timestamped exactly at
+		// the boundary would be double-counted in both the current and
+		// previous windows. One millisecond (the stored timestamps'
+		// precision) keeps the previous window adjacent, not overlapping.
+		to = f.Add(-time.Millisecond).Format(dbTimeFormat)
 		from = f.Add(-span).Format(dbTimeFormat)
 	}
-	key := from + "|" + to + "|" + r.URL.Query().Get("offset")
+	key := from + "|" + to + "|" + strconv.Itoa(offset)
 	w.Header().Set("Cache-Control", "max-age=30")
 	if body, hit := d.summary.get(key); hit {
 		if d.Metrics != nil {
