@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -37,6 +38,63 @@ func TestHistoryRejectsUnknownRange(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	tid, _ := seedResults(t, db, 1)
 	rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=99y", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestHistoryDefaultRangeIs24h(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	var body struct{ From, To string }
+	json.NewDecoder(rec.Body).Decode(&body)
+	assertSpanAround(t, body.From, body.To, 24*time.Hour)
+}
+
+func TestOutagesDefaultRangeIsSevenDays(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/outages", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	var body struct{ From, To string }
+	json.NewDecoder(rec.Body).Decode(&body)
+	assertSpanAround(t, body.From, body.To, 7*24*time.Hour)
+}
+
+// assertSpanAround checks the from/to pair (dbTimeFormat strings) spans want,
+// within a minute of slack for test execution time.
+func assertSpanAround(t *testing.T, from, to string, want time.Duration) {
+	t.Helper()
+	f, err1 := time.Parse(dbTimeFormat, from)
+	tt, err2 := time.Parse(dbTimeFormat, to)
+	if err1 != nil || err2 != nil {
+		t.Fatalf("parse from/to: %v / %v (from=%q to=%q)", err1, err2, from, to)
+	}
+	got := tt.Sub(f)
+	if diff := got - want; diff < -time.Minute || diff > time.Minute {
+		t.Errorf("span = %v, want ~%v", got, want)
+	}
+}
+
+func TestHistoryLoneFromIsBadRequest(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+	rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?from=2026-09-01T00:00:00Z", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestOutagesLoneToIsBadRequest(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/outages?to=2026-09-01T00:00:00Z", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
 	}

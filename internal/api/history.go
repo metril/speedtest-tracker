@@ -18,16 +18,27 @@ var namedRanges = map[string]time.Duration{
 // together than this belong to the same incident.
 const defaultOutageGapSeconds = 1800
 
+// Default window spans used when a request gives neither range nor from/to.
+const (
+	defaultHistorySpan = 24 * time.Hour
+	defaultOutagesSpan = 7 * 24 * time.Hour
+)
+
 // rangeWindow resolves ?range=24h|7d|30d, or an explicit ?from&to pair, to
-// a concrete window. It answers 400 itself and reports whether the window
-// is usable.
-func rangeWindow(w http.ResponseWriter, r *http.Request) (string, string, bool) {
+// a concrete window. defaultSpan is used when neither range nor from/to is
+// given, so callers (history vs. outages) can pick their own default. It
+// answers 400 itself and reports whether the window is usable.
+func rangeWindow(w http.ResponseWriter, r *http.Request, defaultSpan time.Duration) (string, string, bool) {
 	from, ok := timeQuery(w, r, "from")
 	if !ok {
 		return "", "", false
 	}
 	to, ok := timeQuery(w, r, "to")
 	if !ok {
+		return "", "", false
+	}
+	if (from == "") != (to == "") {
+		errBadRequest(w, "from and to must be given together")
 		return "", "", false
 	}
 	if from != "" && to != "" {
@@ -38,15 +49,15 @@ func rangeWindow(w http.ResponseWriter, r *http.Request) (string, string, bool) 
 		return from, to, true
 	}
 	name := r.URL.Query().Get("range")
+	now := time.Now().UTC().Truncate(summaryTTL)
 	if name == "" {
-		name = "24h"
+		return now.Add(-defaultSpan).Format(dbTimeFormat), now.Format(dbTimeFormat), true
 	}
 	span, known := namedRanges[name]
 	if !known {
 		errBadRequest(w, "range must be one of 24h, 7d, 30d, or an explicit from/to pair")
 		return "", "", false
 	}
-	now := time.Now().UTC().Truncate(summaryTTL)
 	return now.Add(-span).Format(dbTimeFormat), now.Format(dbTimeFormat), true
 }
 
@@ -70,7 +81,7 @@ func (d Deps) targetHistory(w http.ResponseWriter, r *http.Request) {
 	if _, err := d.Store.GetTarget(r.Context(), id); storeError(w, d.Logger, "target", err) {
 		return
 	}
-	from, to, ok := rangeWindow(w, r)
+	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
 	if !ok {
 		return
 	}
@@ -88,7 +99,7 @@ func (d Deps) targetHistory(w http.ResponseWriter, r *http.Request) {
 
 // outages answers GET /outages?from&to&gap_seconds.
 func (d Deps) outages(w http.ResponseWriter, r *http.Request) {
-	from, to, ok := rangeWindow(w, r)
+	from, to, ok := rangeWindow(w, r, defaultOutagesSpan)
 	if !ok {
 		return
 	}

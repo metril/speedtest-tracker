@@ -47,7 +47,7 @@ func (c *summaryCache) set(key string, body []byte) {
 // statsSummary answers GET /stats/summary?range=, serving a cached body
 // for up to summaryTTL.
 func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
-	from, to, ok := rangeWindow(w, r)
+	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
 	if !ok {
 		return
 	}
