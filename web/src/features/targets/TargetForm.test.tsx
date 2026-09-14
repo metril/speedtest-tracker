@@ -110,6 +110,29 @@ describe('TargetForm', () => {
     expect(screen.getByLabelText('Reverse (-R)')).toBeDisabled();
   });
 
+  it('lets legacy options with both reverse and bidir true be unchecked', () => {
+    wrap(
+      <TargetForm
+        initial={{
+          id: 9, name: 'Legacy', engine: 'iperf3', enabled: true, lane: 'wan',
+          options: { reverse: true, bidir: true }, thresholds: {},
+          created_at: '', updated_at: '',
+        }}
+        onSubmit={vi.fn()}
+        onCancel={vi.fn()}
+        submitting={false}
+      />,
+    );
+
+    // Neither box is locked out just because both happen to be checked.
+    expect(screen.getByLabelText('Reverse (-R)')).not.toBeDisabled();
+    expect(screen.getByLabelText('Bidirectional (--bidir)')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('Reverse (-R)'));
+    expect(screen.getByLabelText('Reverse (-R)')).not.toBeChecked();
+    expect(screen.getByLabelText('Bidirectional (--bidir)')).toBeChecked();
+  });
+
   it('only enables udp bitrate when protocol is udp, and disables bidir for udp', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });

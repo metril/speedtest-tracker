@@ -238,13 +238,18 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
           </p>
         )}
       </div>
+      {/* Disable a box only when the other is checked and this one isn't —
+          never both at once. Legacy options can have reverse and bidir both
+          true (an invalid combination the engine would reject); if that
+          happened, disabling both here would make it impossible to ever
+          uncheck either one. */}
       <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-reverse">
-        <input id="iperf-reverse" type="checkbox" checked={reverseOn} disabled={bidirOn}
+        <input id="iperf-reverse" type="checkbox" checked={reverseOn} disabled={bidirOn && !reverseOn}
           onChange={(e) => onChange(setOption(options, 'reverse', e.target.checked))} />
         Reverse (-R)
       </label>
       <label className="flex items-center gap-2 text-sm text-slate-300" htmlFor="iperf-bidir">
-        <input id="iperf-bidir" type="checkbox" checked={bidirOn} disabled={reverseOn || isUdp}
+        <input id="iperf-bidir" type="checkbox" checked={bidirOn} disabled={(reverseOn && !bidirOn) || isUdp}
           onChange={(e) => onChange(setOption(options, 'bidir', e.target.checked))} />
         Bidirectional (--bidir)
       </label>

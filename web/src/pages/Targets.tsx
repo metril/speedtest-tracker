@@ -17,6 +17,10 @@ export function Targets() {
   const run = useRunTarget();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [notice, setNotice] = useState('');
+  // run.variables is the target id of whichever "Run now" mutation is
+  // currently in flight, so each row's button can show pending state
+  // independently instead of every row disabling at once.
+  const runningTargetID = run.isPending ? run.variables : undefined;
 
   const mutationError = (err: unknown) =>
     err instanceof ApiError ? err.message : err ? String(err) : undefined;
@@ -98,14 +102,14 @@ export function Targets() {
                   <div className="flex justify-end gap-2">
                     <button
                       className="rounded border border-sky-700 px-2 py-1 text-xs text-sky-300 hover:bg-sky-900/40 disabled:opacity-50"
-                      disabled={run.isPending}
+                      disabled={runningTargetID === t.id}
                       onClick={() =>
                         run.mutate(t.id, {
                           onSuccess: (res) => setNotice(`Queued run #${res.run_id} for ${t.name}`),
                         })
                       }
                     >
-                      Run now
+                      {runningTargetID === t.id ? 'Running…' : 'Run now'}
                     </button>
                     <button
                       className="rounded border border-slate-700 px-2 py-1 text-xs text-slate-300 hover:bg-slate-800"
@@ -115,7 +119,11 @@ export function Targets() {
                     </button>
                     <button
                       className="rounded border border-rose-800 px-2 py-1 text-xs text-rose-300 hover:bg-rose-950/40"
-                      onClick={() => remove.mutate(t.id)}
+                      onClick={() => {
+                        if (window.confirm(`Delete target "${t.name}"? This cannot be undone.`)) {
+                          remove.mutate(t.id);
+                        }
+                      }}
                     >
                       Delete
                     </button>
