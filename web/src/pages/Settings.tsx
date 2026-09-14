@@ -71,8 +71,13 @@ export function Settings() {
   const [vmResult, setVmResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [vlResult, setVlResult] = useState<{ ok: boolean; message: string } | null>(null);
 
+  // Seed local edit state from the fetched settings exactly once. Refetches
+  // (invalidation after save, background refresh, etc.) must never clobber
+  // an in-progress, unsaved edit in any section.
+  const seeded = useRef(false);
   useEffect(() => {
-    if (!settings.data) return;
+    if (!settings.data || seeded.current) return;
+    seeded.current = true;
     setGeneral(settings.data.general);
     setEngines(settings.data.engines);
     setIntegrations(settings.data.integrations);

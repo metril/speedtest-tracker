@@ -75,7 +75,7 @@ function renderSettings(opts: {
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrap = (node: ReactNode) => <QueryClientProvider client={qc}>{node}</QueryClientProvider>;
-  return render(wrap(<Settings />));
+  return { ...render(wrap(<Settings />)), qc };
 }
 
 describe('Settings page', () => {
@@ -104,6 +104,19 @@ describe('Settings page', () => {
     renderSettings({ put });
     await userEvent.click(await screen.findByRole('button', { name: 'Save Integrations' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('vm_url must be http or https');
+  });
+
+  it('does not clobber an edited but unsaved field on refetch', async () => {
+    const { qc } = renderSettings();
+    const tz = await screen.findByLabelText('Timezone');
+    await userEvent.clear(tz);
+    await userEvent.type(tz, 'Asia/Kolkata');
+
+    // A refetch (e.g. invalidation, background refresh) brings back the
+    // original server data; the in-progress, unsaved edit must survive it.
+    await qc.refetchQueries({ queryKey: ['settings'] });
+
+    expect(screen.getByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
   });
 
   it('reports a connection test result inline', async () => {

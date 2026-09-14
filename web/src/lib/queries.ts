@@ -220,7 +220,11 @@ export function useDeleteTag() {
 }
 
 export function useSettings() {
-  return useQuery({ queryKey: queryKeys.settings, queryFn: api.getSettings, staleTime: 0 });
+  return useQuery({
+    queryKey: queryKeys.settings,
+    queryFn: api.getSettings,
+    refetchOnWindowFocus: false,
+  });
 }
 
 export function useUpdateSettings() {

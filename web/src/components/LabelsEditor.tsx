@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 interface Props {
   value: Record<string, string>;
@@ -6,27 +6,75 @@ interface Props {
   label: string;
 }
 
+interface Row {
+  id: string;
+  key: string;
+  value: string;
+}
+
+let rowSeq = 0;
+const nextRowId = () => `row-${(rowSeq += 1)}`;
+
+function rowsFromValue(value: Record<string, string>): Row[] {
+  return Object.entries(value).map(([key, val]) => ({ id: nextRowId(), key, value: val }));
+}
+
+function sameEntries(a: Record<string, string>, b: Record<string, string>): boolean {
+  const ak = Object.keys(a);
+  const bk = Object.keys(b);
+  if (ak.length !== bk.length) return false;
+  return ak.every((k) => a[k] === b[k]);
+}
+
 /** LabelsEditor edits a flat string map (VM extra labels, VL stream
- * fields) as a list of key/value rows plus a draft row to add another. */
+ * fields) as a list of key/value rows plus a draft row to add another.
+ *
+ * Rows are tracked as an ordered list with stable synthetic ids, not
+ * keyed by the (editable) label key itself: renaming a key would
+ * otherwise remount the row on every keystroke and steal focus. Empty
+ * keys and keys that collide with an earlier row are flagged inline and
+ * excluded from the map handed to `onChange` (the first occurrence
+ * wins) until the user fixes them. */
 export function LabelsEditor({ value, onChange, label }: Props) {
+  const [rows, setRows] = useState<Row[]>(() => rowsFromValue(value));
+  const lastEmitted = useRef(value);
+
+  useEffect(() => {
+    if (!sameEntries(value, lastEmitted.current)) {
+      setRows(rowsFromValue(value));
+      lastEmitted.current = value;
+    }
+  }, [value]);
+
   const [draftKey, setDraftKey] = useState('');
   const [draftValue, setDraftValue] = useState('');
-  const entries = Object.entries(value);
 
-  const renameKey = (oldKey: string, newKey: string) => {
-    const next: Record<string, string> = {};
-    for (const [k, v] of entries) next[k === oldKey ? newKey : k] = v;
-    onChange(next);
+  const keyCounts = rows.reduce<Record<string, number>>((acc, r) => {
+    const k = r.key.trim();
+    if (k) acc[k] = (acc[k] ?? 0) + 1;
+    return acc;
+  }, {});
+
+  const emit = (next: Row[]) => {
+    setRows(next);
+    const map: Record<string, string> = {};
+    const seen = new Set<string>();
+    for (const r of next) {
+      const key = r.key.trim();
+      if (!key || seen.has(key)) continue;
+      seen.add(key);
+      map[key] = r.value;
+    }
+    lastEmitted.current = map;
+    onChange(map);
   };
-  const setValue = (key: string, newValue: string) => onChange({ ...value, [key]: newValue });
-  const remove = (key: string) => {
-    const next = { ...value };
-    delete next[key];
-    onChange(next);
-  };
+
+  const updateKey = (id: string, key: string) => emit(rows.map((r) => (r.id === id ? { ...r, key } : r)));
+  const updateValue = (id: string, val: string) => emit(rows.map((r) => (r.id === id ? { ...r, value: val } : r)));
+  const remove = (id: string) => emit(rows.filter((r) => r.id !== id));
   const add = () => {
     if (!draftKey) return;
-    onChange({ ...value, [draftKey]: draftValue });
+    emit([...rows, { id: nextRowId(), key: draftKey, value: draftValue }]);
     setDraftKey('');
     setDraftValue('');
   };
@@ -34,25 +82,39 @@ export function LabelsEditor({ value, onChange, label }: Props) {
   return (
     <div className="grid gap-2">
       <span className="text-sm text-muted">{label}</span>
-      {entries.map(([key, val]) => (
-        <div key={key} className="flex gap-2 items-center">
-          <input
-            aria-label={`${label} key`}
-            className="rounded border border-line bg-surface px-2 py-1 text-fg"
-            value={key}
-            onChange={(e) => renameKey(key, e.target.value)}
-          />
-          <input
-            aria-label={`${label} value for ${key}`}
-            className="rounded border border-line bg-surface px-2 py-1 text-fg"
-            value={val}
-            onChange={(e) => setValue(key, e.target.value)}
-          />
-          <button type="button" className="text-muted hover:text-bad" onClick={() => remove(key)}>
-            Remove {key}
-          </button>
-        </div>
-      ))}
+      {rows.map((row) => {
+        const trimmed = row.key.trim();
+        const empty = trimmed === '';
+        const duplicate = !empty && keyCounts[trimmed] > 1;
+        const invalid = empty || duplicate;
+        return (
+          <div key={row.id} className="grid gap-1">
+            <div className="flex gap-2 items-center">
+              <input
+                aria-label={`${label} key`}
+                aria-invalid={invalid}
+                className="rounded border border-line bg-surface px-2 py-1 text-fg"
+                value={row.key}
+                onChange={(e) => updateKey(row.id, e.target.value)}
+              />
+              <input
+                aria-label={`${label} value for ${row.key}`}
+                className="rounded border border-line bg-surface px-2 py-1 text-fg"
+                value={row.value}
+                onChange={(e) => updateValue(row.id, e.target.value)}
+              />
+              <button type="button" className="text-muted hover:text-bad" onClick={() => remove(row.id)}>
+                Remove {row.key}
+              </button>
+            </div>
+            {invalid && (
+              <p className="text-sm text-bad">
+                {empty ? 'Key is required.' : 'Duplicate key; only the first is saved.'}
+              </p>
+            )}
+          </div>
+        );
+      })}
       <div className="flex gap-2 items-center">
         <input
           aria-label={`New ${label} key`}
