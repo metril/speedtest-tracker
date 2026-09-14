@@ -463,6 +463,36 @@ func TestScheduleNextRunPrefersTheRegisteredScheduler(t *testing.T) {
 	}
 }
 
+// TestScheduleNextRunFallsBackWhenSchedulerReturnsNotOK checks that a wired
+// scheduler answering ok=false (e.g. it doesn't know this schedule yet) is
+// treated the same as no scheduler at all: the handler falls back to
+// parsing the cron expression itself, rather than reporting an empty
+// next_run.
+func TestScheduleNextRunFallsBackWhenSchedulerReturnsNotOK(t *testing.T) {
+	h, db, _ := newTestAPIWith(t, func(d *Deps) {
+		d.Scheduler = stubScheduler{ok: false}
+	})
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	if _, err := db.CreateSchedule(t.Context(), &store.Schedule{
+		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/schedules", nil)
+	var body struct {
+		Schedules []struct {
+			NextRun string `json:"next_run"`
+		} `json:"schedules"`
+	}
+	json.NewDecoder(rec.Body).Decode(&body)
+	if len(body.Schedules) != 1 {
+		t.Fatalf("schedules = %+v", body.Schedules)
+	}
+	if body.Schedules[0].NextRun == "" {
+		t.Error("next_run empty when scheduler returns ok=false; expected the parsed expression")
+	}
+}
+
 func TestScheduleNextRunFallsBackToTheExpression(t *testing.T) {
 	h, db, _ := newTestAPI(t) // no Scheduler wired
 	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})

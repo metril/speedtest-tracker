@@ -108,6 +108,35 @@ func TestHistoryUnknownTargetIs404(t *testing.T) {
 	}
 }
 
+func TestHistoryRejectsExplicitSpanOver90Days(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+	rec := do(t, h, http.MethodGet,
+		"/api/v1/targets/"+itoa(tid)+"/history?from=2026-01-01T00:00:00Z&to=2026-06-01T00:00:00Z", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestOutagesRejectsExplicitSpanOver90Days(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodGet,
+		"/api/v1/outages?from=2026-01-01T00:00:00Z&to=2026-06-01T00:00:00Z", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+func TestHistoryAcceptsExplicitSpanUnder90Days(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+	rec := do(t, h, http.MethodGet,
+		"/api/v1/targets/"+itoa(tid)+"/history?from=2026-01-01T00:00:00Z&to=2026-03-01T00:00:00Z", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
 func TestOutagesListsIncidents(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	tid, _ := seedResults(t, db, 1)

@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"sort"
 )
 
 // TargetSummary is one target's dashboard row: its latest result plus the
@@ -43,9 +42,12 @@ func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, er
 		SELECT t.id, t.name, t.engine,
 		       COUNT(r.id),
 		       SUM(CASE WHEN r.status IS NOT NULL AND r.status <> 'ok' THEN 1 ELSE 0 END),
-		       AVG(NULLIF(r.download_bps,0)), MIN(NULLIF(r.download_bps,0)), MAX(r.download_bps),
-		       AVG(NULLIF(r.upload_bps,0)),
-		       AVG(NULLIF(r.ping_ms,0)), MAX(r.ping_ms)
+		       AVG(CASE WHEN r.status='ok' THEN r.download_bps END),
+		       MIN(CASE WHEN r.status='ok' THEN r.download_bps END),
+		       MAX(CASE WHEN r.status='ok' THEN r.download_bps END),
+		       AVG(CASE WHEN r.status='ok' THEN r.upload_bps END),
+		       AVG(CASE WHEN r.status='ok' THEN r.ping_ms END),
+		       MAX(CASE WHEN r.status='ok' THEN r.ping_ms END)
 		FROM targets t
 		LEFT JOIN results r
 		  ON r.target_id = t.id AND r.started_at >= ? AND r.started_at <= ?
@@ -98,8 +100,5 @@ func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, er
 	for i := range out.Targets {
 		out.Targets[i].Latest = byTarget[out.Targets[i].TargetID]
 	}
-	sort.SliceStable(out.Targets, func(i, j int) bool {
-		return out.Targets[i].TargetName < out.Targets[j].TargetName
-	})
 	return out, nil
 }

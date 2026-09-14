@@ -30,6 +30,32 @@ func TestListEndpointsAnswer304OnMatchingETag(t *testing.T) {
 	}
 }
 
+func TestNotModifiedOmitsContentTypeAndLength(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	seedResults(t, db, 2)
+
+	first := do(t, h, http.MethodGet, "/api/v1/results", nil)
+	tag := first.Header().Get("ETag")
+	if tag == "" {
+		t.Fatal("no ETag header")
+	}
+	req := newRequest(t, http.MethodGet, "/api/v1/results", nil)
+	req.Header.Set("If-None-Match", tag)
+	second := serve(t, h, req)
+	if second.Code != http.StatusNotModified {
+		t.Fatalf("status = %d, want 304", second.Code)
+	}
+	if ct := second.Header().Get("Content-Type"); ct != "" {
+		t.Errorf("Content-Type = %q, want absent on 304", ct)
+	}
+	if cl := second.Header().Get("Content-Length"); cl != "" {
+		t.Errorf("Content-Length = %q, want absent on 304", cl)
+	}
+	if second.Body.Len() != 0 {
+		t.Errorf("304 body length = %d, want 0", second.Body.Len())
+	}
+}
+
 func TestETagChangesWhenDataChanges(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	seedResults(t, db, 1)

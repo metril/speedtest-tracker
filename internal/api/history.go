@@ -24,6 +24,19 @@ const (
 	defaultOutagesSpan = 7 * 24 * time.Hour
 )
 
+// maxExplicitSpan bounds an explicit ?from&to pair for /history and
+// /outages: unlike the named ranges (capped at 30d), a caller-chosen span
+// could otherwise ask for an unbounded table scan.
+const maxExplicitSpan = 90 * 24 * time.Hour
+
+// windowGranularity is the wall-clock resolution rangeWindow truncates
+// "now" to before applying a named range, so two requests in the same
+// window share one summary-cache key. It happens to equal summaryTTL: a
+// window can't usefully be finer than the cache's own reuse period, but
+// the two constants are named separately so that coupling is explicit
+// rather than implied by reusing summaryTTL's name here.
+const windowGranularity = summaryTTL
+
 // rangeWindow resolves ?range=24h|7d|30d, or an explicit ?from&to pair, to
 // a concrete window. defaultSpan is used when neither range nor from/to is
 // given, so callers (history vs. outages) can pick their own default. It
@@ -46,10 +59,16 @@ func rangeWindow(w http.ResponseWriter, r *http.Request, defaultSpan time.Durati
 			errBadRequest(w, "from must be before to")
 			return "", "", false
 		}
+		if f, err1 := time.Parse(dbTimeFormat, from); err1 == nil {
+			if t, err2 := time.Parse(dbTimeFormat, to); err2 == nil && t.Sub(f) > maxExplicitSpan {
+				errBadRequest(w, "range too large")
+				return "", "", false
+			}
+		}
 		return from, to, true
 	}
 	name := r.URL.Query().Get("range")
-	now := time.Now().UTC().Truncate(summaryTTL)
+	now := time.Now().UTC().Truncate(windowGranularity)
 	if name == "" {
 		return now.Add(-defaultSpan).Format(dbTimeFormat), now.Format(dbTimeFormat), true
 	}

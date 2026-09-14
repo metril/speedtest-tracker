@@ -70,10 +70,16 @@ func (s *Store) HistoryBuckets(ctx context.Context, targetID int64, from, to str
 		SELECT (`+epochExpr+` / ?) * ? AS bucket,
 		       COUNT(*),
 		       SUM(CASE WHEN status <> 'ok' THEN 1 ELSE 0 END),
-		       AVG(NULLIF(download_bps,0)), MIN(NULLIF(download_bps,0)), MAX(download_bps),
-		       AVG(NULLIF(upload_bps,0)),   MIN(NULLIF(upload_bps,0)),   MAX(upload_bps),
-		       AVG(NULLIF(ping_ms,0)),      MIN(NULLIF(ping_ms,0)),      MAX(ping_ms),
-		       AVG(NULLIF(jitter_ms,0))
+		       AVG(CASE WHEN status='ok' THEN download_bps END),
+		       MIN(CASE WHEN status='ok' THEN download_bps END),
+		       MAX(CASE WHEN status='ok' THEN download_bps END),
+		       AVG(CASE WHEN status='ok' THEN upload_bps END),
+		       MIN(CASE WHEN status='ok' THEN upload_bps END),
+		       MAX(CASE WHEN status='ok' THEN upload_bps END),
+		       AVG(CASE WHEN status='ok' THEN ping_ms END),
+		       MIN(CASE WHEN status='ok' THEN ping_ms END),
+		       MAX(CASE WHEN status='ok' THEN ping_ms END),
+		       AVG(CASE WHEN status='ok' THEN jitter_ms END)
 		FROM results
 		WHERE target_id=? AND started_at>=? AND started_at<=?
 		GROUP BY bucket

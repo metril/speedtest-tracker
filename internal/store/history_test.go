@@ -79,6 +79,69 @@ func TestHistoryBucketsExcludesFailedRowFromAvgButCountsIt(t *testing.T) {
 	}
 }
 
+// TestHistoryBucketsExcludesFailedNonZeroReadingFromAggregates checks that
+// status, not the value, decides exclusion: a failed row can still carry a
+// nonzero partial reading (e.g. ping succeeded but download failed), and
+// that reading must not pollute avg/min/max even though NULLIF(x,0) would
+// have let it through.
+func TestHistoryBucketsExcludesFailedNonZeroReadingFromAggregates(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z") // download_bps=100e6
+	if _, err := s.InsertResult(ctx, &Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "failed",
+		StartedAt: "2026-09-13T10:10:00.000Z", DurationMs: 500,
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     999e6, UploadBps: 999e6, PingMs: 999,
+	}); err != nil {
+		t.Fatalf("InsertResult: %v", err)
+	}
+
+	pts, err := s.HistoryBuckets(ctx, tid, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", 3600)
+	if err != nil {
+		t.Fatalf("HistoryBuckets: %v", err)
+	}
+	if len(pts) != 1 || pts[0].Count != 2 || pts[0].FailCount != 1 {
+		t.Fatalf("bucket = %+v, want Count=2 FailCount=1", pts[0])
+	}
+	p := pts[0]
+	if p.AvgDownloadBps != 100e6 || p.MinDownloadBps != 100e6 || p.MaxDownloadBps != 100e6 {
+		t.Errorf("download aggregates = %+v, want all 100e6 (999e6 failed reading excluded)", p)
+	}
+	if p.AvgPingMs != 12.5 || p.MaxPingMs != 12.5 {
+		t.Errorf("ping aggregates = %+v, want 12.5 (999 failed reading excluded)", p)
+	}
+}
+
+// TestHistoryBucketsIncludesGenuineZeroFromOkRow checks that an ok row
+// reporting an actual 0 (e.g. 0bps observed) is counted, not treated as
+// missing the way NULLIF(x,0) used to.
+func TestHistoryBucketsIncludesGenuineZeroFromOkRow(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z") // download_bps=100e6
+	if _, err := s.InsertResult(ctx, &Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt: "2026-09-13T10:10:00.000Z", DurationMs: 500,
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     0, UploadBps: 0, PingMs: 0,
+	}); err != nil {
+		t.Fatalf("InsertResult: %v", err)
+	}
+
+	pts, err := s.HistoryBuckets(ctx, tid, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", 3600)
+	if err != nil {
+		t.Fatalf("HistoryBuckets: %v", err)
+	}
+	if len(pts) != 1 || pts[0].Count != 2 || pts[0].FailCount != 0 {
+		t.Fatalf("bucket = %+v, want Count=2 FailCount=0", pts[0])
+	}
+	p := pts[0]
+	if p.AvgDownloadBps != 50e6 || p.MinDownloadBps != 0 {
+		t.Errorf("download aggregates = %+v, want avg=50e6 min=0 (genuine zero included)", p)
+	}
+}
+
 func TestBucketSecondsForKeepsPointsUnder500(t *testing.T) {
 	for _, span := range []time.Duration{24 * time.Hour, 7 * 24 * time.Hour, 30 * 24 * time.Hour} {
 		got := BucketSecondsFor(span)

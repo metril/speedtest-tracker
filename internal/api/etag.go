@@ -38,21 +38,35 @@ func etagJSON(next http.HandlerFunc) http.HandlerFunc {
 		buf := &etagBuffer{header: http.Header{}}
 		next(buf, r)
 
-		for k, v := range buf.header {
-			w.Header()[k] = v
-		}
 		if buf.status != http.StatusOK {
+			for k, v := range buf.header {
+				w.Header()[k] = v
+			}
 			w.WriteHeader(buf.status)
 			w.Write(buf.body.Bytes())
 			return
 		}
 		sum := sha256.Sum256(buf.body.Bytes())
 		tag := `"` + hex.EncodeToString(sum[:]) + `"`
-		w.Header().Set("ETag", tag)
 		if matchesETag(r.Header.Get("If-None-Match"), tag) {
+			// A 304 carries no body, so its Content-Type/Content-Length
+			// would describe content that isn't being sent; RFC 7232
+			// §4.1 only allows headers that would apply to a 200, and
+			// those two specifically describe the (absent) body.
+			for k, v := range buf.header {
+				if k == "Content-Type" || k == "Content-Length" {
+					continue
+				}
+				w.Header()[k] = v
+			}
+			w.Header().Set("ETag", tag)
 			w.WriteHeader(http.StatusNotModified)
 			return
 		}
+		for k, v := range buf.header {
+			w.Header()[k] = v
+		}
+		w.Header().Set("ETag", tag)
 		w.WriteHeader(http.StatusOK)
 		w.Write(buf.body.Bytes())
 	}
