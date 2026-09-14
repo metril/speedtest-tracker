@@ -790,6 +790,62 @@ func TestExecuteSkipsQueuedRunsAfterShutdownBegins(t *testing.T) {
 	}
 }
 
+// TestEnqueuePublishesQueuedBeforeRunning proves clients can never observe
+// a "running" run event before its "queued" one: the "queued" publish must
+// happen under r.mu, before the job is sent into the lane channel, since a
+// worker cannot dequeue (and therefore cannot publish "running") until that
+// send has happened.
+func TestEnqueuePublishesQueuedBeforeRunning(t *testing.T) {
+	r, db, hub := newTestRunner(t)
+	ctx := context.Background()
+	events, cancelSub := hub.Subscribe()
+	defer cancelSub()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "fast", Engine: "fake", Enabled: true, Lane: "wan"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, db, runID)
+
+	var runStatuses []string
+	deadline := time.After(2 * time.Second)
+loop:
+	for {
+		select {
+		case ev := <-events:
+			if ev.Type != sse.EventRun {
+				continue
+			}
+			var payload struct {
+				RunID  int64  `json:"run_id"`
+				Status string `json:"status"`
+			}
+			if err := json.Unmarshal(ev.Data, &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.RunID != runID {
+				continue
+			}
+			runStatuses = append(runStatuses, payload.Status)
+			switch payload.Status {
+			case "done", "failed", "canceled", "skipped":
+				break loop
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for terminal run event")
+		}
+	}
+
+	if len(runStatuses) == 0 || runStatuses[0] != "queued" {
+		t.Fatalf("run event sequence = %v, want first status to be queued", runStatuses)
+	}
+}
+
 // TestEnqueueSkipsDisabledTargetsExceptManual covers the Target.Enabled
 // gate: a scheduled/cron/api trigger must never run a disabled target, but
 // a manual run may deliberately target one.

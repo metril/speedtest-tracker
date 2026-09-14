@@ -175,11 +175,15 @@ func filterRunnable(targets []store.Target, trigger string) []store.Target {
 //
 // The schedule dedupe check and run creation happen under enqueueMu (a
 // separate lock from r.mu) so SQLite I/O is never done while r.mu is held.
-// r.mu is then taken only for the closing check, the run-map insert and the
-// lane-channel sends, which keeps Enqueue mutually exclusive with Shutdown
-// closing those channels (so a send on a closed channel can never happen)
-// without blocking other goroutines on I/O. Publishing happens after r.mu
-// is released.
+// r.mu is then taken only for the closing check, the run-map insert, the
+// "queued" publish and the lane-channel sends, which keeps Enqueue mutually
+// exclusive with Shutdown closing those channels (so a send on a closed
+// channel can never happen) without blocking other goroutines on I/O. The
+// "queued" event is published under r.mu, before any lane send, so clients
+// can never observe "running" before "queued" (hub.Publish is in-process
+// and non-blocking, so this costs nothing meaningful under the lock).
+// Failure-path publishes (queue full, shutting down) happen after r.mu is
+// released, since they involve a SetRunStatus store call first.
 func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	targets, err := r.cfg.Store.ListTargetsByIDs(ctx, req.TargetIDs)
 	if err != nil {
@@ -243,6 +247,14 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		chans = append(chans, r.laneChan(lane))
 	}
 
+	// Publish "queued" before any lane send: a worker cannot even attempt to
+	// dequeue this run's job until it exists in a lane channel, so
+	// publishing here, still under r.mu and before those sends, guarantees
+	// clients never observe "running" before "queued". Hub.Publish is
+	// in-process and non-blocking (buffered channels with a default case),
+	// so this adds no meaningful time under the lock.
+	r.publishRun(runID, "queued", "")
+
 	queueFull := false
 	for i, lane := range order {
 		select {
@@ -265,7 +277,6 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		r.publishRun(runID, "failed", "lane queue full")
 		return 0, ErrQueueFull
 	}
-	r.publishRun(runID, "queued", "")
 	return runID, nil
 }
 
