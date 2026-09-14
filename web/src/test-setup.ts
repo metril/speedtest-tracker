@@ -13,3 +13,14 @@ if (typeof globalThis.EventSource === 'undefined') {
   // @ts-expect-error -- minimal stand-in, not a full EventSource implementation
   globalThis.EventSource = NoopEventSource;
 }
+
+// jsdom has no ResizeObserver, which @tanstack/react-virtual optionally uses
+// to react to container resizes. A no-op keeps virtualised tables mountable.
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  class NoopResizeObserver {
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  }
+  globalThis.ResizeObserver = NoopResizeObserver as unknown as typeof ResizeObserver;
+}

@@ -9,6 +9,7 @@ export const queryKeys = {
   results: (filters: ResultFilters) => ['results', filters] as const,
   ooklaServers: (q: string) => ['ookla-servers', q] as const,
   tags: ['tags'] as const,
+  runs: ['runs'] as const,
 };
 
 export function useTargets() {
@@ -41,7 +42,11 @@ export function useDeleteTarget() {
 }
 
 export function useRunTarget() {
-  return useMutation({ mutationFn: (id: number) => api.runTarget(id) });
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.runTarget(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.runs }),
+  });
 }
 
 export function useOoklaServers(q: string, enabled: boolean) {
@@ -71,7 +76,11 @@ export function useDeleteResult() {
 }
 
 export function useReexecute() {
-  return useMutation({ mutationFn: (id: number) => api.reexecuteResult(id) });
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.reexecuteResult(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.runs }),
+  });
 }
 
 export function useSetTags() {

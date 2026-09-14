@@ -73,4 +73,28 @@ describe('useLiveRun', () => {
     unmount();
     expect(es.closed).toBe(true);
   });
+
+  it('calls onEvent for a result event', () => {
+    const onEvent = vi.fn();
+    renderHook(() => useLiveRun({ onEvent }));
+    act(() => {
+      FakeEventSource.last!.emit('result', { id: 1 });
+    });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'result' });
+  });
+
+  it('calls onEvent when a run reaches a terminal status, but not otherwise', () => {
+    const onEvent = vi.fn();
+    renderHook(() => useLiveRun({ onEvent }));
+
+    act(() => {
+      FakeEventSource.last!.emit('run', { run_id: 5, status: 'running' });
+    });
+    expect(onEvent).not.toHaveBeenCalled();
+
+    act(() => {
+      FakeEventSource.last!.emit('run', { run_id: 5, status: 'canceled' });
+    });
+    expect(onEvent).toHaveBeenCalledWith({ type: 'run', status: 'canceled' });
+  });
 });

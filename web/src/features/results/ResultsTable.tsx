@@ -80,7 +80,12 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                     <button className="text-sky-400 hover:text-sky-300" onClick={() => onReexecute(r.id)}>
                       replay
                     </button>
-                    <button className="text-rose-400 hover:text-rose-300" onClick={() => onDelete(r.id)}>
+                    <button
+                      className="text-rose-400 hover:text-rose-300"
+                      onClick={() => {
+                        if (window.confirm(`Delete this result for ${r.target_name}?`)) onDelete(r.id);
+                      }}
+                    >
                       del
                     </button>
                   </span>
