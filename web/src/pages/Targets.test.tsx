@@ -44,7 +44,8 @@ describe('Targets page delete confirmation', () => {
     const targets = [target()];
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.endsWith('/targets') ) return jsonResponse(targets);
+      if (url.endsWith('/targets')) return jsonResponse(targets);
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -54,8 +55,12 @@ describe('Targets page delete confirmation', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
     expect(window.confirm).toHaveBeenCalled();
-    // Only the initial GET /targets happened — no DELETE was issued.
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    // Only the GETs (targets list + recently-deleted list) happened — no
+    // DELETE was issued.
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ method: 'DELETE' }),
+    );
   });
 
   it('deletes when the confirmation is accepted', async () => {

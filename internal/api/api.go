@@ -178,12 +178,20 @@ func New(deps Deps) http.Handler {
 			t.Get("/", etagJSON(deps.listTargets))
 			t.Post("/", deps.createTarget)
 			t.Post("/test", deps.testTarget)
+			// Registered before "/{id}" so chi's router does not treat
+			// "deleted" as an {id} value.
+			t.Route("/deleted", func(dl chi.Router) {
+				dl.Get("/", deps.listDeletedTargets)
+				dl.Post("/{id}/restore", deps.restoreDeletedTarget)
+			})
 			t.Get("/{id}", deps.getTarget)
 			t.Put("/{id}", deps.updateTarget)
 			t.Delete("/{id}", deps.deleteTarget)
 			t.Post("/{id}/run", deps.runTarget)
 			t.Get("/{id}/latest", deps.targetLatest)
 			t.Get("/{id}/history", deps.targetHistory)
+			t.Get("/{id}/revisions", deps.listTargetRevisions)
+			t.Post("/{id}/revisions/{version}/revert", deps.revertTargetRevision)
 		})
 		v1.Route("/schedules", func(s chi.Router) {
 			s.Get("/", etagJSON(deps.listSchedules))

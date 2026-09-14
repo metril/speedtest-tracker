@@ -16,6 +16,8 @@ export const queryKeys = {
   schedules: ['schedules'] as const,
   cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
   history: (id: number, range: Range) => ['history', id, range] as const,
+  targetRevisions: (id: number) => ['target-revisions', id] as const,
+  deletedTargets: ['deleted-targets'] as const,
   summary: (range: Range) => ['summary', range] as const,
   outages: (range: Range) => ['outages', range] as const,
   settings: ['settings'] as const,
@@ -57,6 +59,41 @@ export function useRunTarget() {
   return useMutation({
     mutationFn: (id: number) => api.runTarget(id),
     onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.runs }),
+  });
+}
+
+export function useTargetRevisions(id: number, enabled: boolean) {
+  return useQuery({
+    queryKey: queryKeys.targetRevisions(id),
+    queryFn: () => api.listTargetRevisions(id),
+    enabled,
+  });
+}
+
+export function useRevertTargetRevision() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, version }: { id: number; version: number }) =>
+      api.revertTargetRevision(id, version),
+    onSuccess: (_data, { id }) => {
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+      qc.invalidateQueries({ queryKey: queryKeys.targetRevisions(id) });
+    },
+  });
+}
+
+export function useDeletedTargets() {
+  return useQuery({ queryKey: queryKeys.deletedTargets, queryFn: api.listDeletedTargets });
+}
+
+export function useRestoreTarget() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.restoreTarget(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+      qc.invalidateQueries({ queryKey: queryKeys.deletedTargets });
+    },
   });
 }
 

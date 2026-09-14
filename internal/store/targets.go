@@ -44,15 +44,38 @@ func scanTarget(sc interface{ Scan(...any) error }) (*Target, error) {
 	return &t, nil
 }
 
-// CreateTarget inserts t and returns the new row id.
+// CreateTarget inserts t, writes a "create" revision and returns the new
+// row id. The insert and the revision are written in one transaction.
 func (s *Store) CreateTarget(ctx context.Context, t *Target) (int64, error) {
-	res, err := s.Write.ExecContext(ctx,
+	tx, err := s.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin create target: %w", err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx,
 		`INSERT INTO targets(name,engine,enabled,lane,options,thresholds) VALUES(?,?,?,?,?,?)`,
 		t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds))
 	if err != nil {
 		return 0, fmt.Errorf("insert target: %w", err)
 	}
-	return res.LastInsertId()
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, fmt.Errorf("insert target: %w", err)
+	}
+
+	created, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, id))
+	if err != nil {
+		return 0, fmt.Errorf("read created target %d: %w", id, err)
+	}
+	if err := insertRevision(ctx, tx, id, "create", created); err != nil {
+		return 0, fmt.Errorf("insert create revision for target %d: %w", id, err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("commit create target: %w", err)
+	}
+	return id, nil
 }
 
 // GetTarget returns the target with the given id, or ErrNotFound.
@@ -123,9 +146,23 @@ func (s *Store) ListTargetsByIDs(ctx context.Context, ids []int64) ([]Target, er
 	return out, nil
 }
 
-// UpdateTarget writes every mutable field of t, or returns ErrNotFound.
+// UpdateTarget writes every mutable field of t and records an "update"
+// revision in the same transaction, or returns ErrNotFound.
 func (s *Store) UpdateTarget(ctx context.Context, t *Target) error {
-	res, err := s.Write.ExecContext(ctx, `
+	return s.updateTargetWithAction(ctx, t, "update")
+}
+
+// updateTargetWithAction is UpdateTarget with a caller-chosen revision
+// action, so revert can reuse the same write path while recording itself
+// distinctly from a plain edit.
+func (s *Store) updateTargetWithAction(ctx context.Context, t *Target, action string) error {
+	tx, err := s.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin update target %d: %w", t.ID, err)
+	}
+	defer tx.Rollback()
+
+	res, err := tx.ExecContext(ctx, `
 		UPDATE targets SET name=?,engine=?,enabled=?,lane=?,options=?,thresholds=?,
 			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id=?`,
@@ -133,16 +170,58 @@ func (s *Store) UpdateTarget(ctx context.Context, t *Target) error {
 	if err != nil {
 		return fmt.Errorf("update target %d: %w", t.ID, err)
 	}
-	return requireAffected(res)
+	if err := requireAffected(res); err != nil {
+		return err
+	}
+
+	updated, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, t.ID))
+	if err != nil {
+		return fmt.Errorf("read updated target %d: %w", t.ID, err)
+	}
+	if err := insertRevision(ctx, tx, t.ID, action, updated); err != nil {
+		return fmt.Errorf("insert %s revision for target %d: %w", action, t.ID, err)
+	}
+
+	return tx.Commit()
 }
 
-// DeleteTarget removes the target, or returns ErrNotFound.
+// RevertTarget applies t's fields (loaded from a past revision's snapshot
+// by the caller) to the live row and records a "revert" revision, or
+// returns ErrNotFound if no live row matches t.ID.
+func (s *Store) RevertTarget(ctx context.Context, t *Target) error {
+	return s.updateTargetWithAction(ctx, t, "revert")
+}
+
+// DeleteTarget removes the target and records a "delete" revision (whose
+// snapshot is the row as it stood before deletion) in the same
+// transaction, or returns ErrNotFound.
 func (s *Store) DeleteTarget(ctx context.Context, id int64) error {
-	res, err := s.Write.ExecContext(ctx, `DELETE FROM targets WHERE id=?`, id)
+	tx, err := s.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin delete target %d: %w", id, err)
+	}
+	defer tx.Rollback()
+
+	before, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
+	}
+	if err != nil {
+		return fmt.Errorf("read target %d before delete: %w", id, err)
+	}
+
+	res, err := tx.ExecContext(ctx, `DELETE FROM targets WHERE id=?`, id)
 	if err != nil {
 		return fmt.Errorf("delete target %d: %w", id, err)
 	}
-	return requireAffected(res)
+	if err := requireAffected(res); err != nil {
+		return err
+	}
+	if err := insertRevision(ctx, tx, id, "delete", before); err != nil {
+		return fmt.Errorf("insert delete revision for target %d: %w", id, err)
+	}
+
+	return tx.Commit()
 }
 
 // requireAffected turns a zero-row Exec into ErrNotFound.

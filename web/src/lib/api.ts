@@ -217,6 +217,33 @@ export const testTargetOptions = (engine: string, options: Record<string, unknow
 export const listOoklaServers = (q: string) =>
   request<OoklaServer[]>(`/ookla/servers${query({ q })}`);
 
+export type RevisionAction = 'create' | 'update' | 'delete' | 'revert' | 'restore';
+
+export interface TargetRevision {
+  version: number;
+  action: RevisionAction;
+  created_at: string;
+  snapshot: Target;
+  changed: string[];
+}
+
+export interface DeletedTarget {
+  id: number;
+  name: string;
+  engine: string;
+  lane: string;
+  deleted_at: string;
+  version: number;
+}
+
+export const listTargetRevisions = (id: number) =>
+  request<TargetRevision[]>(`/targets/${id}/revisions`);
+export const revertTargetRevision = (id: number, version: number) =>
+  request<Target>(`/targets/${id}/revisions/${version}/revert`, { method: 'POST' });
+export const listDeletedTargets = () => request<DeletedTarget[]>('/targets/deleted');
+export const restoreTarget = (id: number) =>
+  request<Target>(`/targets/deleted/${id}/restore`, { method: 'POST' });
+
 export const listResults = (filters: ResultFilters, cursor?: string) =>
   request<ResultsPage>(`/results${query({ ...filters, cursor, limit: filters.limit ?? 50 })}`);
 export const deleteResult = (id: number) =>

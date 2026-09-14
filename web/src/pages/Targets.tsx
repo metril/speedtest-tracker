@@ -1,11 +1,70 @@
 import { useState } from 'react';
 import { TargetForm } from '../features/targets/TargetForm';
+import { HistoryDialog } from '../features/targets/HistoryDialog';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { Target, TargetInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import {
-  useCreateTarget, useDeleteTarget, useRunTarget, useTargets, useUpdateTarget,
+  useCreateTarget, useDeletedTargets, useDeleteTarget, useRestoreTarget, useRunTarget,
+  useTargets, useUpdateTarget,
 } from '../lib/queries';
+
+/** RecentlyDeleted lists targets whose most recent history entry is a
+ * delete, with a Restore action. Stays collapsed (no expand affordance)
+ * while the list is empty. */
+function RecentlyDeleted() {
+  const deleted = useDeletedTargets();
+  const restore = useRestoreTarget();
+  const [expanded, setExpanded] = useState(false);
+  const count = deleted.data?.length ?? 0;
+
+  return (
+    <section className="grid gap-2">
+      <button
+        type="button"
+        className="flex items-center gap-1 text-left text-sm font-medium text-muted disabled:opacity-60"
+        onClick={() => setExpanded((e) => !e)}
+        disabled={count === 0}
+      >
+        <span>{expanded ? '▾' : '▸'}</span>
+        Recently deleted{count > 0 ? ` (${count})` : ''}
+      </button>
+
+      {expanded && count > 0 && (
+        <table className="w-full border-collapse text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs uppercase tracking-wide text-faint">
+              <th className="py-2 pr-3 font-medium">Name</th>
+              <th className="py-2 pr-3 font-medium">Engine</th>
+              <th className="py-2 pr-3 font-medium">Lane</th>
+              <th className="py-2 pr-3 font-medium">Deleted</th>
+              <th className="py-2 text-right font-medium">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {deleted.data!.map((d) => (
+              <tr key={d.id} className="border-b border-line">
+                <td className="py-2 pr-3 text-fg">{d.name}</td>
+                <td className="py-2 pr-3 text-muted">{d.engine}</td>
+                <td className="py-2 pr-3 text-muted">{d.lane}</td>
+                <td className="py-2 pr-3 text-muted">{new Date(d.deleted_at).toLocaleString()}</td>
+                <td className="py-2 text-right">
+                  <button
+                    className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
+                    disabled={restore.isPending}
+                    onClick={() => restore.mutate(d.id)}
+                  >
+                    {restore.isPending ? 'Restoring…' : 'Restore'}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </section>
+  );
+}
 
 type Editing = { mode: 'none' } | { mode: 'new' } | { mode: 'edit'; target: Target };
 
@@ -119,6 +178,7 @@ export function Targets() {
                     >
                       Edit
                     </button>
+                    <HistoryDialog target={t} />
                     <button
                       className="rounded border border-bad px-2 py-1 text-xs text-bad hover:bg-bad/20"
                       onClick={() => {
@@ -136,6 +196,8 @@ export function Targets() {
           </tbody>
         </table>
       )}
+
+      <RecentlyDeleted />
     </section>
   );
 }

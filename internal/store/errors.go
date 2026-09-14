@@ -12,3 +12,7 @@ var ErrInvalidTransition = errors.New("store: invalid run status transition")
 
 // ErrNameConflict reports a UNIQUE constraint violation on a name column.
 var ErrNameConflict = errors.New("store: name already exists")
+
+// ErrIDConflict is returned by RestoreTarget when a live row already
+// occupies the id being restored.
+var ErrIDConflict = errors.New("store: id already exists")
