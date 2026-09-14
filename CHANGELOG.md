@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.0](https://github.com/metril/speedtest-tracker/compare/v0.4.0...v0.5.0) (2026-09-14)
+
+
+### Features
+
+* **web:** replace iperf3 advanced disclosure with a Custom toggle ([47b3241](https://github.com/metril/speedtest-tracker/commit/47b32418c232167827c6fd52acaf17072fda344a))
+* **web:** share a TimezoneSelect between General settings and schedules ([0ca8cb2](https://github.com/metril/speedtest-tracker/commit/0ca8cb233e8746cb721a01a4ff792478de51ed57))
+
+
+### Bug Fixes
+
+* **web:** drop fake engine from user-facing dropdowns ([9795de6](https://github.com/metril/speedtest-tracker/commit/9795de67045cae813e165310707b3d1f9cf5b3c0))
+* **web:** fall back off crypto.randomUUID for non-secure origins ([2971dcf](https://github.com/metril/speedtest-tracker/commit/2971dcf2670e6b514791c13f40471ef087567a61))
+* **web:** review follow-ups for form/button consistency ([7bae073](https://github.com/metril/speedtest-tracker/commit/7bae073233c5af034074a30d7c90bce9c1396cc3))
+
 ## [0.4.0](https://github.com/metril/speedtest-tracker/compare/v0.3.0...v0.4.0) (2026-09-14)
 
 
