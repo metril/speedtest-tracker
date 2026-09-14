@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -122,5 +123,85 @@ func TestPutSettingsOnlyTouchesProvidedSections(t *testing.T) {
 	g, _ := st.General(ctx)
 	if g.Units != "MB/s" {
 		t.Fatalf("units = %q", g.Units)
+	}
+}
+
+func TestSettingsTestVMProbesHealth(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		if r.Header.Get("Authorization") != "Bearer tok" {
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMURL, srv.URL)
+	st.Set(ctx, settings.KeyVMAuthHeader, "Bearer tok")
+
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	var body struct {
+		OK     bool   `json:"ok"`
+		Status int    `json:"status"`
+		Error  string `json:"error"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if !body.OK || body.Status != 200 {
+		t.Fatalf("probe = %+v", body)
+	}
+	if path != "/health" {
+		t.Fatalf("probed %q, want /health", path)
+	}
+}
+
+func TestSettingsTestUsesBodyURLAndKeepsStoredSecret(t *testing.T) {
+	var auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, st := newTestAPIWithSettings(t)
+	st.Set(context.Background(), settings.KeyVLAuthHeader, "Bearer stored")
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vl", map[string]any{
+		"url": srv.URL, "auth_header": settings.MaskedSecret,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d", rec.Code)
+	}
+	if auth != "Bearer stored" {
+		t.Fatalf("auth = %q, want the stored secret", auth)
+	}
+}
+
+func TestSettingsTestReportsUnreachable(t *testing.T) {
+	h, _, _ := newTestAPIWithSettings(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{"url": "http://127.0.0.1:1"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("an unreachable endpoint is still a successful API call, got %d", rec.Code)
+	}
+	var body struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.OK || body.Error == "" {
+		t.Fatalf("probe = %+v", body)
+	}
+}
+
+func TestSettingsTestRejectsUnknownTargetAndBadURL(t *testing.T) {
+	h, _, _ := newTestAPIWithSettings(t)
+	if rec := do(t, h, http.MethodPost, "/api/v1/settings/test/notify", map[string]any{}); rec.Code != http.StatusNotFound {
+		t.Fatalf("unknown target = %d, want 404", rec.Code)
+	}
+	if rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{"url": "ftp://x"}); rec.Code != http.StatusBadRequest {
+		t.Fatalf("bad url = %d, want 400", rec.Code)
 	}
 }

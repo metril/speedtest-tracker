@@ -61,6 +61,11 @@ type Deps struct {
 	// /api/v1/settings. Optional: nil means those routes are not mounted.
 	Settings *settings.Store
 
+	// TestClient is the HTTP client used to probe VM/VL endpoints for
+	// POST /api/v1/settings/test/{target}. Optional: nil means a client
+	// with a probeTimeout timeout is used.
+	TestClient *http.Client
+
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
 }
@@ -166,6 +171,7 @@ func New(deps Deps) http.Handler {
 		if deps.Settings != nil {
 			v1.Get("/settings", deps.getSettings)
 			v1.Put("/settings", deps.putSettings)
+			v1.Post("/settings/test/{target}", deps.testIntegration)
 		}
 	})
 

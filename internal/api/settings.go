@@ -4,13 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"regexp"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
+
+// probeTimeout bounds a settings connection test. It is short on purpose:
+// the user is staring at a spinner in the Settings form.
+const probeTimeout = 5 * time.Second
 
 // settingsKeyPattern matches a valid Prometheus/Loki-style label or field
 // name: a leading letter or underscore, then letters, digits or
@@ -336,4 +342,80 @@ func validateKeys(m map[string]string, reserved map[string]bool) error {
 		}
 	}
 	return nil
+}
+
+// testIntegration probes the configured VictoriaMetrics or VictoriaLogs
+// endpoint with GET /health. A reachable-but-unhappy endpoint is reported
+// in the body with ok=false rather than as an HTTP error, so the form can
+// show the reason inline.
+func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
+	target := chi.URLParam(r, "target")
+	if target != "vm" && target != "vl" {
+		errNotFound(w, "unknown test target "+target)
+		return
+	}
+	var body struct {
+		URL        *string `json:"url"`
+		AuthHeader *string `json:"auth_header"`
+	}
+	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+		return
+	}
+	cur, err := d.Settings.Integrations(r.Context())
+	if err != nil {
+		internalError(w, d.Logger, "load integrations", err)
+		return
+	}
+	rawURL, auth := cur.VMURL, cur.VMAuthHeader
+	if target == "vl" {
+		rawURL, auth = cur.VLURL, cur.VLAuthHeader
+	}
+	if body.URL != nil {
+		rawURL = *body.URL
+	}
+	if body.AuthHeader != nil && *body.AuthHeader != settings.MaskedSecret {
+		auth = *body.AuthHeader
+	}
+	if err := validateEndpointURL(rawURL, true); err != nil {
+		errBadRequest(w, err.Error())
+		return
+	}
+
+	client := d.TestClient
+	if client == nil {
+		client = &http.Client{Timeout: probeTimeout}
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL+"/health", nil)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+
+	start := time.Now()
+	resp, err := client.Do(req)
+	if err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	latency := time.Since(start)
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"ok":    false,
+			"error": fmt.Sprintf("GET /health returned %d", resp.StatusCode),
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"ok":         true,
+		"status":     resp.StatusCode,
+		"latency_ms": latency.Milliseconds(),
+	})
 }
