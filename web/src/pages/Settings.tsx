@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../components/LabelsEditor';
+import { SwitchField } from '../components/SwitchField';
 import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
 import { ChannelEditor } from '../features/settings/ChannelEditor';
 import { Iperf3ServerListSection } from '../features/settings/Iperf3ServerListSection';
@@ -292,16 +293,16 @@ export function Settings() {
             <Input id="engines-iperf3-bin" value={engines.iperf3_bin}
               onChange={(e) => setEngines({ ...engines, iperf3_bin: e.target.value })} />
           </div>
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={engines.ookla_accept_license}
-              onChange={(e) => setEngines({ ...engines, ookla_accept_license: e.target.checked })} />
-            Accept Ookla license
-          </label>
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={engines.ookla_accept_gdpr}
-              onChange={(e) => setEngines({ ...engines, ookla_accept_gdpr: e.target.checked })} />
-            Accept Ookla GDPR terms
-          </label>
+          <SwitchField
+            id="engines-ookla-accept-license" label="Accept Ookla license"
+            checked={engines.ookla_accept_license}
+            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_license: checked })}
+          />
+          <SwitchField
+            id="engines-ookla-accept-gdpr" label="Accept Ookla GDPR terms"
+            checked={engines.ookla_accept_gdpr}
+            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_gdpr: checked })}
+          />
           <div className={fieldClass}>
             <label htmlFor="engines-ttl" className={labelClass}>Server list TTL (seconds)</label>
             <Input id="engines-ttl" type="number" min={1}
@@ -329,11 +330,11 @@ export function Settings() {
           error={errors.integrations} saved={saved.integrations}
           onSave={() => save('integrations', { integrations })}
         >
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={integrations.vm_enabled}
-              onChange={(e) => setIntegrations({ ...integrations, vm_enabled: e.target.checked })} />
-            Enable VictoriaMetrics
-          </label>
+          <SwitchField
+            id="vm-enabled" label="Enable VictoriaMetrics"
+            checked={integrations.vm_enabled}
+            onCheckedChange={(checked) => setIntegrations({ ...integrations, vm_enabled: checked })}
+          />
           <div className={fieldClass}>
             <label htmlFor="vm-url" className={labelClass}>VictoriaMetrics URL</label>
             <Input id="vm-url" value={integrations.vm_url}
@@ -360,11 +361,11 @@ export function Settings() {
             )}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={integrations.vl_enabled}
-              onChange={(e) => setIntegrations({ ...integrations, vl_enabled: e.target.checked })} />
-            Enable VictoriaLogs
-          </label>
+          <SwitchField
+            id="vl-enabled" label="Enable VictoriaLogs"
+            checked={integrations.vl_enabled}
+            onCheckedChange={(checked) => setIntegrations({ ...integrations, vl_enabled: checked })}
+          />
           <div className={fieldClass}>
             <label htmlFor="vl-url" className={labelClass}>VictoriaLogs URL</label>
             <Input id="vl-url" value={integrations.vl_url}
@@ -391,12 +392,12 @@ export function Settings() {
             )}
           </div>
 
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={integrations.metrics_enabled}
-              onChange={(e) => setIntegrations({ ...integrations, metrics_enabled: e.target.checked })} />
-            Enable /metrics endpoint
-          </label>
-          <p className="text-sm text-faint">/metrics answers 404 while disabled</p>
+          <SwitchField
+            id="metrics-enabled" label="Enable /metrics endpoint"
+            hint="/metrics answers 404 while disabled"
+            checked={integrations.metrics_enabled}
+            onCheckedChange={(checked) => setIntegrations({ ...integrations, metrics_enabled: checked })}
+          />
         </Section>
 
         <Section
@@ -404,12 +405,12 @@ export function Settings() {
           error={errors.notifications} saved={saved.notifications}
           onSave={saveNotifications}
         >
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={notifications.enabled}
-              onChange={(e) => setNotifications({ ...notifications, enabled: e.target.checked })} />
-            Enabled
-          </label>
-          <p className="text-sm text-faint">Nothing is delivered while this is off.</p>
+          <SwitchField
+            id="notifications-enabled" label="Enabled"
+            hint="Nothing is delivered while this is off."
+            checked={notifications.enabled}
+            onCheckedChange={(checked) => setNotifications({ ...notifications, enabled: checked })}
+          />
 
           <div className="grid gap-3">
             {notifications.channels.map((channel) => (
@@ -445,11 +446,11 @@ export function Settings() {
               value={notifications.quiet_hours_end}
               onChange={(e) => setNotifications({ ...notifications, quiet_hours_end: e.target.value })} />
           </div>
-          <label className="flex items-center gap-2 text-sm text-muted">
-            <input type="checkbox" checked={notifications.notify_recovery}
-              onChange={(e) => setNotifications({ ...notifications, notify_recovery: e.target.checked })} />
-            Send recovery notifications
-          </label>
+          <SwitchField
+            id="notifications-notify-recovery" label="Send recovery notifications"
+            checked={notifications.notify_recovery}
+            onCheckedChange={(checked) => setNotifications({ ...notifications, notify_recovery: checked })}
+          />
 
           <div className="grid gap-2">
             <h3 className="text-sm font-semibold text-fg">Default thresholds</h3>

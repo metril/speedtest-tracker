@@ -1,6 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
+import { SwitchField } from '../../components/SwitchField';
 import type { NotifyChannel, NotifyChannelType } from '../../lib/api';
 import { fieldClass, inputClass, labelClass } from './styles';
 
@@ -47,11 +48,11 @@ export function ChannelEditor({
         </select>
       </div>
 
-      <div className="flex items-center gap-2 text-sm text-muted">
-        <input id={`channel-${id}-enabled`} type="checkbox" checked={value.enabled}
-          onChange={(e) => onChange({ ...value, enabled: e.target.checked })} />
-        <label htmlFor={`channel-${id}-enabled`}>Enabled</label>
-      </div>
+      <SwitchField
+        id={`channel-${id}-enabled`} label="Enabled"
+        checked={value.enabled}
+        onCheckedChange={(checked) => onChange({ ...value, enabled: checked })}
+      />
 
       <div className={fieldClass}>
         <label htmlFor={`channel-${id}-url`} className={labelClass}>URL</label>

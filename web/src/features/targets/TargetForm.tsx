@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SwitchField } from '../../components/SwitchField';
 import type { Target, TargetInput, ThresholdSet } from '../../lib/api';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
 import { ThresholdFields, validateThresholds } from './ThresholdFields';
@@ -68,11 +69,9 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
         </div>
       </div>
 
-      <label className="flex w-fit items-center gap-2 text-sm text-muted" htmlFor="target-enabled">
-        <input id="target-enabled" type="checkbox" checked={enabled}
-          onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled
-      </label>
+      <div className="w-fit">
+        <SwitchField id="target-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
+      </div>
 
       <div className="border-t border-line pt-3">
         <EngineOptionFields engine={engine} options={options} onChange={setOptions} />

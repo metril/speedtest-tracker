@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { SwitchField } from '../../components/SwitchField';
 import type { Schedule, ScheduleInput, Target } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { useCronPreview } from '../../lib/queries';
@@ -138,10 +139,7 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
         <TargetPicker targets={targets} selected={selected} onChange={setSelected} />
       </fieldset>
 
-      <label className="flex items-center gap-2 text-sm text-muted">
-        <input type="checkbox" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />
-        Enabled
-      </label>
+      <SwitchField id="schedule-enabled" label="Enabled" checked={enabled} onCheckedChange={setEnabled} />
 
       {(localError || error) && <p className="text-sm text-bad">{localError || error}</p>}
 

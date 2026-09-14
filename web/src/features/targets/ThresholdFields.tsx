@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { SwitchField } from '../../components/SwitchField';
 import type { ThresholdSet } from '../../lib/api';
 
 interface Props {
@@ -75,20 +76,18 @@ export function ThresholdFields({ value, onChange }: Props) {
           </div>
         ))}
       </div>
-      <label className="flex w-fit items-center gap-2 text-sm text-muted" htmlFor="threshold-notify-on-failure">
-        <input
-          id="threshold-notify-on-failure"
-          type="checkbox"
+      <div className="w-fit">
+        <SwitchField
+          id="threshold-notify-on-failure" label="Notify on failed test"
           checked={value.notify_on_failure === true}
-          onChange={(e) => {
+          onCheckedChange={(checked) => {
             const next: ThresholdSet = { ...value };
-            if (e.target.checked) next.notify_on_failure = true;
+            if (checked) next.notify_on_failure = true;
             else delete next.notify_on_failure;
             onChange(next);
           }}
         />
-        Notify on failed test
-      </label>
+      </div>
     </div>
   );
 }

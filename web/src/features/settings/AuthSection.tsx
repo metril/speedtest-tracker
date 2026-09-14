@@ -1,3 +1,4 @@
+import { SwitchField } from '../../components/SwitchField';
 import type { AuthMode, AuthSettings } from '../../lib/api';
 import { LockedBadge } from './LockedBadge';
 import { fieldClass, inputClass, labelClass } from './styles';
@@ -103,12 +104,14 @@ export function AuthSection({ value, locked, onChange }: Props) {
 
       {value.mode === 'forward_auth' && (
         <div className="flex items-center gap-2">
-          <label className="flex items-center gap-2 text-sm text-muted" htmlFor="auth-allow-tokens">
-            <input id="auth-allow-tokens" type="checkbox" checked={value.allow_tokens}
+          <div className="flex-1">
+            <SwitchField
+              id="auth-allow-tokens" label="Accept API tokens as well"
+              checked={value.allow_tokens}
               disabled={isLocked('auth.allow_tokens')}
-              onChange={(e) => onChange({ ...value, allow_tokens: e.target.checked })} />
-            Accept API tokens as well
-          </label>
+              onCheckedChange={(checked) => onChange({ ...value, allow_tokens: checked })}
+            />
+          </div>
           {isLocked('auth.allow_tokens') && <LockedBadge />}
         </div>
       )}

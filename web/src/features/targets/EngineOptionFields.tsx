@@ -3,6 +3,7 @@ import { useIperf3Servers, useOoklaServers } from '../../lib/queries';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
+import { Checkbox } from '@/components/ui/checkbox';
 
 export type Options = Record<string, unknown>;
 
@@ -434,13 +435,13 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
           happened, disabling both here would make it impossible to ever
           uncheck either one. */}
       <label className="flex items-center gap-2 text-sm text-muted" htmlFor="iperf-reverse">
-        <input id="iperf-reverse" type="checkbox" checked={reverseOn} disabled={bidirOn && !reverseOn}
-          onChange={(e) => onChange(setOption(options, 'reverse', e.target.checked))} />
+        <Checkbox id="iperf-reverse" checked={reverseOn} disabled={bidirOn && !reverseOn}
+          onCheckedChange={(checked) => onChange(setOption(options, 'reverse', checked === true))} />
         Reverse (-R)
       </label>
       <label className="flex items-center gap-2 text-sm text-muted" htmlFor="iperf-bidir">
-        <input id="iperf-bidir" type="checkbox" checked={bidirOn} disabled={(reverseOn && !bidirOn) || isUdp}
-          onChange={(e) => onChange(setOption(options, 'bidir', e.target.checked))} />
+        <Checkbox id="iperf-bidir" checked={bidirOn} disabled={(reverseOn && !bidirOn) || isUdp}
+          onCheckedChange={(checked) => onChange(setOption(options, 'bidir', checked === true))} />
         Bidirectional (--bidir)
       </label>
     </div>

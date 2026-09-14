@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { Checkbox } from '@/components/ui/checkbox';
 import type { Target } from '../../lib/api';
 
 interface Props {
@@ -124,9 +125,9 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
           return (
             <li key={t.id}>
               <label htmlFor={id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1 text-sm hover:bg-surface">
-                <input
-                  id={id} type="checkbox" checked={selectedSet.has(t.id)}
-                  onChange={() => toggleTarget(t.id)}
+                <Checkbox
+                  id={id} checked={selectedSet.has(t.id)}
+                  onCheckedChange={() => toggleTarget(t.id)}
                 />
                 <span className="flex-1 text-fg">{t.name}</span>
                 <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs uppercase text-muted">{t.engine}</span>
