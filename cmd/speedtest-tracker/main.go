@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/api"
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/config"
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
@@ -90,6 +91,72 @@ func healthcheck(listen string) error {
 	return nil
 }
 
+// storeTokens adapts *store.Store to auth.TokenLookup so internal/auth
+// never imports internal/store.
+type storeTokens struct{ db *store.Store }
+
+func (s storeTokens) LookupToken(ctx context.Context, hash string) (int64, bool, error) {
+	t, ok, err := s.db.APITokenByHash(ctx, hash)
+	return t.ID, ok, err
+}
+
+func (s storeTokens) TouchToken(ctx context.Context, id int64) error { return s.db.TouchAPIToken(ctx, id) }
+
+// authConfigurer is the subset of *auth.Middleware that applyAuth needs.
+// It exists so authAdapter (below) can also satisfy it: *auth.Middleware
+// has no way to report its own configured mode, so production code routes
+// every Configure call through authAdapter, which remembers the mode
+// alongside delegating to the real middleware.
+type authConfigurer interface {
+	Configure(settings.Auth) error
+}
+
+// authAdapter implements api.Authenticator over *auth.Middleware, tracking
+// the last successfully configured mode so GET /api/v1/me can answer
+// without a second settings read.
+type authAdapter struct {
+	mw   *auth.Middleware
+	mode atomic.Value // string
+}
+
+func newAuthAdapter(mw *auth.Middleware) *authAdapter {
+	a := &authAdapter{mw: mw}
+	a.mode.Store(settings.AuthModeOpen)
+	return a
+}
+
+func (a *authAdapter) Handler(next http.Handler) http.Handler { return a.mw.Handler(next) }
+
+func (a *authAdapter) Mode() string {
+	mode, _ := a.mode.Load().(string)
+	return mode
+}
+
+func (a *authAdapter) Configure(cfg settings.Auth) error {
+	if err := a.mw.Configure(cfg); err != nil {
+		return err
+	}
+	a.mode.Store(cfg.Mode)
+	return nil
+}
+
+// applyAuth pushes the stored Auth section into the live auth middleware.
+// It mirrors applyIntegrations/applyNotifications: called once at startup
+// and again on every auth.* settings change. On a bad CIDR, m.Configure
+// leaves the previously applied configuration in place and this returns
+// the wrapped error, so the caller decides whether that is fatal.
+func applyAuth(ctx context.Context, st *settings.Store, m authConfigurer, logger *slog.Logger) error {
+	a, err := st.Auth(ctx)
+	if err != nil {
+		return err
+	}
+	if err := m.Configure(a); err != nil {
+		return fmt.Errorf("configure auth: %w", err)
+	}
+	logger.Debug("auth applied", "mode", a.Mode)
+	return nil
+}
+
 // parseLevel maps a settings log level string onto a slog.Level,
 // defaulting to info for anything unrecognised.
 func parseLevel(s string) slog.Level {
@@ -117,7 +184,7 @@ func parseLevel(s string) slog.Level {
 // never race the notification past a subscriber that isn't listening yet.
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
-	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, metricsEnabled *atomic.Bool, logger *slog.Logger) {
+	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, metricsEnabled *atomic.Bool, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -169,6 +236,12 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 					continue
 				}
 				logger.Info("integrations reloaded", "changed_key", key)
+			case strings.HasPrefix(key, "auth."):
+				if err := applyAuth(ctx, st, am, logger); err != nil {
+					logger.Error("reload auth", "error", err)
+					continue
+				}
+				logger.Info("auth reloaded", "changed_key", key)
 			}
 		}
 	}
@@ -229,6 +302,21 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	if err != nil {
 		return err
 	}
+
+	// Seed the settings table from ST_<SECTION>_<KEY> env vars before
+	// anything reads a setting: a mistyped ST_ value must abort startup
+	// rather than boot with a half-applied config. Values are logged as
+	// key names only, never the values themselves.
+	locked, err := st.SeedFromEnv(ctx, os.Environ())
+	if err != nil {
+		return fmt.Errorf("seed settings from env: %w", err)
+	}
+	if len(locked) > 0 {
+		logger.Info("settings seeded from env", "locked_count", len(locked), "locked_keys", locked)
+	} else {
+		logger.Info("settings seeded from env", "locked_count", 0)
+	}
+
 	general, err := st.General(ctx)
 	if err != nil {
 		return err
@@ -267,6 +355,19 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	}()
 	if err := applyNotifications(ctx, st, nt, logger); err != nil {
 		return err
+	}
+
+	authMW := auth.New(logger, storeTokens{db}, time.Now)
+	am := newAuthAdapter(authMW)
+	// Apply the stored auth config once at boot, but log and continue on
+	// error rather than aborting: a bad stored CIDR (e.g. hand-edited in
+	// the DB) must not make the instance unbootable. authAdapter starts
+	// in open mode, which is the safe-to-serve fallback only because the
+	// stored config was never successfully applied yet; once applyAuth
+	// has succeeded at least once, a later failure (from watchSettings)
+	// instead keeps whatever config was last successfully applied.
+	if err := applyAuth(ctx, st, am, logger); err != nil {
+		logger.Error("apply auth settings", "error", err)
 	}
 
 	engineCfg, err := st.Engines(ctx)
@@ -334,7 +435,11 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
-	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, &metricsEnabled, logger)
+	watchDone := make(chan struct{})
+	go func() {
+		defer close(watchDone)
+		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, &metricsEnabled, logger)
+	}()
 	go pj.Run(watchCtx)
 
 	srv := &http.Server{
@@ -355,6 +460,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			Metrics:         m,
 			MetricsHandler:  m.Handler(),
 			MetricsEnabled:  metricsEnabled.Load,
+			Auth:            am,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -381,6 +487,13 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			logger.Error("http shutdown", "error", err)
 		}
 		stopWatch()
+		watchTimeout, cancelWatch := context.WithTimeout(context.Background(), 5*time.Second)
+		select {
+		case <-watchDone:
+		case <-watchTimeout.Done():
+			logger.Warn("watchSettings did not stop before shutdown timeout")
+		}
+		cancelWatch()
 		schedCtx, cancelSched := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancelSched()
 		if err := sch.Stop(schedCtx); err != nil {

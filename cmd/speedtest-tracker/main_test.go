@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/fake"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
@@ -25,6 +26,29 @@ import (
 	"github.com/metril/speedtest-tracker/internal/vlpush"
 	"github.com/metril/speedtest-tracker/internal/vmpush"
 )
+
+// noTokens is a TokenLookup that never matches, for tests that only care
+// about non-token auth modes.
+type noTokens struct{}
+
+func (noTokens) LookupToken(context.Context, string) (int64, bool, error) { return 0, false, nil }
+func (noTokens) TouchToken(context.Context, int64) error                  { return nil }
+
+// newTestSettings builds a settings.Store backed by a fresh temp-file
+// database, closed automatically at test cleanup.
+func newTestSettings(t *testing.T) *settings.Store {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "settings.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	st, err := settings.New(context.Background(), db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return st
+}
 
 // freePort asks the OS for an unused port.
 func freePort(t *testing.T) string {
@@ -158,10 +182,12 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 	nt.Start()
 	defer nt.Close(context.Background())
 
+	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
+
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, &metricsEnabled, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -302,5 +328,145 @@ func TestApplyIntegrationsConfiguresClients(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("applyIntegrations did not enable the VM writer")
+	}
+}
+
+func TestApplyAuthReadsTheSettingsSection(t *testing.T) {
+	st := newTestSettings(t)
+	ctx := context.Background()
+	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeForward); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set(ctx, settings.KeyAuthTrustedProxies, []string{"10.0.0.0/8"}); err != nil {
+		t.Fatal(err)
+	}
+	m := auth.New(slog.Default(), noTokens{}, time.Now)
+	if err := applyAuth(ctx, st, m, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+
+	// auth.Middleware has no way to report its own mode, so exercise the
+	// applied config through Identify: a trusted-proxy forward-auth
+	// request only succeeds once the forward_auth section (mode, trusted
+	// proxies, default headers) has actually been configured.
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	req.RemoteAddr = "10.1.2.3:5555"
+	req.Header.Set("Remote-User", "alice")
+	id, err := m.Identify(req)
+	if err != nil || id.User != "alice" || id.Mode != settings.AuthModeForward {
+		t.Fatalf("identify = %+v, %v; want forward-auth mode applied from settings", id, err)
+	}
+}
+
+func TestApplyAuthKeepsPreviousConfigOnBadCIDR(t *testing.T) {
+	st := newTestSettings(t)
+	ctx := context.Background()
+	m := auth.New(slog.Default(), noTokens{}, time.Now)
+	if err := applyAuth(ctx, st, m, slog.Default()); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set(ctx, settings.KeyAuthTrustedProxies, []string{"garbage"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := applyAuth(ctx, st, m, slog.Default()); err == nil {
+		t.Fatal("want an error for an unparseable CIDR")
+	}
+
+	id, err := m.Identify(httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil))
+	if err != nil || id.Mode != settings.AuthModeOpen || !id.IsAdmin {
+		t.Fatalf("identify = %+v, %v; want the instance to keep serving under the previous (open) config", id, err)
+	}
+}
+
+func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "watch-auth.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := settings.New(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	level := new(slog.LevelVar)
+	reg := engine.NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	servers := ookla.NewServerList("speedtest", time.Hour)
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(), Logger: logger}), Logger: logger})
+	vm := vmpush.New(vmpush.Config{})
+	vm.Start()
+	defer vm.Close(context.Background())
+	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
+	vl.Start()
+	defer vl.Close(context.Background())
+	nt := notify.New(notify.Config{Store: db, Logger: logger})
+	nt.Start()
+	defer nt.Close(context.Background())
+	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
+
+	changes, unsubscribe := st.Subscribe()
+	defer unsubscribe()
+	var metricsEnabled atomic.Bool
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
+
+	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeToken); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for am.Mode() != settings.AuthModeToken && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if am.Mode() != settings.AuthModeToken {
+		t.Errorf("mode = %q, want %q", am.Mode(), settings.AuthModeToken)
+	}
+}
+
+func TestWatchSettingsStopsOnContextCancel(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "watch-cancel.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	st, err := settings.New(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	level := new(slog.LevelVar)
+	reg := engine.NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	servers := ookla.NewServerList("speedtest", time.Hour)
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(), Logger: logger}), Logger: logger})
+	vm := vmpush.New(vmpush.Config{})
+	vm.Start()
+	defer vm.Close(context.Background())
+	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
+	vl.Start()
+	defer vl.Close(context.Background())
+	nt := notify.New(notify.Config{Store: db, Logger: logger})
+	nt.Start()
+	defer nt.Close(context.Background())
+	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
+
+	changes, unsubscribe := st.Subscribe()
+	defer unsubscribe()
+	var metricsEnabled atomic.Bool
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, logger)
+	}()
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("watchSettings did not stop after context cancel")
 	}
 }
