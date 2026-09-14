@@ -6,6 +6,7 @@ import { ChannelEditor } from '../features/settings/ChannelEditor';
 import {
   buttonClass, fieldClass, inputClass, labelClass,
 } from '../features/settings/styles';
+import { TokenPanel } from '../features/settings/TokenPanel';
 import { ThresholdFields, validateThresholds } from '../features/targets/ThresholdFields';
 import type {
   AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
@@ -202,6 +203,15 @@ export function Settings() {
           onSave={saveAuth}
         >
           <AuthSection value={auth} locked={settings.data?.locked ?? []} onChange={setAuth} />
+
+          <div className="grid gap-2 border-t border-line pt-4">
+            <h3 className="text-sm font-semibold text-fg">API tokens</h3>
+            <p className="text-sm text-faint">
+              Send a token as <code>Authorization: Bearer &lt;token&gt;</code>. The live-events
+              stream also accepts <code>?token=</code>.
+            </p>
+            <TokenPanel />
+          </div>
         </Section>
 
         <Section
