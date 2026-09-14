@@ -1,5 +1,5 @@
 // Package settings is a typed accessor over the settings table, with
-// General and Engines sections implemented and Auth, Integrations and
+// General, Engines and Integrations sections implemented and Auth and
 // Notifications arriving in later milestones.
 package settings
 
@@ -16,31 +16,42 @@ import (
 
 // General is the General settings section.
 type General struct {
-	BaseURL              string `json:"base_url"`
-	Timezone             string `json:"timezone"`
-	Units                string `json:"units"`
-	LogLevel             string `json:"log_level"`
-	RetentionDaysResults int    `json:"retention_days_results"`
-	RetentionDaysRuns    int    `json:"retention_days_runs"`
+	BaseURL                       string `json:"base_url"`
+	Timezone                      string `json:"timezone"`
+	Units                         string `json:"units"`
+	LogLevel                      string `json:"log_level"`
+	RetentionDaysResults          int    `json:"retention_days_results"`
+	RetentionDaysRuns             int    `json:"retention_days_runs"`
+	RetentionPruneIntervalMinutes int    `json:"retention_prune_interval_minutes"`
 }
 
 // Keys of the General section.
 const (
-	KeyBaseURL              = "general.base_url"
-	KeyTimezone             = "general.timezone"
-	KeyUnits                = "general.units"
-	KeyLogLevel             = "general.log_level"
-	KeyRetentionDaysResults = "general.retention_days_results"
-	KeyRetentionDaysRuns    = "general.retention_days_runs"
+	KeyBaseURL                       = "general.base_url"
+	KeyTimezone                      = "general.timezone"
+	KeyUnits                         = "general.units"
+	KeyLogLevel                      = "general.log_level"
+	KeyRetentionDaysResults          = "general.retention_days_results"
+	KeyRetentionDaysRuns             = "general.retention_days_runs"
+	KeyRetentionPruneIntervalMinutes = "general.retention_prune_interval_minutes"
 )
 
+// MaskedSecret is what the API sends instead of a stored secret, and the
+// sentinel a client sends back to mean "keep the stored value".
+const MaskedSecret = "***"
+
+// New seeds defaults with ON CONFLICT DO NOTHING: a default value change
+// (like the runs-retention default below, raised from 30 to 90) only takes
+// effect for databases created from now on. Existing installs keep whatever
+// value was already stored, seeded or set.
 var defaults = map[string]any{
-	KeyBaseURL:              "",
-	KeyTimezone:             "UTC",
-	KeyUnits:                "Mbps",
-	KeyLogLevel:             "info",
-	KeyRetentionDaysResults: 90,
-	KeyRetentionDaysRuns:    30,
+	KeyBaseURL:                       "",
+	KeyTimezone:                      "UTC",
+	KeyUnits:                         "Mbps",
+	KeyLogLevel:                      "info",
+	KeyRetentionDaysResults:          90,
+	KeyRetentionDaysRuns:             90,
+	KeyRetentionPruneIntervalMinutes: 60,
 
 	KeySpeedtestBin:             "speedtest",
 	KeyIperf3Bin:                "iperf3",
@@ -50,7 +61,44 @@ var defaults = map[string]any{
 	KeyDefaultOoklaOptions:      json.RawMessage(`{}`),
 	KeyDefaultCloudflareOptions: json.RawMessage(`{}`),
 	KeyDefaultIperf3Options:     json.RawMessage(`{}`),
+
+	KeyVMEnabled:      false,
+	KeyVMURL:          "",
+	KeyVMAuthHeader:   "",
+	KeyVMExtraLabels:  map[string]string{},
+	KeyVLEnabled:      false,
+	KeyVLURL:          "",
+	KeyVLAuthHeader:   "",
+	KeyVLStreamFields: map[string]string{},
+	KeyMetricsEnabled: false,
 }
+
+// Integrations is the Integrations settings section: the VictoriaMetrics
+// and VictoriaLogs clients plus the Prometheus /metrics endpoint.
+type Integrations struct {
+	VMEnabled      bool              `json:"vm_enabled"`
+	VMURL          string            `json:"vm_url"`
+	VMAuthHeader   string            `json:"vm_auth_header"`
+	VMExtraLabels  map[string]string `json:"vm_extra_labels"`
+	VLEnabled      bool              `json:"vl_enabled"`
+	VLURL          string            `json:"vl_url"`
+	VLAuthHeader   string            `json:"vl_auth_header"`
+	VLStreamFields map[string]string `json:"vl_stream_fields"`
+	MetricsEnabled bool              `json:"metrics_enabled"`
+}
+
+// Keys of the Integrations section.
+const (
+	KeyVMEnabled      = "integrations.vm_enabled"
+	KeyVMURL          = "integrations.vm_url"
+	KeyVMAuthHeader   = "integrations.vm_auth_header"
+	KeyVMExtraLabels  = "integrations.vm_extra_labels"
+	KeyVLEnabled      = "integrations.vl_enabled"
+	KeyVLURL          = "integrations.vl_url"
+	KeyVLAuthHeader   = "integrations.vl_auth_header"
+	KeyVLStreamFields = "integrations.vl_stream_fields"
+	KeyMetricsEnabled = "integrations.metrics_enabled"
+)
 
 // Engines is the Engines settings section: external binary paths, Ookla
 // consent flags, server-list cache TTL and per-engine default options.
@@ -139,12 +187,13 @@ func (s *Store) Set(ctx context.Context, key string, value any) error {
 func (s *Store) General(ctx context.Context) (General, error) {
 	g := General{}
 	targets := map[string]any{
-		KeyBaseURL:              &g.BaseURL,
-		KeyTimezone:             &g.Timezone,
-		KeyUnits:                &g.Units,
-		KeyLogLevel:             &g.LogLevel,
-		KeyRetentionDaysResults: &g.RetentionDaysResults,
-		KeyRetentionDaysRuns:    &g.RetentionDaysRuns,
+		KeyBaseURL:                       &g.BaseURL,
+		KeyTimezone:                      &g.Timezone,
+		KeyUnits:                         &g.Units,
+		KeyLogLevel:                      &g.LogLevel,
+		KeyRetentionDaysResults:          &g.RetentionDaysResults,
+		KeyRetentionDaysRuns:             &g.RetentionDaysRuns,
+		KeyRetentionPruneIntervalMinutes: &g.RetentionPruneIntervalMinutes,
 	}
 	for key, dest := range targets {
 		raw, ok, err := s.Get(ctx, key)
@@ -198,6 +247,48 @@ func (s *Store) Engines(ctx context.Context) (Engines, error) {
 		}
 	}
 	return e, nil
+}
+
+// Integrations returns the Integrations section, falling back to the seeded
+// defaults for any key that is missing.
+func (s *Store) Integrations(ctx context.Context) (Integrations, error) {
+	var i Integrations
+	for _, f := range []struct {
+		key string
+		dst any
+	}{
+		{KeyVMEnabled, &i.VMEnabled},
+		{KeyVMURL, &i.VMURL},
+		{KeyVMAuthHeader, &i.VMAuthHeader},
+		{KeyVMExtraLabels, &i.VMExtraLabels},
+		{KeyVLEnabled, &i.VLEnabled},
+		{KeyVLURL, &i.VLURL},
+		{KeyVLAuthHeader, &i.VLAuthHeader},
+		{KeyVLStreamFields, &i.VLStreamFields},
+		{KeyMetricsEnabled, &i.MetricsEnabled},
+	} {
+		raw, ok, err := s.Get(ctx, f.key)
+		if err != nil {
+			return Integrations{}, err
+		}
+		if !ok {
+			encoded, err := json.Marshal(defaults[f.key])
+			if err != nil {
+				return Integrations{}, err
+			}
+			raw = encoded
+		}
+		if err := json.Unmarshal(raw, f.dst); err != nil {
+			return Integrations{}, fmt.Errorf("decode %s: %w", f.key, err)
+		}
+	}
+	if i.VMExtraLabels == nil {
+		i.VMExtraLabels = map[string]string{}
+	}
+	if i.VLStreamFields == nil {
+		i.VLStreamFields = map[string]string{}
+	}
+	return i, nil
 }
 
 // Subscribe returns a channel of changed keys and a cancel function. Sends

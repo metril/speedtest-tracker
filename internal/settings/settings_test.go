@@ -42,8 +42,8 @@ func TestNewSeedsGeneralDefaults(t *testing.T) {
 	if g.RetentionDaysResults != 90 {
 		t.Errorf("RetentionDaysResults = %d, want 90", g.RetentionDaysResults)
 	}
-	if g.RetentionDaysRuns != 30 {
-		t.Errorf("RetentionDaysRuns = %d, want 30", g.RetentionDaysRuns)
+	if g.RetentionDaysRuns != 90 {
+		t.Errorf("RetentionDaysRuns = %d, want 90", g.RetentionDaysRuns)
 	}
 }
 
@@ -156,6 +156,60 @@ func TestGeneralFallsBackToDefaultOnMissingKey(t *testing.T) {
 	}
 	if g.Timezone != "UTC" {
 		t.Errorf("Timezone = %q, want the seeded default UTC", g.Timezone)
+	}
+}
+
+func TestIntegrationsDefaults(t *testing.T) {
+	s := newTestStore(t)
+	got, err := s.Integrations(context.Background())
+	if err != nil {
+		t.Fatalf("Integrations: %v", err)
+	}
+	if got.VMEnabled || got.VLEnabled || got.MetricsEnabled {
+		t.Fatalf("integrations default to disabled, got %+v", got)
+	}
+	if got.VMExtraLabels == nil || len(got.VMExtraLabels) != 0 {
+		t.Fatalf("vm_extra_labels = %v, want empty non-nil map", got.VMExtraLabels)
+	}
+	if got.VLStreamFields == nil || len(got.VLStreamFields) != 0 {
+		t.Fatalf("vl_stream_fields = %v, want empty non-nil map", got.VLStreamFields)
+	}
+}
+
+func TestIntegrationsRoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	for key, val := range map[string]any{
+		KeyVMEnabled:     true,
+		KeyVMURL:         "http://vm:8428",
+		KeyVMAuthHeader:  "Bearer tok",
+		KeyVMExtraLabels: map[string]string{"host": "pi4"},
+	} {
+		if err := s.Set(ctx, key, val); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, err := s.Integrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.VMEnabled || got.VMURL != "http://vm:8428" || got.VMAuthHeader != "Bearer tok" ||
+		got.VMExtraLabels["host"] != "pi4" {
+		t.Fatalf("round trip = %+v", got)
+	}
+}
+
+func TestGeneralPruneIntervalDefault(t *testing.T) {
+	s := newTestStore(t)
+	g, err := s.General(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if g.RetentionPruneIntervalMinutes != 60 {
+		t.Fatalf("prune interval = %d, want 60", g.RetentionPruneIntervalMinutes)
+	}
+	if g.RetentionDaysResults != 90 || g.RetentionDaysRuns != 90 {
+		t.Fatalf("retention = %d/%d, want 90/90", g.RetentionDaysResults, g.RetentionDaysRuns)
 	}
 }
 
