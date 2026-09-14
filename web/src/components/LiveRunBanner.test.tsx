@@ -128,6 +128,20 @@ describe('LiveRunBanner', () => {
     expect(screen.queryByText('download')).not.toBeInTheDocument();
   });
 
+  it('exposes an aria-live region and a labeled progressbar', () => {
+    renderBanner();
+    act(() => {
+      FakeEventSource.last!.emit('progress', {
+        run_id: 5, target_id: 2, engine: 'ookla', phase: 'download', progress: 0.4, bps: 1, ping_ms: 1,
+      });
+    });
+    const progress = screen.getByRole('progressbar');
+    expect(progress).toHaveAttribute('aria-valuenow', '40');
+    expect(progress).toHaveAttribute('aria-valuemin', '0');
+    expect(progress).toHaveAttribute('aria-valuemax', '100');
+    expect(progress.closest('[aria-live="polite"]')).not.toBeNull();
+  });
+
   it('disables Cancel once the run is no longer live, even during the grace period', () => {
     renderBanner();
     act(() => {

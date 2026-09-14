@@ -45,13 +45,19 @@ export function LiveRunBanner() {
 
   const pct = Math.round(Math.min(Math.max(display.progress, 0), 1) * 100);
   return (
-    <div className="border-b border-sky-900/60 bg-sky-950/40">
+    <div className="border-b border-sky-900/60 bg-sky-950/40" aria-live="polite">
       <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-2 text-sm">
         <span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-mono text-xs uppercase text-sky-300">
           {display.engine}
         </span>
         <span className="w-24 text-slate-300 capitalize">{display.phase}</span>
-        <div className="h-1 flex-1 overflow-hidden rounded bg-slate-800">
+        <div
+          className="h-1 flex-1 overflow-hidden rounded bg-slate-800"
+          role="progressbar"
+          aria-valuenow={pct}
+          aria-valuemin={0}
+          aria-valuemax={100}
+        >
           <div className="h-full bg-sky-400 transition-[width] duration-150" style={{ width: `${pct}%` }} />
         </div>
         <span className="w-28 text-right font-mono tabular-nums text-slate-100">

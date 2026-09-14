@@ -48,7 +48,7 @@ describe('ResultsTable delete confirmation', () => {
       <ResultsTable rows={[makeResult()]} onDelete={onDelete} onReexecute={vi.fn()} onTag={vi.fn()} />,
     );
 
-    fireEvent.click(screen.getByText('del'));
+    fireEvent.click(screen.getByRole('button', { name: /Delete result for/ }));
 
     expect(window.confirm).toHaveBeenCalled();
     expect(onDelete).not.toHaveBeenCalled();
@@ -61,8 +61,27 @@ describe('ResultsTable delete confirmation', () => {
       <ResultsTable rows={[makeResult({ id: 42 })]} onDelete={onDelete} onReexecute={vi.fn()} onTag={vi.fn()} />,
     );
 
-    fireEvent.click(screen.getByText('del'));
+    fireEvent.click(screen.getByRole('button', { name: /Delete result for/ }));
 
     expect(onDelete).toHaveBeenCalledWith(42);
+  });
+});
+
+describe('ResultsTable accessibility', () => {
+  it('exposes a table/row/cell role structure and labeled action buttons', () => {
+    render(
+      <ResultsTable
+        rows={[makeResult({ id: 7, target_name: 'wan-1' })]}
+        onDelete={vi.fn()}
+        onReexecute={vi.fn()}
+        onTag={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('table', { name: 'Results' })).toBeInTheDocument();
+    expect(screen.getAllByRole('row').length).toBeGreaterThan(1); // header row + data row
+    expect(screen.getAllByRole('cell').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: 'Replay result for wan-1' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Delete result for wan-1' })).toBeInTheDocument();
   });
 });
