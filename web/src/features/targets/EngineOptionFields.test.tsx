@@ -206,7 +206,9 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
 
   it('shows an empty state when there are no hits', () => {
     render(<OoklaResultsList servers={[]} isFetching={false} isError={false} onSelect={vi.fn()} />);
-    expect(screen.getByText('No servers found')).toBeInTheDocument();
+    const empty = screen.getByText('No servers found');
+    expect(empty).toBeInTheDocument();
+    expect(empty).toHaveClass('px-3', 'py-6', 'text-center', 'text-sm', 'text-muted');
   });
 
   it('shows an error state', () => {
@@ -313,7 +315,9 @@ describe('Iperf3ResultsList (tested directly, no Popover)', () => {
 
   it('shows an empty state when there are no hits', () => {
     render(<Iperf3ResultsList servers={[]} isFetching={false} isError={false} onSelect={vi.fn()} />);
-    expect(screen.getByText('No servers found')).toBeInTheDocument();
+    const empty = screen.getByText('No servers found');
+    expect(empty).toBeInTheDocument();
+    expect(empty).toHaveClass('px-3', 'py-6', 'text-center', 'text-sm', 'text-muted');
   });
 
   it('shows an error state', () => {

@@ -170,7 +170,7 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
             onInteractOutside={(e) => {
               if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
             }}
-            className="w-[--radix-popover-trigger-width] p-0"
+            className="w-(--radix-popover-trigger-width) p-0"
           >
             <OoklaResultsList
               servers={servers.data ?? []}
@@ -357,7 +357,7 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
             onInteractOutside={(e) => {
               if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
             }}
-            className="w-[--radix-popover-trigger-width] p-0"
+            className="w-(--radix-popover-trigger-width) p-0"
           >
             <Iperf3ResultsList
               servers={publicServers.data?.servers ?? []}
