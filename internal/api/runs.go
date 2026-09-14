@@ -24,6 +24,10 @@ func (d Deps) listRuns(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			return
 		}
+		if sid == 0 {
+			errBadRequest(w, "schedule_id must be a positive integer")
+			return
+		}
 		f.ScheduleID = &sid
 	}
 	runs, next, err := d.Store.ListRuns(r.Context(), f)

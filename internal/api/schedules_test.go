@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,6 +100,60 @@ func TestCreateScheduleRejectsBadCronTimezoneAndTargets(t *testing.T) {
 				t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// TestCreateScheduleDuplicateTargetIDsIs400 checks that repeated target ids
+// are reported distinctly from an unknown target id.
+func TestCreateScheduleDuplicateTargetIDsIs400(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	id := createTestTarget(t, h, "t1")
+
+	rec := do(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "dup", "cron": "@hourly", "enabled": true, "timezone": "UTC",
+		"target_ids": []int64{id, id}})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Error struct {
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(body.Error.Message, "duplicates") {
+		t.Fatalf("message = %q, want mention of duplicates", body.Error.Message)
+	}
+}
+
+// TestReloadSchedulesSurvivesCancelledRequestContext ensures a client
+// disconnect (cancelled request context) doesn't prevent the reload from
+// running with a live context. Exercised directly against
+// Deps.reloadSchedules since going through the full HTTP stack would also
+// cancel the store reads validateSchedule needs before reload ever runs.
+func TestReloadSchedulesSurvivesCancelledRequestContext(t *testing.T) {
+	invoked := false
+	d := Deps{
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		ReloadSchedules: func(ctx context.Context) error {
+			invoked = true
+			// Checked inside the callback: reloadSchedules defers its own
+			// cancel(), so the context is only guaranteed live while
+			// ReloadSchedules itself is running, same as any WithTimeout.
+			if ctx.Err() != nil {
+				t.Fatalf("reload ctx = %v, want a live context", ctx.Err())
+			}
+			return nil
+		},
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // simulate a client that already disconnected
+	d.reloadSchedules(ctx)
+
+	if !invoked {
+		t.Fatal("ReloadSchedules was not invoked")
 	}
 }
 
@@ -332,6 +388,16 @@ func TestListRunsFilteredByScheduleID(t *testing.T) {
 	json.Unmarshal(rec.Body.Bytes(), &body)
 	if len(body.Runs) != 1 || body.Runs[0].ScheduleID == nil || *body.Runs[0].ScheduleID != sid {
 		t.Fatalf("runs = %+v", body.Runs)
+	}
+}
+
+// TestListRunsRejectsZeroScheduleID checks that ?schedule_id=0 (unset id,
+// not a real schedule) is a 400 rather than silently matching no rows.
+func TestListRunsRejectsZeroScheduleID(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := doJSON(t, h, http.MethodGet, "/api/v1/runs?schedule_id=0", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
 	}
 }
 

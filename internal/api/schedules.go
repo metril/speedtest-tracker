@@ -68,6 +68,14 @@ func (d Deps) validateSchedule(w http.ResponseWriter, r *http.Request, b *schedu
 		errBadRequest(w, "target_ids must contain at least one target")
 		return false
 	}
+	seen := make(map[int64]bool, len(b.TargetIDs))
+	for _, id := range b.TargetIDs {
+		if seen[id] {
+			errBadRequest(w, "target_ids contains duplicates")
+			return false
+		}
+		seen[id] = true
+	}
 	found, err := d.Store.ListTargetsByIDs(r.Context(), b.TargetIDs)
 	if err != nil {
 		internalError(w, d.Logger, "load targets failed", err)
@@ -80,11 +88,20 @@ func (d Deps) validateSchedule(w http.ResponseWriter, r *http.Request, b *schedu
 	return true
 }
 
-// reloadSchedules notifies the scheduler that stored schedules changed.
+// reloadTimeout bounds a reload triggered from an HTTP handler; it runs
+// detached from the request context so a client disconnect can't abort it
+// and leave the cron stale.
+const reloadTimeout = 10 * time.Second
+
+// reloadSchedules notifies the scheduler that stored schedules changed. It
+// runs with a fresh timeout detached from r's cancellation so a client
+// disconnecting mid-request never aborts the reload.
 func (d Deps) reloadSchedules(ctx context.Context) {
 	if d.ReloadSchedules == nil {
 		return
 	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reloadTimeout)
+	defer cancel()
 	if err := d.ReloadSchedules(ctx); err != nil {
 		d.Logger.Error("reload schedules", "error", err)
 	}
