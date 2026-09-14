@@ -12,6 +12,12 @@ interface Props {
   engine: string;
   options: Options;
   onChange: (next: Options) => void;
+  /** Bumped by the parent form on a failed submit blocked by
+   * validateEngineOptions, to force the iperf3 advanced disclosure open so
+   * the blocking error (rendered next to the field it's about) isn't
+   * hidden behind a collapsed section. Ignored by engines other than
+   * iperf3. */
+  forceOpenAdvancedSignal?: number;
 }
 
 const field = 'w-full rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
@@ -56,7 +62,11 @@ const IPERF3_ADVANCED_KEYS = [
 ] as const;
 
 function hasAdvancedIperf3Options(options: Options): boolean {
-  return IPERF3_ADVANCED_KEYS.some((k) => options[k] !== undefined && options[k] !== '');
+  return IPERF3_ADVANCED_KEYS.some((k) => {
+    const v = options[k];
+    if (k === 'reverse' || k === 'bidir') return v === true;
+    return v !== undefined && v !== '';
+  });
 }
 
 /** summarizeIperf3Advanced renders the closed-disclosure summary line,
@@ -76,10 +86,14 @@ function summarizeIperf3Advanced(options: Options): string {
 }
 
 /** EngineOptionFields renders the option form for one engine. */
-export function EngineOptionFields({ engine, options, onChange }: Props) {
+export function EngineOptionFields({ engine, options, onChange, forceOpenAdvancedSignal }: Props) {
   if (engine === 'ookla') return <OoklaFields options={options} onChange={onChange} />;
   if (engine === 'cloudflare') return <CloudflareFields options={options} onChange={onChange} />;
-  if (engine === 'iperf3') return <Iperf3Fields options={options} onChange={onChange} />;
+  if (engine === 'iperf3') {
+    return (
+      <Iperf3Fields options={options} onChange={onChange} forceOpenAdvancedSignal={forceOpenAdvancedSignal} />
+    );
+  }
   return (
     <p className="text-sm text-muted">
       The <span className="font-mono">{engine}</span> engine takes no configuration.
@@ -304,7 +318,7 @@ function CloudflareFields({ options, onChange }: Omit<Props, 'engine'>) {
   );
 }
 
-function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
+function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props, 'engine'>) {
   const text = (key: string) => (options[key] === undefined ? '' : String(options[key]));
   const checked = (key: string) => options[key] === true;
 
@@ -329,6 +343,13 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
   // fresh target, but open by default when editing one that already has
   // any of them set, so nothing configured is hidden from view.
   const [advancedOpen, setAdvancedOpen] = useState(() => hasAdvancedIperf3Options(options));
+
+  // A failed submit blocked by validateEngineOptions (e.g. a password with
+  // no username/RSA key) bumps this signal from the parent form; force the
+  // section open so the error isn't hidden behind a collapsed disclosure.
+  useEffect(() => {
+    if (forceOpenAdvancedSignal) setAdvancedOpen(true);
+  }, [forceOpenAdvancedSignal]);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
@@ -410,7 +431,7 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
         <button
           type="button"
           aria-expanded={advancedOpen}
-          aria-controls="iperf-advanced-options"
+          aria-controls={advancedOpen ? 'iperf-advanced-options' : undefined}
           onClick={() => setAdvancedOpen((o) => !o)}
           className="flex items-center gap-1 text-sm font-medium text-muted hover:text-fg"
         >

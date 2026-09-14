@@ -53,7 +53,7 @@ function CollapsedThemeToggle() {
  * arrow/Home/End keys move both selection and focus across the other two,
  * per the ARIA authoring practices for a single-select radio group.
  * With `collapsed`, it renders as a single cycling icon button instead. */
-export function ThemeToggle({ collapsed }: { collapsed?: boolean } = {}) {
+export function ThemeToggle({ collapsed }: { collapsed?: boolean }) {
   const { theme, setTheme } = useTheme();
   const buttonRefs = useRef<Array<HTMLButtonElement | null>>([]);
 

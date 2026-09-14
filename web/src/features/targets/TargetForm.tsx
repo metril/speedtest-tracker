@@ -27,6 +27,10 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   const [options, setOptions] = useState<Options>(initial?.options ?? {});
   const [thresholds, setThresholds] = useState<ThresholdSet>((initial?.thresholds as ThresholdSet) ?? {});
   const [touched, setTouched] = useState(false);
+  // Bumped on a failed submit blocked by optionsError, to force open the
+  // iperf3 advanced disclosure (see EngineOptionFields' forceOpenAdvancedSignal)
+  // so a collapsed section can't hide the reason Save silently did nothing.
+  const [forceOpenAdvancedSignal, setForceOpenAdvancedSignal] = useState(0);
 
   const nameInvalid = name.trim() === '';
   const optionsError = validateEngineOptions(engine, options);
@@ -38,7 +42,10 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
       onSubmit={(e) => {
         e.preventDefault();
         setTouched(true);
-        if (nameInvalid || optionsError || thresholdsError) return;
+        if (nameInvalid || optionsError || thresholdsError) {
+          if (optionsError) setForceOpenAdvancedSignal((n) => n + 1);
+          return;
+        }
         onSubmit({
           name: name.trim(), engine, enabled, lane, options, thresholds: thresholds as Record<string, unknown>,
         });
@@ -74,7 +81,10 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
       </div>
 
       <div className="border-t border-line pt-3">
-        <EngineOptionFields engine={engine} options={options} onChange={setOptions} />
+        <EngineOptionFields
+          engine={engine} options={options} onChange={setOptions}
+          forceOpenAdvancedSignal={forceOpenAdvancedSignal}
+        />
       </div>
 
       <div className="border-t border-line pt-3">
@@ -84,6 +94,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
         )}
       </div>
 
+      {touched && optionsError && <p className="text-sm text-bad">{optionsError}</p>}
       {error && <p className="text-sm text-bad">{error}</p>}
 
       <div className="flex gap-2">

@@ -189,7 +189,34 @@ describe('TargetForm', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
 
     expect(onSubmit).not.toHaveBeenCalled();
-    expect(screen.getByText('Password requires a username and RSA public key path')).toBeInTheDocument();
+    // The inline hint next to the Password field and the form-level
+    // message next to Save both show the same blocking error.
+    expect(screen.getAllByText('Password requires a username and RSA public key path')).toHaveLength(2);
+  });
+
+  it('shows the blocking options error next to Save and reopens a collapsed advanced disclosure on failed submit', () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
+
+    fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
+    fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
+    fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
+
+    // Open the disclosure just to set the password, then collapse it again
+    // -- Save must still surface the error and reopen it, not fail silently.
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'sekrit' } });
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
+
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByLabelText('Password')).toHaveValue('sekrit');
+    expect(screen.getAllByText('Password requires a username and RSA public key path')).toHaveLength(2);
   });
 
   it('debounces the ookla server search so one request fires per pause', async () => {

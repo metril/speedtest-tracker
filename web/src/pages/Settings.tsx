@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { NavLink, Outlet } from 'react-router';
 import type { SectionKey, SettingsOutletContext, TestResult } from '../features/settings/settingsContext';
 import { stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
 import { validateAuthSettings } from '../features/settings/AuthSection';
@@ -50,7 +49,6 @@ function useSavedFlash() {
  * hands all of it down through useOutletContext so switching tabs never
  * loses an in-progress, unsaved edit in another section. */
 export function Settings() {
-  const location = useLocation();
   const settings = useSettings();
   const update = useUpdateSettings();
   const test = useTestIntegration();
@@ -176,8 +174,6 @@ export function Settings() {
     return <h1 className="text-xl font-semibold">Settings</h1>;
   }
 
-  const activeTab = TABS.find((t) => location.pathname.includes(`/settings/${t.to}`))?.key ?? 'general';
-
   const context: SettingsOutletContext = {
     locked: settings.data?.locked ?? [],
     saving: update.isPending,
@@ -199,15 +195,24 @@ export function Settings() {
     <div className="grid gap-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
-      <Tabs value={activeTab} onValueChange={() => {}} className="md:hidden">
-        <TabsList className="w-full justify-start overflow-x-auto">
+      <nav aria-label="Settings sections" className="md:hidden">
+        <ul className="flex w-full gap-1 overflow-x-auto rounded-lg bg-raised p-1">
           {TABS.map((tab) => (
-            <TabsTrigger key={tab.key} value={tab.key} asChild>
-              <NavLink to={`/settings/${tab.to}`}>{tab.label}</NavLink>
-            </TabsTrigger>
+            <li key={tab.key} className="shrink-0">
+              <NavLink
+                to={`/settings/${tab.to}`}
+                className={({ isActive }) =>
+                  `block whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-colors ${
+                    isActive ? 'bg-surface text-fg shadow' : 'text-muted hover:text-fg'
+                  }`
+                }
+              >
+                {tab.label}
+              </NavLink>
+            </li>
           ))}
-        </TabsList>
-      </Tabs>
+        </ul>
+      </nav>
 
       <div className="grid gap-6 md:grid-cols-[12rem_1fr]">
         <nav className="hidden md:block" aria-label="Settings sections">

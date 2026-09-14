@@ -382,10 +382,13 @@ describe('Settings page', () => {
     await userEvent.clear(tz);
     await userEvent.type(tz, 'Asia/Kolkata');
 
-    await userEvent.click(screen.getByRole('link', { name: 'Engines' }));
+    // Both the md+ column nav and the mobile horizontal-scroll strip render
+    // a same-named link (only one is visible at a time via CSS, which
+    // jsdom doesn't apply) — either navigates to the same route.
+    await userEvent.click(screen.getAllByRole('link', { name: 'Engines' })[0]);
     await screen.findByLabelText('iperf3 server list URL');
 
-    await userEvent.click(screen.getByRole('link', { name: 'General' }));
+    await userEvent.click(screen.getAllByRole('link', { name: 'General' })[0]);
     expect(await screen.findByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
   });
 });

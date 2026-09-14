@@ -296,11 +296,26 @@ describe('Iperf3Fields: advanced options disclosure', () => {
     expect(screen.getByText('port 5201 · TCP · 10 s')).toBeInTheDocument();
   });
 
+  it('omits aria-controls while collapsed (nothing to point at) and sets it once open', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    expect(toggle).not.toHaveAttribute('aria-controls');
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-controls', 'iperf-advanced-options');
+    expect(document.getElementById('iperf-advanced-options')).toBeInTheDocument();
+  });
+
   it('starts open when editing a target with an advanced option already set', () => {
     wrap(<EngineOptionFields engine="iperf3" options={{ parallel: 4 }} onChange={vi.fn()} />);
     const toggle = screen.getByRole('button', { name: 'Advanced options' });
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByLabelText('Parallel streams')).toHaveValue('4');
+  });
+
+  it('does not treat explicit reverse:false/bidir:false as an advanced option being set', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ reverse: false, bidir: false }} onChange={vi.fn()} />);
+    const toggle = screen.getByRole('button', { name: 'Advanced options' });
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
   });
 
   it('toggles open and closed on click', () => {
