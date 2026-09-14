@@ -4,8 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sort"
 	"time"
 )
+
+// maxIncidents caps how many incidents Outages returns (most recent first).
+// A package var so tests can shrink it instead of inserting 500+ rows.
+var maxIncidents = 500
 
 // Incident is a contiguous stretch of trouble: consecutive non-ok results
 // for one target (Kind "result"), or a single cron fire that never ran
@@ -21,10 +26,12 @@ type Incident struct {
 	Error      string `json:"error,omitempty"`
 }
 
-// Outages returns the trouble timeline between from and to. Consecutive
-// failed/degraded results for the same target that are no more than
-// gapSeconds apart (the caller passes 2x the expected test interval)
-// collapse into one incident; a longer quiet stretch starts a new one.
+// Outages returns the trouble timeline between from and to, most recent
+// first, capped at maxIncidents. Consecutive failed/degraded results for
+// the same target that are no more than gapSeconds apart (the caller
+// passes 2x the expected test interval) collapse into one incident; a
+// longer quiet stretch, or an intervening "ok" result, closes it and a
+// later failure starts a new one.
 func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([]Incident, error) {
 	if gapSeconds <= 0 {
 		gapSeconds = 1800
@@ -32,7 +39,7 @@ func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([
 	rows, err := s.Read.QueryContext(ctx, `
 		SELECT target_id, target_name, status, started_at, COALESCE(error,'')
 		FROM results
-		WHERE status <> 'ok' AND started_at >= ? AND started_at <= ?
+		WHERE started_at >= ? AND started_at <= ?
 		ORDER BY target_id, started_at`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("outage results: %w", err)
@@ -65,6 +72,14 @@ func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([
 		}
 		sameTarget := cur != nil && ((cur.TargetID == nil && !tid.Valid) ||
 			(cur.TargetID != nil && tid.Valid && *cur.TargetID == tid.Int64))
+		if status == "ok" {
+			// A recovery closes any open incident for this target; a later
+			// failure (even inside gapSeconds) starts a fresh incident.
+			if sameTarget {
+				flush()
+			}
+			continue
+		}
 		if sameTarget && at.Sub(curEnd) <= gap {
 			cur.EndedAt = startedAt
 			cur.Count++
@@ -111,6 +126,11 @@ func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([
 	}
 	if err := skipped.Err(); err != nil {
 		return nil, err
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].StartedAt > out[j].StartedAt })
+	if len(out) > maxIncidents {
+		out = out[:maxIncidents]
 	}
 	return out, nil
 }
