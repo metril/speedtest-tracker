@@ -69,7 +69,7 @@ export function Layout() {
               <NavLinks collapsed={collapsed} />
             </div>
             <div className={`flex items-center gap-2 border-t border-line p-2 ${collapsed ? 'flex-col' : 'justify-between'}`}>
-              <ThemeToggle />
+              <ThemeToggle collapsed={collapsed} />
               <Button
                 type="button"
                 variant="ghost"

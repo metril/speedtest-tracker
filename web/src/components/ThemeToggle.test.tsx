@@ -52,3 +52,24 @@ it('moves selection and focus with arrow keys (roving tabindex)', async () => {
   await user.keyboard('{End}');
   expect(dark).toHaveAttribute('aria-checked', 'true');
 });
+
+it('collapsed: renders a single icon button that cycles system -> light -> dark -> system', async () => {
+  localStorage.clear();
+  const user = userEvent.setup();
+  render(<ThemeProvider><ThemeToggle collapsed /></ThemeProvider>);
+
+  expect(screen.queryByRole('radiogroup')).not.toBeInTheDocument();
+  const toggle = screen.getByRole('button', { name: 'Theme: System' });
+
+  await user.click(toggle);
+  expect(screen.getByRole('button', { name: 'Theme: Light' })).toBeInTheDocument();
+  expect(localStorage.getItem('st-theme')).toBe('light');
+
+  await user.click(screen.getByRole('button', { name: 'Theme: Light' }));
+  expect(screen.getByRole('button', { name: 'Theme: Dark' })).toBeInTheDocument();
+  expect(localStorage.getItem('st-theme')).toBe('dark');
+
+  await user.click(screen.getByRole('button', { name: 'Theme: Dark' }));
+  expect(screen.getByRole('button', { name: 'Theme: System' })).toBeInTheDocument();
+  expect(localStorage.getItem('st-theme')).toBe('system');
+});
