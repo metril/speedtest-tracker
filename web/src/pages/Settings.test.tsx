@@ -182,6 +182,60 @@ describe('Settings page', () => {
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
   });
 
+  it('disables Test with a save-first hint for a dirty/unsaved channel', async () => {
+    renderSettings({
+      settings: settingsFixture({
+        channels: [{
+          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+        }],
+      }),
+    });
+
+    // A brand-new, never-saved channel: Test is disabled with the hint.
+    await userEvent.click(await screen.findByRole('button', { name: 'Add channel' }));
+    expect(screen.getByRole('button', { name: 'Test New channel' })).toBeDisabled();
+    expect(screen.getAllByText('Save first to test this channel')).toHaveLength(1);
+
+    // The already-saved channel is untouched: Test stays enabled.
+    expect(screen.getByRole('button', { name: 'Test phone' })).toBeEnabled();
+
+    // Editing the saved channel without saving disables its Test button too.
+    await userEvent.type(screen.getByDisplayValue('phone'), 'x');
+    expect(screen.getByRole('button', { name: 'Test phonex' })).toBeDisabled();
+    expect(screen.getAllByText('Save first to test this channel')).toHaveLength(2);
+  });
+
+  it('scopes the test-pending state to the channel under test', async () => {
+    let resolveTest: (result: { ok: boolean }) => void = () => {};
+    const testChannel = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveTest = resolve; }));
+    renderSettings({
+      testChannel,
+      settings: settingsFixture({
+        channels: [
+          {
+            id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+          },
+          {
+            id: 'c2', type: 'ntfy', name: 'laptop', enabled: true, url: 'https://ntfy.sh/y',
+          },
+        ],
+      }),
+    });
+
+    const phoneButton = await screen.findByRole('button', { name: 'Test phone' });
+    const laptopButton = screen.getByRole('button', { name: 'Test laptop' });
+    await userEvent.click(phoneButton);
+
+    expect(phoneButton).toBeDisabled();
+    expect(laptopButton).toBeEnabled();
+    expect(testChannel).toHaveBeenCalledWith('c1');
+    expect(testChannel).toHaveBeenCalledTimes(1);
+
+    resolveTest({ ok: true });
+    await screen.findByText(/Sent in/);
+    expect(phoneButton).toBeEnabled();
+  });
+
   it('shows only the fields the selected channel type uses', async () => {
     renderSettings({
       settings: settingsFixture({

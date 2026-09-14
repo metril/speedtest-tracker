@@ -9,20 +9,22 @@ interface Props {
   onTest: () => void;
   testResult?: { ok: boolean; message: string } | null;
   testPending?: boolean;
+  /** True when this channel has unsaved edits (or is not yet saved), so
+   * testing it would test stale/nonexistent server state. */
+  unsaved?: boolean;
 }
 
-/** ChannelEditor edits one notification channel. Changing Type keeps the
- * id/name/url/enabled fields and drops whatever the previous type used
- * that the new type does not (headers, token, priority, tags, urls). */
+/** ChannelEditor edits one notification channel. Changing Type keeps all
+ * fields (headers, token, priority, tags, urls) in local state so a
+ * type flip-flop doesn't lose data such as a token; fields the new type
+ * doesn't use are only stripped when the form is submitted. */
 export function ChannelEditor({
-  value, onChange, onRemove, onTest, testResult, testPending,
+  value, onChange, onRemove, onTest, testResult, testPending, unsaved,
 }: Props) {
   const { id } = value;
 
   const changeType = (type: NotifyChannelType) => {
-    onChange({
-      id: value.id, type, name: value.name, enabled: value.enabled, url: value.url,
-    });
+    onChange({ ...value, type });
   };
 
   return (
@@ -109,12 +111,14 @@ export function ChannelEditor({
       )}
 
       <div className="flex items-center gap-3">
-        <button type="button" className={buttonClass} disabled={testPending} onClick={onTest}>
+        <button type="button" className={buttonClass} disabled={testPending || unsaved}
+          title={unsaved ? 'Save first to test this channel' : undefined} onClick={onTest}>
           Test {value.name}
         </button>
         <button type="button" className="text-muted hover:text-bad" onClick={onRemove}>
           Remove {value.name}
         </button>
+        {unsaved && <p className="text-sm text-faint">Save first to test this channel</p>}
         {testResult && (
           <p className={testResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{testResult.message}</p>
         )}

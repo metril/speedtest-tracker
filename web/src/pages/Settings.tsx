@@ -9,6 +9,7 @@ import { ThresholdFields, validateThresholds } from '../features/targets/Thresho
 import type {
   EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
 } from '../lib/api';
+import { isChannelUnsaved, stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
 import { ApiError } from '../lib/api';
 import {
   useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
@@ -79,6 +80,7 @@ export function Settings() {
   const [vmResult, setVmResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [vlResult, setVlResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [channelResults, setChannelResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
 
   // Seed local edit state from the fetched settings exactly once. Refetches
   // (invalidation after save, background refresh, etc.) must never clobber
@@ -146,6 +148,7 @@ export function Settings() {
   };
 
   const runChannelTest = (channel: NotifyChannel) => {
+    setTestingChannelId(channel.id);
     testChannel.mutate(channel.id, {
       onSuccess: (result) => {
         setChannelResults((r) => ({
@@ -156,6 +159,7 @@ export function Settings() {
         }));
       },
       onError: (err) => setChannelResults((r) => ({ ...r, [channel.id]: { ok: false, message: message(err) } })),
+      onSettled: () => setTestingChannelId((id) => (id === channel.id ? null : id)),
     });
   };
 
@@ -166,7 +170,9 @@ export function Settings() {
       setErrors((e) => ({ ...e, notifications: thresholdError }));
       return;
     }
-    save('notifications', { notifications });
+    save('notifications', {
+      notifications: { ...notifications, channels: notifications.channels.map(stripIrrelevantChannelFields) },
+    });
   };
 
   if (settings.isLoading || !general || !engines || !integrations || !notifications) {
@@ -359,7 +365,8 @@ export function Settings() {
                 onRemove={() => removeChannel(channel.id)}
                 onTest={() => runChannelTest(channel)}
                 testResult={channelResults[channel.id]}
-                testPending={testChannel.isPending}
+                testPending={testingChannelId === channel.id}
+                unsaved={isChannelUnsaved(channel, settings.data?.notifications.channels)}
               />
             ))}
             <button type="button" className={buttonClass} onClick={addChannel}>Add channel</button>

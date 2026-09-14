@@ -1,5 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { NotifyChannel } from '../../lib/api';
 import { ChannelEditor } from './ChannelEditor';
@@ -19,15 +20,21 @@ describe('ChannelEditor', () => {
     expect(screen.queryByLabelText('Token')).not.toBeInTheDocument();
   });
 
-  it('drops the previous type fields when the type changes', async () => {
-    const onChange = vi.fn();
-    render(
-      <ChannelEditor value={webhookChannel} onChange={onChange} onRemove={vi.fn()} onTest={vi.fn()} />,
-    );
+  it('keeps prior-type fields (e.g. a token) in state across a type flip-flop', async () => {
+    // A stateful harness stands in for Settings.tsx's controlled state, so
+    // this exercises the real onChange -> value round trip a flip-flop
+    // (ntfy -> webhook -> ntfy) goes through in the app.
+    function Harness() {
+      const [value, setValue] = useState<NotifyChannel>({
+        id: 'c2', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', token: 'secret-token',
+      });
+      return <ChannelEditor value={value} onChange={setValue} onRemove={vi.fn()} onTest={vi.fn()} />;
+    }
+    render(<Harness />);
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'webhook');
+    expect(screen.queryByLabelText('Token')).not.toBeInTheDocument();
     await userEvent.selectOptions(screen.getByLabelText('Type'), 'ntfy');
-    expect(onChange).toHaveBeenCalledWith({
-      id: 'c1', type: 'ntfy', name: 'hook', enabled: true, url: 'https://hook',
-    });
+    expect(screen.getByLabelText('Token')).toHaveValue('secret-token');
   });
 
   it('calls onTest and shows the returned result', async () => {
@@ -48,6 +55,18 @@ describe('ChannelEditor', () => {
     );
     await userEvent.click(screen.getByRole('button', { name: 'Remove hook' }));
     expect(onRemove).toHaveBeenCalled();
+  });
+
+  it('disables Test and shows a save-first hint when unsaved', async () => {
+    const onTest = vi.fn();
+    render(
+      <ChannelEditor value={webhookChannel} onChange={vi.fn()} onRemove={vi.fn()} onTest={onTest} unsaved />,
+    );
+    const testButton = screen.getByRole('button', { name: 'Test hook' });
+    expect(testButton).toBeDisabled();
+    expect(screen.getByText('Save first to test this channel')).toBeInTheDocument();
+    await userEvent.click(testButton);
+    expect(onTest).not.toHaveBeenCalled();
   });
 
   it('joins tags for display and splits edits back into an array', async () => {
