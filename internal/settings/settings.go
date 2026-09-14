@@ -230,9 +230,10 @@ const (
 type Store struct {
 	db *store.Store
 
-	mu   sync.Mutex
-	subs map[int]chan string
-	next int
+	mu     sync.Mutex
+	subs   map[int]chan string
+	next   int
+	locked map[string]bool
 }
 
 // New returns a Store and seeds any General key that is not yet present.
