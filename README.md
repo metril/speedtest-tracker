@@ -305,6 +305,11 @@ avg/min/max download, upload and ping plus the test and failure counts for that
 bucket. `GET /api/v1/stats/summary?range=` is cached in-memory for 30 seconds
 and sent with `Cache-Control: max-age=30`.
 
+Both `/stats/summary` and `/targets/{id}/history` accept `offset=1` (0 is the
+default) to shift the resolved window back by its own span, returning the
+immediately preceding period of equal length instead of the current one —
+the data behind a "compare with previous period" overlay.
+
 ### SLA compliance
 
 Setting a plan speed — General settings `sla_download_mbps`/`sla_upload_mbps`,

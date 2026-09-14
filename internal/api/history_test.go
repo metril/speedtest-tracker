@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -31,6 +32,71 @@ func TestHistoryRangeReturnsBucketedPoints(t *testing.T) {
 	}
 	if len(body.Points) > 500 {
 		t.Errorf("points = %d, want <= 500", len(body.Points))
+	}
+}
+
+func TestHistoryRejectsBadOffset(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+	rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=24h&offset=2", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// TestHistoryOffsetShiftsWindowBack covers task-10-brief: offset=1 reuses
+// the same window-shift as /stats/summary (shiftWindow), returning the
+// immediately preceding period of equal length instead of the current one.
+func TestHistoryOffsetShiftsWindowBack(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1) // fixed historical timestamps, outside either window below
+	if _, err := db.InsertResult(context.Background(), &store.Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt:       time.Now().UTC().Add(-30 * time.Hour).Format("2006-01-02T15:04:05.000Z"),
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     5e7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertResult(context.Background(), &store.Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt:       time.Now().UTC().Add(-time.Hour).Format("2006-01-02T15:04:05.000Z"),
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     8e7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cur := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=24h&offset=0", nil)
+	prev := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=24h&offset=1", nil)
+	if cur.Code != http.StatusOK || prev.Code != http.StatusOK {
+		t.Fatalf("status cur=%d prev=%d", cur.Code, prev.Code)
+	}
+
+	var curBody, prevBody struct {
+		From, To string
+		Points   []store.HistoryPoint `json:"points"`
+	}
+	json.NewDecoder(cur.Body).Decode(&curBody)
+	json.NewDecoder(prev.Body).Decode(&prevBody)
+
+	if curBody.From == prevBody.From || curBody.To == prevBody.To {
+		t.Fatalf("offset=1 window did not shift: cur=%+v prev=%+v", curBody, prevBody)
+	}
+	// The -1h result falls in the current (offset=0) window; the -30h
+	// result falls in the previous (offset=1) window.
+	curTotal, prevTotal := 0, 0
+	for _, p := range curBody.Points {
+		curTotal += p.Count
+	}
+	for _, p := range prevBody.Points {
+		prevTotal += p.Count
+	}
+	if curTotal == 0 {
+		t.Errorf("offset=0 window has no points, want the -1h result")
+	}
+	if prevTotal == 0 {
+		t.Errorf("offset=1 window has no points, want the -30h result")
 	}
 }
 

@@ -83,20 +83,10 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if offset == 1 {
-		span := windowSpan(from, to)
-		f, err := time.Parse(dbTimeFormat, from)
-		if err != nil {
-			errBadRequest(w, "invalid window")
-			return
-		}
-		// Store.Summary is inclusive on both ends ([from,to]), matching
-		// history/outages; without this, a result timestamped exactly at
-		// the boundary would be double-counted in both the current and
-		// previous windows. One millisecond (the stored timestamps'
-		// precision) keeps the previous window adjacent, not overlapping.
-		to = f.Add(-time.Millisecond).Format(dbTimeFormat)
-		from = f.Add(-span).Format(dbTimeFormat)
+	from, to, ok = shiftWindow(from, to, offset)
+	if !ok {
+		errBadRequest(w, "invalid window")
+		return
 	}
 	key := from + "|" + to + "|" + strconv.Itoa(offset)
 	w.Header().Set("Cache-Control", "max-age=30")
