@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.4.0](https://github.com/metril/speedtest-tracker/compare/v0.3.0...v0.4.0) (2026-09-14)
+
+
+### Features
+
+* compare-with-previous-period overlay ([b8f6903](https://github.com/metril/speedtest-tracker/commit/b8f690302f9d327683f54c2f78a3933bffcafcbf))
+* **engine:** iperf3 port-range retry on busy server ([35b1d44](https://github.com/metril/speedtest-tracker/commit/35b1d44bc0ca2f21727ed218b6116eff77d77b5d))
+* postcode geocoding via Nominatim with country hint ([2d14cea](https://github.com/metril/speedtest-tracker/commit/2d14cea114e32024be21bf5659c3613d162cd5d0))
+* richer iperf3 public list ([e81e7d0](https://github.com/metril/speedtest-tracker/commit/e81e7d004381137f5a0bc986f2e7ee1c2194fab9))
+* SLA compliance ([4533b51](https://github.com/metril/speedtest-tracker/commit/4533b5140a5e07352243d67e20949729fe4d4396))
+* **web:** compare-with-previous-period overlay ([15ab66e](https://github.com/metril/speedtest-tracker/commit/15ab66ea0b012fe47d0fd3315793a83c8cb72b4f))
+* **web:** iperf3 advanced options disclosure ([2654caf](https://github.com/metril/speedtest-tracker/commit/2654cafbd755b85fd485da4cc2c055a5325466dc))
+* **web:** postcode geocoding search with country hint ([1241c0f](https://github.com/metril/speedtest-tracker/commit/1241c0ffd922f7597c94c69c83092bc368a1a656))
+* **web:** richer iperf3 public list ([c5ed6d1](https://github.com/metril/speedtest-tracker/commit/c5ed6d1fe74e3f6964a870931f020c19d7b1cccd))
+* **web:** SLA compliance ([1b72547](https://github.com/metril/speedtest-tracker/commit/1b72547315efaa4b69a5648e78c9e9d35e71bd58))
+* **web:** Switch/Checkbox primitives, replace all native checkboxes ([0f0e2a5](https://github.com/metril/speedtest-tracker/commit/0f0e2a565ed8ebf921d7aae07baf396a5e4fdaa8))
+
+
+### Bug Fixes
+
+* **ooklaweb:** re-search geocoded postcodes by coordinates ([82c6e28](https://github.com/metril/speedtest-tracker/commit/82c6e287f96c29fb5fa1e768686d6064c19034dc))
+* single connecting event per iperf3 attempt, reject negative history offset ([d89a09a](https://github.com/metril/speedtest-tracker/commit/d89a09abac9527578465b49ed8c6c2b6c2da53dc))
+* SLA plan edge cases and review follow-ups ([4980f51](https://github.com/metril/speedtest-tracker/commit/4980f5124f6fdfbb5581de31649364c17530b8d9))
+* **web:** popover width + empty state ([2df580f](https://github.com/metril/speedtest-tracker/commit/2df580fd0ad4bf42944659a37e04042bbd267efa))
+* **web:** review follow-ups for picker, country input and SLA fields ([a6a3907](https://github.com/metril/speedtest-tracker/commit/a6a3907de98dd705897ddf6ff970cfa21bd3875f))
+* **web:** review follow-ups for target form and settings nav ([e17cc22](https://github.com/metril/speedtest-tracker/commit/e17cc2259962ec4806bb3b8b51bfce96e96c3a90))
+* **web:** theme toggle compacts with sidebar ([1a6cf46](https://github.com/metril/speedtest-tracker/commit/1a6cf46ded423504eb0ff2803e21ab48e330bd57))
+
 ## [0.3.0](https://github.com/metril/speedtest-tracker/compare/v0.2.0...v0.3.0) (2026-09-14)
 
 
