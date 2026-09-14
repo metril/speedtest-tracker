@@ -10,14 +10,21 @@ import (
 
 // Schedule is a named cron schedule over an ordered list of targets.
 type Schedule struct {
-	ID        int64   `json:"id"`
-	Name      string  `json:"name"`
-	Cron      string  `json:"cron"`
-	Enabled   bool    `json:"enabled"`
-	Timezone  string  `json:"timezone"`
-	TargetIDs []int64 `json:"target_ids"`
-	CreatedAt string  `json:"created_at"`
-	UpdatedAt string  `json:"updated_at"`
+	ID        int64        `json:"id"`
+	Name      string       `json:"name"`
+	Cron      string       `json:"cron"`
+	Enabled   bool         `json:"enabled"`
+	Timezone  string       `json:"timezone"`
+	TargetIDs []int64      `json:"target_ids"`
+	CreatedAt string       `json:"created_at"`
+	UpdatedAt string       `json:"updated_at"`
+	LastRun   *ScheduleRun `json:"last_run"`
+}
+
+// ScheduleRun is the compact "last run" badge the schedules listing shows.
+type ScheduleRun struct {
+	Status    string `json:"status"`
+	StartedAt string `json:"started_at"`
 }
 
 const scheduleColumns = `id,name,cron,enabled,timezone,created_at,updated_at`
@@ -135,6 +142,9 @@ func (s *Store) GetSchedule(ctx context.Context, id int64) (*Schedule, error) {
 	if err := s.attachScheduleTargets(ctx, one); err != nil {
 		return nil, err
 	}
+	if err := s.attachLastRuns(ctx, one); err != nil {
+		return nil, err
+	}
 	return &one[0], nil
 }
 
@@ -159,7 +169,48 @@ func (s *Store) ListSchedules(ctx context.Context) ([]Schedule, error) {
 	if err := s.attachScheduleTargets(ctx, out); err != nil {
 		return nil, err
 	}
+	if err := s.attachLastRuns(ctx, out); err != nil {
+		return nil, err
+	}
 	return out, nil
+}
+
+// attachLastRuns fills LastRun for every schedule in one query. The
+// highest run id per schedule is its newest run (ids are monotonic), so a
+// single grouped subquery replaces one lookup per row.
+func (s *Store) attachLastRuns(ctx context.Context, list []Schedule) error {
+	if len(list) == 0 {
+		return nil
+	}
+	args := make([]any, len(list))
+	byID := make(map[int64]*Schedule, len(list))
+	for i := range list {
+		args[i] = list[i].ID
+		byID[list[i].ID] = &list[i]
+	}
+	placeholders := `(?` + strings.Repeat(",?", len(list)-1) + `)`
+	rows, err := s.Read.QueryContext(ctx, `
+		SELECT schedule_id, status, COALESCE(started_at,'')
+		FROM runs
+		WHERE id IN (SELECT MAX(id) FROM runs
+		             WHERE schedule_id IN `+placeholders+`
+		             GROUP BY schedule_id)`, args...)
+	if err != nil {
+		return fmt.Errorf("load schedule last runs: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var sid int64
+		var lr ScheduleRun
+		if err := rows.Scan(&sid, &lr.Status, &lr.StartedAt); err != nil {
+			return fmt.Errorf("scan schedule last run: %w", err)
+		}
+		if sc, ok := byID[sid]; ok {
+			run := lr
+			sc.LastRun = &run
+		}
+	}
+	return rows.Err()
 }
 
 // attachScheduleTargets fills TargetIDs for every schedule in one query,

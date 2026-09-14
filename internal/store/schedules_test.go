@@ -173,3 +173,41 @@ func TestListRunsFiltersByScheduleID(t *testing.T) {
 		t.Fatalf("filtered runs = %+v", runs)
 	}
 }
+
+func TestListSchedulesAttachesLastRunInOneQuery(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	id, err := s.CreateSchedule(ctx, &Schedule{Name: "nightly", Cron: "@hourly", Enabled: true, TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, _ := s.CreateSchedule(ctx, &Schedule{Name: "quiet", Cron: "@daily", Enabled: true, TargetIDs: []int64{tid}})
+
+	first, _ := s.CreateRun(ctx, "cron", &id)
+	if err := s.SetRunStatus(ctx, first, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetRunStatus(ctx, first, "done", ""); err != nil {
+		t.Fatal(err)
+	}
+	last, _ := s.CreateRun(ctx, "cron", &id)
+	if err := s.SetRunStatus(ctx, last, "running", ""); err != nil {
+		t.Fatal(err)
+	}
+
+	list, err := s.ListSchedules(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byID := map[int64]Schedule{}
+	for _, sc := range list {
+		byID[sc.ID] = sc
+	}
+	got := byID[id].LastRun
+	if got == nil || got.Status != "running" || got.StartedAt == "" {
+		t.Fatalf("last run = %+v", got)
+	}
+	if byID[other].LastRun != nil {
+		t.Errorf("schedule with no runs should have a nil last_run, got %+v", byID[other].LastRun)
+	}
+}

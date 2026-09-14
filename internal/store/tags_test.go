@@ -92,3 +92,43 @@ func TestListResultsIncludesTags(t *testing.T) {
 		}
 	}
 }
+
+func TestRenameAndDeleteTag(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	rid := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
+	if _, err := s.SetResultTags(ctx, rid, []string{"evening", "wifi"}); err != nil {
+		t.Fatal(err)
+	}
+	tags, _ := s.ListTags(ctx)
+
+	renamed, err := s.RenameTag(ctx, tags[0].ID, "  Morning  ")
+	if err != nil {
+		t.Fatalf("RenameTag: %v", err)
+	}
+	if renamed.Name != "morning" {
+		t.Errorf("name = %q, want normalised %q", renamed.Name, "morning")
+	}
+	res, _ := s.GetResult(ctx, rid)
+	if len(res.Tags) != 2 || res.Tags[0] != "morning" {
+		t.Errorf("result tags = %v", res.Tags)
+	}
+
+	if _, err := s.RenameTag(ctx, tags[0].ID, "wifi"); !errors.Is(err, ErrNameConflict) {
+		t.Errorf("rename onto an existing name = %v, want ErrNameConflict", err)
+	}
+	if _, err := s.RenameTag(ctx, 9999, "nope"); !errors.Is(err, ErrNotFound) {
+		t.Errorf("rename missing tag = %v, want ErrNotFound", err)
+	}
+
+	if err := s.DeleteTag(ctx, tags[0].ID); err != nil {
+		t.Fatalf("DeleteTag: %v", err)
+	}
+	res, _ = s.GetResult(ctx, rid)
+	if len(res.Tags) != 1 || res.Tags[0] != "wifi" {
+		t.Errorf("tags after delete = %v", res.Tags)
+	}
+	if err := s.DeleteTag(ctx, tags[0].ID); !errors.Is(err, ErrNotFound) {
+		t.Errorf("delete missing tag = %v, want ErrNotFound", err)
+	}
+}

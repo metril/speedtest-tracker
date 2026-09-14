@@ -42,7 +42,9 @@ const resultColumns = `id,run_id,target_id,target_name,engine,options_snapshot,s
 	started_at,duration_ms,download_bps,upload_bps,ping_ms,jitter_ms,packet_loss_pct,
 	bytes_down,bytes_up,server_id,server_name,server_host,isp,external_ip,result_url,raw`
 
-func scanResult(sc interface{ Scan(...any) error }) (*Result, error) {
+// scanResultWithTags scans resultColumns, plus one trailing group_concat
+// column when extra is non-nil.
+func scanResultWithTags(sc interface{ Scan(...any) error }, extra *string) (*Result, error) {
 	var (
 		r                                  Result
 		snapshot                           string
@@ -53,9 +55,13 @@ func scanResult(sc interface{ Scan(...any) error }) (*Result, error) {
 		bdown, bup                         sql.NullInt64
 		sid, sname, shost, isp, extIP, url sql.NullString
 	)
-	if err := sc.Scan(&r.ID, &r.RunID, &r.TargetID, &r.TargetName, &r.Engine, &snapshot,
+	dest := []any{&r.ID, &r.RunID, &r.TargetID, &r.TargetName, &r.Engine, &snapshot,
 		&r.Status, &errMsg, &r.StartedAt, &dur, &down, &up, &ping, &jitter, &loss,
-		&bdown, &bup, &sid, &sname, &shost, &isp, &extIP, &url, &raw); err != nil {
+		&bdown, &bup, &sid, &sname, &shost, &isp, &extIP, &url, &raw}
+	if extra != nil {
+		dest = append(dest, extra)
+	}
+	if err := sc.Scan(dest...); err != nil {
 		return nil, err
 	}
 	r.OptionsSnapshot = json.RawMessage(snapshot)
@@ -71,6 +77,10 @@ func scanResult(sc interface{ Scan(...any) error }) (*Result, error) {
 	}
 	r.Tags = []string{}
 	return &r, nil
+}
+
+func scanResult(sc interface{ Scan(...any) error }) (*Result, error) {
+	return scanResultWithTags(sc, nil)
 }
 
 // nullString stores "" as NULL so empty text columns stay empty.
@@ -131,10 +141,9 @@ type ResultFilter struct {
 	Cursor   int64
 }
 
-// ListResults returns up to Limit results newest-first plus the cursor for
-// the next page (0 when exhausted). Keyset pagination on id; never OFFSET.
-func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int64, error) {
-	limit := clampLimit(f.Limit)
+// resultWhere builds the shared WHERE clause and args for a ResultFilter.
+// Cursor is handled by the caller: the CSV export never paginates.
+func resultWhere(f ResultFilter) ([]string, []any) {
 	var where []string
 	var args []any
 	if f.TargetID != nil {
@@ -163,6 +172,14 @@ func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int6
 			WHERE rt.result_id = results.id AND t.name = ?)`)
 		args = append(args, tag)
 	}
+	return where, args
+}
+
+// ListResults returns up to Limit results newest-first plus the cursor for
+// the next page (0 when exhausted). Keyset pagination on id; never OFFSET.
+func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int64, error) {
+	limit := clampLimit(f.Limit)
+	where, args := resultWhere(f)
 	if f.Cursor > 0 {
 		where = append(where, `id<?`)
 		args = append(args, f.Cursor)

@@ -118,6 +118,41 @@ func (s *Store) TagsForResults(ctx context.Context, ids []int64) (map[int64][]st
 	return out, rows.Err()
 }
 
+// tagNameConflict maps the UNIQUE violation on tags.name onto
+// ErrNameConflict so the API answers 409 instead of 500.
+func tagNameConflict(err error) error {
+	if err != nil && strings.Contains(err.Error(), "UNIQUE constraint failed: tags.name") {
+		return ErrNameConflict
+	}
+	return err
+}
+
+// RenameTag renames a tag in place (keeping every result_tags link), with
+// the same normalisation applied to tag names everywhere.
+func (s *Store) RenameTag(ctx context.Context, id int64, name string) (Tag, error) {
+	names := normaliseTagNames([]string{name})
+	if len(names) == 0 {
+		return Tag{}, fmt.Errorf("tag name is empty")
+	}
+	res, err := s.Write.ExecContext(ctx, `UPDATE tags SET name=? WHERE id=?`, names[0], id)
+	if err != nil {
+		return Tag{}, tagNameConflict(fmt.Errorf("rename tag %d: %w", id, err))
+	}
+	if err := requireAffected(res); err != nil {
+		return Tag{}, err
+	}
+	return Tag{ID: id, Name: names[0]}, nil
+}
+
+// DeleteTag removes a tag; result_tags rows cascade away with it.
+func (s *Store) DeleteTag(ctx context.Context, id int64) error {
+	res, err := s.Write.ExecContext(ctx, `DELETE FROM tags WHERE id=?`, id)
+	if err != nil {
+		return fmt.Errorf("delete tag %d: %w", id, err)
+	}
+	return requireAffected(res)
+}
+
 // attachTags fills in the Tags field of each result in one extra query.
 func (s *Store) attachTags(ctx context.Context, results []Result) error {
 	if len(results) == 0 {
