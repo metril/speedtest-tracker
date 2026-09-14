@@ -66,8 +66,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := s2.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1", n)
+	if n != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2", n)
 	}
 }
 
@@ -144,8 +144,8 @@ func TestOpenEscapesSpecialPathCharacters(t *testing.T) {
 	if err := s.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("schema_migrations rows = %d, want 1", n)
+	if n != 2 {
+		t.Errorf("schema_migrations rows = %d, want 2", n)
 	}
 }
 
@@ -167,6 +167,30 @@ func TestForeignKeysCascade(t *testing.T) {
 	}
 	if n != 0 {
 		t.Errorf("notification_state rows = %d, want 0 (cascade)", n)
+	}
+}
+
+// TestMigration0002CreatesResultIndexes confirms migration 2 applies and
+// creates the composite (col, id DESC) indexes ListResults relies on.
+func TestMigration0002CreatesResultIndexes(t *testing.T) {
+	s := openTemp(t)
+	for _, name := range []string{
+		"idx_results_target_id_id", "idx_results_status_id", "idx_results_engine_id",
+	} {
+		var got string
+		err := s.Read.QueryRow(
+			`SELECT name FROM sqlite_master WHERE type='index' AND name=?`, name).Scan(&got)
+		if err != nil {
+			t.Errorf("index %s missing: %v", name, err)
+		}
+	}
+	var applied int
+	if err := s.Read.QueryRow(
+		`SELECT count(*) FROM schema_migrations WHERE version='0002_result_id_indexes'`).Scan(&applied); err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if applied != 1 {
+		t.Errorf("migration 0002 applied rows = %d, want 1", applied)
 	}
 }
 
