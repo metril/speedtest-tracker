@@ -109,3 +109,49 @@ func TestSeedFromEnvRejectsUndecodableValue(t *testing.T) {
 		t.Fatalf("err = %v, want one naming the offending variable", err)
 	}
 }
+
+// TestSeedFromEnvAuthModeAlwaysAppliesUnlocked is a regression test for
+// review item 7: ST_AUTH_MODE=open alone (no ST_LOCK_ENV) must recover a
+// locked-out operator even though auth.mode was already customized away
+// from its default, unlike every other unlocked env value which only fills
+// a key that still equals its seeded default.
+func TestSeedFromEnvAuthModeAlwaysAppliesUnlocked(t *testing.T) {
+	st, _ := newTestSettings(t)
+	ctx := context.Background()
+	if err := st.Set(ctx, KeyAuthMode, AuthModeForward); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Set(ctx, KeyAuthAdminGroup, "stored"); err != nil {
+		t.Fatal(err)
+	}
+	locked, err := st.SeedFromEnv(ctx, []string{"ST_AUTH_MODE=open", "ST_AUTH_ADMIN_GROUP=from-env"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(locked) != 0 {
+		t.Fatalf("locked = %v, want none — ST_LOCK_ENV was not set", locked)
+	}
+	got, _ := st.Auth(ctx)
+	if got.Mode != AuthModeOpen {
+		t.Fatalf("mode = %q, want ST_AUTH_MODE to always apply on boot even over a previously customized value", got.Mode)
+	}
+	if got.AdminGroup != "stored" {
+		t.Errorf("admin group = %q, want other unlocked keys unaffected: the stored value still wins", got.AdminGroup)
+	}
+}
+
+// TestSeedFromEnvRetriesTypeMismatchAsString is a regression test for
+// review item 10: an env value that is valid JSON of the wrong type for
+// the target field (e.g. a bare number for a string field) must retry as a
+// JSON string instead of failing boot.
+func TestSeedFromEnvRetriesTypeMismatchAsString(t *testing.T) {
+	st, _ := newTestSettings(t)
+	ctx := context.Background()
+	if _, err := st.SeedFromEnv(ctx, []string{"ST_AUTH_ADMIN_GROUP=1234"}); err != nil {
+		t.Fatalf("ST_AUTH_ADMIN_GROUP=1234: %v, want a retry as the string \"1234\" instead of a fatal error", err)
+	}
+	got, _ := st.Auth(ctx)
+	if got.AdminGroup != "1234" {
+		t.Fatalf("admin_group = %q, want \"1234\"", got.AdminGroup)
+	}
+}

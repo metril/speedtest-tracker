@@ -89,27 +89,30 @@ func (s *Store) SeedFromEnv(ctx context.Context, environ []string) ([]string, er
 	for _, e := range entries {
 		value := raw[e.env]
 
-		var decoded any
-		if err := json.Unmarshal([]byte(value), &decoded); err != nil {
-			quoted, err := json.Marshal(value)
-			if err != nil {
-				return nil, fmt.Errorf("%s: %w", e.env, err)
-			}
-			if err := json.Unmarshal(quoted, &decoded); err != nil {
-				return nil, fmt.Errorf("%s: %w", e.env, err)
-			}
-		}
-
-		encoded, err := json.Marshal(decoded)
-		if err != nil {
-			return nil, fmt.Errorf("%s: %w", e.env, err)
-		}
+		// Decode straight into the key's typed default shape. A bare env
+		// value like ST_AUTH_ADMIN_GROUP=1234 parses as valid JSON (the
+		// number 1234), but the target field is a string — that type
+		// mismatch is not a malformed value, it just means the operator
+		// meant the literal string "1234", so retry once treating the raw
+		// value as a JSON string before giving up.
 		target := reflect.New(reflect.TypeOf(defaults[e.key])).Interface()
-		if err := json.Unmarshal(encoded, target); err != nil {
-			return nil, fmt.Errorf("%s: %w", e.env, err)
+		if err := json.Unmarshal([]byte(value), target); err != nil {
+			quoted, qerr := json.Marshal(value)
+			if qerr != nil {
+				return nil, fmt.Errorf("%s: %w", e.env, qerr)
+			}
+			target = reflect.New(reflect.TypeOf(defaults[e.key])).Interface()
+			if err := json.Unmarshal(quoted, target); err != nil {
+				return nil, fmt.Errorf("%s: %w", e.env, err)
+			}
 		}
+		decoded := reflect.ValueOf(target).Elem().Interface()
 
-		if !lockEnv {
+		// auth.mode is special-cased unconditionally: an operator recovers
+		// from a lockout with ST_AUTH_MODE=open alone (no ST_LOCK_ENV), so
+		// it must always be applied on boot, not only when the stored
+		// value still equals the seeded default.
+		if !lockEnv && e.key != KeyAuthMode {
 			// New() seeds every default key with ON CONFLICT DO NOTHING,
 			// so a row always exists; "never seen" means the stored value
 			// still equals the seeded default, i.e. no one has set it
