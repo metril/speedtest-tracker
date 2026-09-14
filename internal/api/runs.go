@@ -5,6 +5,7 @@ import (
 	"strconv"
 
 	"github.com/metril/speedtest-tracker/internal/runner"
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 // listRuns answers GET /runs?limit&cursor.
@@ -17,7 +18,7 @@ func (d Deps) listRuns(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	runs, next, err := d.Store.ListRuns(r.Context(), limit, cursor)
+	runs, next, err := d.Store.ListRuns(r.Context(), store.RunFilter{Limit: limit, Cursor: cursor})
 	if err != nil {
 		internalError(w, d.Logger, "list runs failed", err)
 		return
