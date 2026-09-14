@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { TimezoneSelect } from '../../components/TimezoneSelect';
 import { fieldClass, inputClass, labelClass } from './styles';
 import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
@@ -48,8 +49,8 @@ export function GeneralSection() {
       </div>
       <div className={fieldClass}>
         <label htmlFor="general-timezone" className={labelClass}>Timezone</label>
-        <Input id="general-timezone" value={general.timezone}
-          onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
+        <TimezoneSelect id="general-timezone" value={general.timezone}
+          onChange={(tz) => setGeneral({ ...general, timezone: tz })} />
       </div>
       <div className={fieldClass}>
         <label htmlFor="general-units" className={labelClass}>Units</label>

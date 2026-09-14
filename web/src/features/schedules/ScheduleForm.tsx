@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { SwitchField } from '../../components/SwitchField';
+import { TimezoneSelect } from '../../components/TimezoneSelect';
 import type { Schedule, ScheduleInput, Target } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { useCronPreview } from '../../lib/queries';
@@ -14,14 +15,6 @@ const PRESETS = [
   { label: 'Hourly', expr: '0 * * * *' },
   { label: 'Daily 03:00', expr: '0 3 * * *' },
 ] as const;
-
-/** A curated shortlist of common zones, shown before the full IANA list so
- * the dropdown isn't 400 entries deep by default. */
-const CURATED_TIMEZONES = [
-  'UTC', 'America/New_York', 'America/Chicago', 'America/Denver', 'America/Los_Angeles',
-  'Europe/London', 'Europe/Berlin', 'Europe/Zurich', 'Asia/Kolkata', 'Asia/Singapore',
-  'Asia/Tokyo', 'Australia/Sydney',
-];
 
 /** How long to wait after the last keystroke before asking the server to
  * validate the cron expression. */
@@ -63,7 +56,6 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
 
   const preview = useCronPreview(debouncedCron, debouncedTimezone);
   const byID = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
-  const isCustomTimezone = timezone !== '' && !CURATED_TIMEZONES.includes(timezone);
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -116,20 +108,9 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
 
       <div className="grid gap-1">
         <label htmlFor="schedule-tz" className="text-xs uppercase tracking-wide text-faint">Timezone</label>
-        <select
-          id="schedule-tz" value={isCustomTimezone ? '__custom__' : timezone}
-          onChange={(e) => setTimezone(e.target.value)}
+        <TimezoneSelect
+          id="schedule-tz" value={timezone} onChange={setTimezone}
           className="rounded border border-line bg-app px-2 py-1.5 text-sm text-fg"
-        >
-          {CURATED_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
-          {isCustomTimezone && <option value="__custom__" disabled>Custom…</option>}
-        </select>
-        <input
-          aria-label="Custom timezone"
-          placeholder="Or type an IANA zone, e.g. Europe/Zurich"
-          value={isCustomTimezone ? timezone : ''}
-          onChange={(e) => setTimezone(e.target.value)}
-          className="rounded border border-line bg-app px-2 py-1.5 text-xs text-muted"
         />
       </div>
 

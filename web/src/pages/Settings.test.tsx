@@ -236,8 +236,7 @@ describe('Settings page', () => {
   it('does not clobber an edited but unsaved field on refetch', async () => {
     const { qc } = renderSettings();
     const tz = await screen.findByLabelText('Timezone');
-    await userEvent.clear(tz);
-    await userEvent.type(tz, 'Asia/Kolkata');
+    await userEvent.selectOptions(tz, 'Asia/Kolkata');
 
     // A refetch (e.g. invalidation, background refresh) brings back the
     // original server data; the in-progress, unsaved edit must survive it.
@@ -430,8 +429,7 @@ describe('Settings page', () => {
   it('switching tabs keeps unsaved edits in the tab left behind', async () => {
     renderSettings({ path: '/settings/general' });
     const tz = await screen.findByLabelText('Timezone');
-    await userEvent.clear(tz);
-    await userEvent.type(tz, 'Asia/Kolkata');
+    await userEvent.selectOptions(tz, 'Asia/Kolkata');
 
     // Both the md+ column nav and the mobile horizontal-scroll strip render
     // a same-named link (only one is visible at a time via CSS, which

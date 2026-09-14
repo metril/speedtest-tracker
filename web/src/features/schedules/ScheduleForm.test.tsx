@@ -75,7 +75,7 @@ describe('ScheduleForm', () => {
       const initialCalls = fetchMock.mock.calls.length;
 
       fireEvent.change(screen.getByLabelText('Cron expression'), { target: { value: '0 5 * * *' } });
-      fireEvent.change(screen.getByLabelText('Custom timezone'), { target: { value: 'Pacific/Fiji' } });
+      fireEvent.change(screen.getByLabelText('Timezone'), { target: { value: 'Pacific/Fiji' } });
       // Not yet debounced: no new preview request.
       expect(fetchMock.mock.calls.length).toBe(initialCalls);
 
@@ -86,12 +86,14 @@ describe('ScheduleForm', () => {
     }
   });
 
-  it('shows a Custom… option instead of injecting the free-text zone into the select', async () => {
+  it('shows the full IANA zone list grouped behind the curated shortlist', async () => {
     wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
-    await userEvent.type(screen.getByLabelText('Custom timezone'), 'Pacific/Fiji');
     const select = screen.getByLabelText('Timezone') as HTMLSelectElement;
-    expect(select.value).toBe('__custom__');
-    expect(screen.getByRole('option', { name: 'Custom…' })).toBeInTheDocument();
-    expect(screen.queryByRole('option', { name: 'Pacific/Fiji' })).not.toBeInTheDocument();
+    const groups = select.querySelectorAll('optgroup');
+    expect(groups).toHaveLength(2);
+    expect(groups[0].getAttribute('label')).toBe('Common');
+    expect(groups[1].getAttribute('label')).toBe('All zones');
+    await userEvent.selectOptions(select, 'Pacific/Fiji');
+    expect(select.value).toBe('Pacific/Fiji');
   });
 });
