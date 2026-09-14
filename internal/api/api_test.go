@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/metril/speedtest-tracker/internal/sse"
 )
 
 type stubPinger struct{ err error }
@@ -97,6 +102,62 @@ func TestSecurityHeaders(t *testing.T) {
 		if got := rec.Header().Get(k); got != v {
 			t.Errorf("%s = %q, want %q", k, got, v)
 		}
+	}
+}
+
+// TestEventsStreamIsNeverGzipCompressed drives /api/v1/events through the
+// full api.New router (including the global Compress middleware) with a
+// client that advertises gzip, and asserts the SSE stream is delivered
+// uncompressed and an event is received intact: the compress middleware
+// only compresses content types on its allow-list, and text/event-stream
+// is not one of them, so this must hold regardless of Accept-Encoding.
+func TestEventsStreamIsNeverGzipCompressed(t *testing.T) {
+	hub := sse.NewHub()
+	srv := httptest.NewServer(New(Deps{
+		Pinger: stubPinger{},
+		Logger: slog.New(slog.NewJSONHandler(io.Discard, nil)),
+		Hub:    hub,
+	}))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/api/v1/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+	resp, err := http.DefaultTransport.RoundTrip(req) // bypass DefaultClient's transparent gzip handling
+	if err != nil {
+		t.Fatalf("GET: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if ce := resp.Header.Get("Content-Encoding"); ce != "" {
+		t.Errorf("Content-Encoding = %q, want unset (SSE must never be compressed)", ce)
+	}
+	if ct := resp.Header.Get("Content-Type"); ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q", ct)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.Subscribers() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	hub.Publish(hub.Marshal(sse.EventRun, map[string]any{"run_id": 1, "status": "queued", "error": ""}))
+
+	sc := bufio.NewScanner(resp.Body)
+	var gotEvent, gotData bool
+	for sc.Scan() {
+		line := sc.Text()
+		if line == "event: run" {
+			gotEvent = true
+		}
+		if strings.Contains(line, `"run_id":1`) {
+			gotData = true
+			break
+		}
+	}
+	if !gotEvent || !gotData {
+		t.Errorf("event=%v data=%v (stream must carry plain, uncompressed SSE text)", gotEvent, gotData)
 	}
 }
 

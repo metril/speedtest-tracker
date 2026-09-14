@@ -5,6 +5,7 @@ package sse
 
 import (
 	"encoding/json"
+	"log/slog"
 	"sync"
 )
 
@@ -74,11 +75,13 @@ func (h *Hub) Publish(e Event) {
 	}
 }
 
-// Marshal encodes payload into an Event, returning an empty-object event
-// if encoding fails (never a reason to fail a test run).
+// Marshal encodes payload into an Event, logging and falling back to an
+// empty-object event if encoding fails (never a reason to fail a test run).
 func (h *Hub) Marshal(eventType string, payload any) Event {
 	data, err := json.Marshal(payload)
 	if err != nil {
+		slog.Default().Warn("sse: marshal event payload failed, emitting empty object",
+			"event_type", eventType, "error", err)
 		return Event{Type: eventType, Data: json.RawMessage(`{}`)}
 	}
 	return Event{Type: eventType, Data: data}
