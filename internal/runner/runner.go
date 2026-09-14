@@ -236,21 +236,14 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	return runID, nil
 }
 
-// runContext returns the cancellable context of a live run.
-func (r *Runner) runContext(runID int64) (context.Context, bool) {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	st, ok := r.runs[runID]
-	if !ok {
-		return nil, false
-	}
-	return st.ctx, true
-}
-
 // Cancel aborts an in-flight or queued run. It reports whether the run was
-// known to the runner. When the run has not started any lane yet, the
-// canceled status is persisted immediately (rather than waiting for a
-// worker to eventually dequeue it), and started_at is never set.
+// known to the runner. Setting canceled and calling the run's CancelFunc
+// happen atomically under r.mu, together with execute's own canceled/started
+// check, so a lane can never observe canceled==false and go on to write
+// "running" after Cancel has already committed to canceling the run. When
+// the run has not started any lane yet, the canceled status is persisted
+// immediately (rather than waiting for a worker to eventually dequeue it),
+// and started_at is never set.
 func (r *Runner) Cancel(runID int64) bool {
 	r.mu.Lock()
 	st, ok := r.runs[runID]
@@ -260,10 +253,9 @@ func (r *Runner) Cancel(runID int64) bool {
 	}
 	st.canceled = true
 	notStarted := !st.started
-	cancel := st.cancel
+	st.cancel()
 	r.mu.Unlock()
 
-	cancel()
 	if notStarted {
 		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "")
 		r.publishRun(runID, "canceled", "")
@@ -271,28 +263,29 @@ func (r *Runner) Cancel(runID int64) bool {
 	return true
 }
 
-// markStarted records that a run has begun executing at least one lane.
-func (r *Runner) markStarted(runID int64) {
-	r.mu.Lock()
-	if st, ok := r.runs[runID]; ok {
-		st.started = true
-	}
-	r.mu.Unlock()
-}
-
 // execute runs one lane's targets sequentially.
 func (r *Runner) execute(j job) {
-	ctx, ok := r.runContext(j.runID)
+	r.mu.Lock()
+	st, ok := r.runs[j.runID]
 	if !ok {
+		r.mu.Unlock()
 		return
 	}
-	if ctx.Err() != nil {
-		// Canceled while still queued: never write "running" or start a
-		// target, so started_at stays unset.
+	ctx := st.ctx
+	if st.canceled || ctx.Err() != nil {
+		// Canceled (by Cancel, or the run's context otherwise done) while
+		// still queued: never write "running" or start a target, so
+		// started_at stays unset. Checking st.canceled here, under the same
+		// lock Cancel uses to set it, closes the race where a lane reads
+		// ctx.Err()==nil right before Cancel commits and goes on to write
+		// "running" anyway.
+		r.mu.Unlock()
 		r.finishLane(j.runID, false, true)
 		return
 	}
-	r.markStarted(j.runID)
+	st.started = true
+	r.mu.Unlock()
+
 	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
 		r.publishRun(j.runID, "running", "")
 	}
@@ -440,6 +433,23 @@ func (r *Runner) publishRun(runID int64, status, errMsg string) {
 	}))
 }
 
+// claimForForceCancel atomically removes id from r.runs if it is still
+// present there, reporting whether it did. Deleting and checking under the
+// same r.mu critical section is what makes this race-free against
+// finishLane, which deletes the same map entry (under r.mu too) right
+// before it persists the run's real terminal status: at most one of the
+// two calls can observe the entry and delete it, so exactly one of them
+// gets to write the run's final status — the loser must not overwrite it.
+func (r *Runner) claimForForceCancel(id int64) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.runs[id]; !ok {
+		return false
+	}
+	delete(r.runs, id)
+	return true
+}
+
 // Shutdown stops accepting work, waits up to Grace for in-flight lanes,
 // then force-cancels what is left and marks only the runs still genuinely
 // in flight as canceled — a run finishLane already resolved to done/failed
@@ -489,12 +499,9 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	}
 
 	for _, id := range stuck {
-		r.mu.Lock()
-		_, stillInFlight := r.runs[id]
-		r.mu.Unlock()
-		if !stillInFlight {
-			// finishLane already ran and persisted the run's real terminal
-			// status (done/failed/canceled); do not overwrite it.
+		if !r.claimForForceCancel(id) {
+			// finishLane already claimed and persisted the run's real
+			// terminal status (done/failed/canceled); do not overwrite it.
 			continue
 		}
 		markCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

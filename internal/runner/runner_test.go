@@ -473,6 +473,14 @@ func TestEnqueueDedupeIsRaceFree(t *testing.T) {
 // TestCancelQueuedRunNeverStarts cancels a run while it still sits behind
 // another run in the same lane's channel. It must land on "canceled"
 // without ever having started_at set, i.e. it never actually ran.
+//
+// Cancel is called immediately after Enqueue, with no sleep: Cancel sets
+// runState.canceled and calls the run's CancelFunc atomically under r.mu,
+// and execute() checks st.canceled under that same lock before ever
+// writing "running", so the outcome is correct regardless of exactly when
+// the lane worker gets around to dequeuing runB relative to when Cancel
+// runs (runA's slow engine just guarantees a wide margin). Run with
+// -count=N to hammer the race from many different schedules.
 func TestCancelQueuedRunNeverStarts(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
@@ -489,9 +497,9 @@ func TestCancelQueuedRunNeverStarts(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// runA occupies the wan lane's single worker for ~20*2*30ms; runB is
-	// still waiting in the lane channel at this point.
-	time.Sleep(20 * time.Millisecond)
+	// No sleep: cancel runB as soon as it's queued. runA's slow engine
+	// (20*2*30ms) keeps the wan lane's single worker busy well past this
+	// point, so runB is still sitting in the lane channel either way.
 	if !r.Cancel(runB) {
 		t.Fatal("Cancel returned false for a queued run")
 	}
@@ -506,4 +514,206 @@ func TestCancelQueuedRunNeverStarts(t *testing.T) {
 
 	r.Cancel(runA)
 	waitForRun(t, db, runA)
+}
+
+// TestShutdownClaimNeverOverwritesFinishedRun proves the atomic
+// "delete-to-claim" invariant Shutdown's final loop relies on
+// (claimForForceCancel) directly and deterministically: it drives
+// finishLane (the exact code a lane worker calls on completion) to win the
+// race first — deleting the run from r.runs and persisting "done" — then
+// calls the real claimForForceCancel, the same method Shutdown's loop
+// calls, against that same run id. Because the entry is already gone, the
+// claim must report false and Shutdown's loop would `continue` without
+// ever touching the store again, leaving "done" intact.
+//
+// A real end-to-end reproduction of this race (via a live Shutdown() call
+// racing finishLane on the scheduler's own timing) was tried and found too
+// narrow a window to trigger reliably either with or without the fix — the
+// claim's critical section is only a couple of instructions. Calling the
+// production claimForForceCancel method directly (rather than duplicating
+// its logic in the test) still exercises the real code Shutdown runs,
+// while pinning down the exact interleaving instead of hoping the
+// scheduler reproduces it. TestShutdownGaveUpReturnsCtxErr below covers
+// the surrounding gaveUp control flow end-to-end.
+func TestShutdownClaimNeverOverwritesFinishedRun(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+
+	runID, err := db.CreateRun(ctx, "manual", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runCtx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	r.mu.Lock()
+	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: 1, started: true}
+	r.mu.Unlock()
+
+	// finishLane wins the race: exactly what a lane worker calls when its
+	// last target finishes successfully. It deletes the run from r.runs
+	// and persists "done".
+	r.finishLane(runID, false, false)
+
+	run, err := db.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "done" {
+		t.Fatalf("setup: run status = %q, want done", run.Status)
+	}
+
+	// The real method Shutdown's final loop calls for each stuck id.
+	if r.claimForForceCancel(runID) {
+		t.Fatal("claimForForceCancel returned true for a run finishLane already claimed")
+	}
+	// Shutdown's real loop would `continue` here without ever calling
+	// SetRunStatus("canceled", ...); confirm the store still says "done".
+
+	run, err = db.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "done" {
+		t.Errorf("status after claim attempt = %q, want done (must not be overwritten)", run.Status)
+	}
+}
+
+// TestClaimForForceCancelIsExclusiveWithFinishLane races the real
+// claimForForceCancel (what Shutdown's final loop calls) against the real
+// finishLane (what a lane worker calls on completion) for the same run id,
+// many times, to prove they can never both believe they own the run.
+//
+// finishLane always deletes r.runs[id] under r.mu once it decides the
+// run's terminal status; claimForForceCancel must do the same atomically,
+// so that whichever of the two loses the race sees the entry already gone
+// and never acts on it. Before the fix, claimForForceCancel only checked
+// presence without deleting, so it could report "still in flight" (true)
+// even after finishLane had already deleted the entry and wrote "done" —
+// letting Shutdown's caller go on to overwrite it with "canceled". This
+// test verifies the exclusivity property directly (rather than hoping a
+// live Shutdown() call happens to interleave the same way), by asserting
+// that whenever claimForForceCancel reports ownership, finishLane's own
+// write must not have landed.
+func TestClaimForForceCancelIsExclusiveWithFinishLane(t *testing.T) {
+	const trials = 60
+	for i := 0; i < trials; i++ {
+		r, db, _ := newTestRunner(t)
+		ctx := context.Background()
+
+		runID, err := db.CreateRun(ctx, "manual", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		runCtx, cancel := context.WithCancel(context.Background())
+		r.mu.Lock()
+		r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: 1, started: true}
+		r.mu.Unlock()
+
+		var claimed bool
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			claimed = r.claimForForceCancel(runID)
+		}()
+		go func() {
+			defer wg.Done()
+			r.finishLane(runID, false, false)
+		}()
+		wg.Wait()
+		cancel()
+
+		r.mu.Lock()
+		_, stillPresent := r.runs[runID]
+		r.mu.Unlock()
+		if stillPresent {
+			t.Fatalf("trial %d: run still present in r.runs after both raced to completion", i)
+		}
+
+		run, err := db.GetRun(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if claimed {
+			// claimForForceCancel says it deleted the entry itself, which
+			// means finishLane's own guarded delete must have found it
+			// already gone and returned without writing anything.
+			if run.Status == "done" {
+				t.Fatalf("trial %d: claimForForceCancel claimed ownership but finishLane still wrote"+
+					" done — the two are not mutually exclusive", i)
+			}
+		} else {
+			// Lost the claim race: finishLane must be the one that deleted
+			// the entry, so it must have written "done".
+			if run.Status != "done" {
+				t.Fatalf("trial %d: claim lost the race but status = %q, want done", i, run.Status)
+			}
+		}
+	}
+}
+
+// TestShutdownGaveUpReturnsCtxErr checks the gaveUp control flow itself:
+// an already-expired ctx must make Shutdown force-cancel in-flight runs
+// and return ctx.Err(), without blocking on the (large) Grace period.
+func TestShutdownGaveUpReturnsCtxErr(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "gaveup.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	reg := engine.NewRegistry()
+	reg.Register(&fake.Engine{Steps: 50, Delay: 40 * time.Millisecond})
+	r := New(Config{
+		Store: db, Registry: reg, Hub: sse.NewHub(),
+		Logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Grace:  1 * time.Minute, // large: must not be waited out
+	})
+	r.Start()
+
+	ctx := context.Background()
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, Lane: "wan"})
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// This test is only about the gaveUp/ctx.Err() control flow, not about
+	// racing Enqueue against Shutdown (that's covered by
+	// TestConcurrentEnqueueAndShutdownNoPanic and
+	// TestClaimForForceCancelIsExclusiveWithFinishLane), so wait for the
+	// lane worker to actually reach "running" — and be safely blocked deep
+	// in the slow engine's loop — before forcing shutdown.
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		run, err := db.GetRun(ctx, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if run.Status == "running" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("run never reached running, status = %q", run.Status)
+		}
+		time.Sleep(time.Millisecond)
+	}
+
+	expiredCtx, cancel := context.WithDeadline(ctx, time.Now().Add(-time.Second))
+	defer cancel()
+
+	start := time.Now()
+	if err := r.Shutdown(expiredCtx); err != context.DeadlineExceeded {
+		t.Fatalf("Shutdown = %v, want context.DeadlineExceeded", err)
+	}
+	if elapsed := time.Since(start); elapsed > 5*time.Second {
+		t.Errorf("Shutdown took %v, want well under Grace (1m) since ctx was already expired", elapsed)
+	}
+
+	run, err := db.GetRun(ctx, runID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != "canceled" && run.Status != "done" && run.Status != "failed" {
+		t.Errorf("status after gaveUp shutdown = %q, want terminal", run.Status)
+	}
 }
