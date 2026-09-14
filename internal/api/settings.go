@@ -132,12 +132,24 @@ func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// maskChannelTokens replaces every set channel token with
-// settings.MaskedSecret, leaving an unset one as the empty string.
+// maskChannelTokens replaces every set channel secret — the token, each
+// webhook header value and each apprise URL (which embeds its own
+// credentials) — with settings.MaskedSecret, leaving unset ones as the
+// empty string.
 func maskChannelTokens(n *settings.Notifications) {
 	for i := range n.Channels {
 		if n.Channels[i].Token != "" {
 			n.Channels[i].Token = settings.MaskedSecret
+		}
+		for k, v := range n.Channels[i].Headers {
+			if v != "" {
+				n.Channels[i].Headers[k] = settings.MaskedSecret
+			}
+		}
+		for j, u := range n.Channels[i].URLs {
+			if u != "" {
+				n.Channels[i].URLs[j] = settings.MaskedSecret
+			}
 		}
 	}
 }
@@ -176,6 +188,19 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	if err := validateSettings(body, current); err != nil {
 		errBadRequest(w, err.Error())
 		return
+	}
+
+	// Merged up front, alongside validation, so a channel whose masked
+	// secret cannot be carried forward (type/url changed) rejects the
+	// whole PUT as a no-op rather than after other sections already wrote.
+	var mergedChannels *[]settings.Channel
+	if n := body.Notifications; n != nil && n.Channels != nil {
+		merged, err := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
+		if err != nil {
+			errBadRequest(w, err.Error())
+			return
+		}
+		mergedChannels = &merged
 	}
 
 	// Validation above ran over the full document up front, so a Set
@@ -257,14 +282,9 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if n := body.Notifications; n != nil {
-		var channels *[]settings.Channel
-		if n.Channels != nil {
-			merged := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
-			channels = &merged
-		}
 		writes := []func() error{
 			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyEnabled, n.Enabled) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyChannels, channels) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyChannels, mergedChannels) },
 			func() error {
 				return setPtr(ctx, d.Settings, settings.KeyNotifyDefaultThresholds, n.DefaultThresholds)
 			},
@@ -294,23 +314,73 @@ func setPtr[T any](ctx context.Context, s *settings.Store, key string, v *T) err
 	return s.Set(ctx, key, *v)
 }
 
-// mergeChannelSecrets replaces a channel's masked token with the one
-// already stored for the same channel id. A brand-new channel that
-// somehow carries the mask gets an empty token rather than the literal
-// "***".
-func mergeChannelSecrets(incoming []settings.Channel, current []settings.Channel) []settings.Channel {
-	stored := make(map[string]string, len(current))
+// mergeChannelSecrets replaces a masked secret — token, header value or
+// apprise URL — with the one already stored for the same channel id, but
+// only when the stored channel's type and url are unchanged: echoing
+// "***" back after switching the url (or type) would otherwise forward
+// the stored credential to whatever host the url now points at. When a
+// channel carries a masked secret but its type/url changed (or it has no
+// stored counterpart), that channel is reported so the caller can turn it
+// into a 400 asking the client to re-enter the secret.
+func mergeChannelSecrets(incoming []settings.Channel, current []settings.Channel) ([]settings.Channel, error) {
+	stored := make(map[string]settings.Channel, len(current))
 	for _, c := range current {
-		stored[c.ID] = c.Token
+		stored[c.ID] = c
 	}
 	out := make([]settings.Channel, len(incoming))
 	copy(out, incoming)
 	for i := range out {
+		if !channelHasMaskedSecret(out[i]) {
+			continue
+		}
+		old, ok := stored[out[i].ID]
+		if !ok || old.Type != out[i].Type || old.URL != out[i].URL {
+			return nil, fmt.Errorf("channel %s: type or url changed; re-enter the token", out[i].ID)
+		}
 		if out[i].Token == settings.MaskedSecret {
-			out[i].Token = stored[out[i].ID]
+			out[i].Token = old.Token
+		}
+		if len(out[i].Headers) > 0 {
+			merged := make(map[string]string, len(out[i].Headers))
+			for k, v := range out[i].Headers {
+				if v == settings.MaskedSecret {
+					v = old.Headers[k]
+				}
+				merged[k] = v
+			}
+			out[i].Headers = merged
+		}
+		if len(out[i].URLs) > 0 {
+			merged := make([]string, len(out[i].URLs))
+			for j, u := range out[i].URLs {
+				if u == settings.MaskedSecret && j < len(old.URLs) {
+					u = old.URLs[j]
+				}
+				merged[j] = u
+			}
+			out[i].URLs = merged
 		}
 	}
-	return out
+	return out, nil
+}
+
+// channelHasMaskedSecret reports whether ch carries settings.MaskedSecret
+// in its token, any header value or any apprise url.
+func channelHasMaskedSecret(ch settings.Channel) bool {
+	if ch.Token == settings.MaskedSecret {
+		return true
+	}
+	for _, v := range ch.Headers {
+		if v == settings.MaskedSecret {
+			return true
+		}
+	}
+	for _, u := range ch.URLs {
+		if u == settings.MaskedSecret {
+			return true
+		}
+	}
+	return false
 }
 
 // setSecret writes *v under key when v is non-nil, unless it equals

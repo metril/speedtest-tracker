@@ -338,14 +338,87 @@ func TestPutNotificationsKeepsMaskedTokenByID(t *testing.T) {
 		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"}})
 	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
 		"notifications": map[string]any{"channels": []map[string]any{
-			{"id": "c1", "type": "ntfy", "url": "https://ntfy.sh/y", "token": settings.MaskedSecret}}},
+			{"id": "c1", "type": "ntfy", "url": "https://ntfy.sh/x", "token": settings.MaskedSecret}}},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
 	}
 	got, _ := st.Notifications(context.Background())
-	if got.Channels[0].Token != "tk_1" || got.Channels[0].URL != "https://ntfy.sh/y" {
-		t.Fatalf("channel = %+v, want the stored token kept and the URL updated", got.Channels[0])
+	if got.Channels[0].Token != "tk_1" || got.Channels[0].URL != "https://ntfy.sh/x" {
+		t.Fatalf("channel = %+v, want the stored token kept", got.Channels[0])
+	}
+}
+
+// TestPutNotificationsRejectsMaskedTokenAfterURLChange is the regression
+// case for finding 4: echoing back "***" while also changing the url (or
+// type) must not forward the stored token to whatever host the new url
+// points at. It must be rejected as a 400, and the PUT must be a no-op —
+// not even other, unrelated sections may be written.
+func TestPutNotificationsRejectsMaskedTokenAfterURLChange(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"}})
+	st.Set(ctx, settings.KeyNotifyCooldownMinutes, 30)
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"notifications": map[string]any{
+			"cooldown_minutes": 45,
+			"channels": []map[string]any{
+				{"id": "c1", "type": "ntfy", "url": "https://attacker.example/x", "token": settings.MaskedSecret}},
+		},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
+	}
+	got, _ := st.Notifications(ctx)
+	if got.Channels[0].URL != "https://ntfy.sh/x" || got.CooldownMinutes != 30 {
+		t.Fatalf("rejected PUT was not a no-op: %+v", got)
+	}
+}
+
+// TestGetSettingsMasksChannelHeadersAndApprisURLs is the regression case
+// for finding 1: webhook header values and apprise urls (which embed
+// credentials) must be masked in GET /settings just like the token is,
+// and a PUT echoing the masks back must restore them from the stored
+// channel.
+func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "wh", Type: "webhook", URL: "https://hook", Headers: map[string]string{"Authorization": "secret-header"}},
+		{ID: "ap", Type: "apprise", URL: "https://apprise", URLs: []string{"tgram://token/chat"}},
+	})
+
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
+	var body struct {
+		Notifications settings.Notifications `json:"notifications"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Notifications.Channels[0].Headers["Authorization"] != settings.MaskedSecret {
+		t.Fatalf("header = %+v, want masked", body.Notifications.Channels[0].Headers)
+	}
+	if body.Notifications.Channels[1].URLs[0] != settings.MaskedSecret {
+		t.Fatalf("apprise url = %+v, want masked", body.Notifications.Channels[1].URLs)
+	}
+
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"notifications": map[string]any{"channels": []map[string]any{
+			{"id": "wh", "type": "webhook", "url": "https://hook",
+				"headers": map[string]string{"Authorization": settings.MaskedSecret}},
+			{"id": "ap", "type": "apprise", "url": "https://apprise",
+				"urls": []string{settings.MaskedSecret}},
+		}},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
+	}
+	got, _ := st.Notifications(ctx)
+	if got.Channels[0].Headers["Authorization"] != "secret-header" {
+		t.Fatalf("header not restored: %+v", got.Channels[0].Headers)
+	}
+	if got.Channels[1].URLs[0] != "tgram://token/chat" {
+		t.Fatalf("apprise url not restored: %+v", got.Channels[1].URLs)
 	}
 }
 
