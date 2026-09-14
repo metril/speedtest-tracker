@@ -73,11 +73,12 @@ const boulder: OoklaServer = {
 };
 
 const frankfurtIperf: Iperf3Server = {
-  id: 1, host: 'iperf.example.net', port: 5201, options: '-R,-u',
-  supports_reverse: true, supports_udp: true, country: 'DE', site: 'Frankfurt', provider: 'Example Net',
+  id: 1, host: 'iperf.example.net', port: 5201, port_end: 5210, options: '-R,-u',
+  supports_reverse: true, supports_udp: true, supports_ipv6: true, gbs: '10',
+  country: 'DE', continent: 'Europe', site: 'Frankfurt', provider: 'Example Net',
 };
 const denverIperf: Iperf3Server = {
-  id: 2, host: 'speed.other.net', port: 5202, supports_reverse: false, supports_udp: false,
+  id: 2, host: 'speed.other.net', port: 5202, supports_reverse: false, supports_udp: false, supports_ipv6: false,
   country: 'US', site: 'Denver', provider: 'Other Net',
 };
 
@@ -315,13 +316,13 @@ describe('Iperf3Fields: picker wiring', () => {
     // The picker only opens once focused (see the jsdom-hang rationale
     // above) — focus it to see the already-fetched default list.
     fireEvent.focus(screen.getByLabelText('Pick from public list'));
-    expect(await screen.findByText('iperf.example.net:5201')).toBeInTheDocument();
+    expect(await screen.findByText('iperf.example.net:5201–5210')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('mock-popover-force-close'));
-    expect(screen.queryByText('iperf.example.net:5201')).not.toBeInTheDocument();
+    expect(screen.queryByText('iperf.example.net:5201–5210')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByLabelText('Pick from public list'), { target: { value: 'frank' } });
-    expect(await screen.findByText('iperf.example.net:5201')).toBeInTheDocument();
+    expect(await screen.findByText('iperf.example.net:5201–5210')).toBeInTheDocument();
   });
 
   it('keeps the host and port fields directly editable', () => {
@@ -333,6 +334,31 @@ describe('Iperf3Fields: picker wiring', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Advanced options' }));
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5202' } });
     expect(onChange).toHaveBeenCalledWith({ host: 'manual.example.net', port: 5202 });
+  });
+
+  it('picking a server that supports -R sets reverse and shows the enabled hint', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={onChange} />);
+
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
+    fireEvent.click(await screen.findByText('iperf.example.net:5201–5210'));
+
+    expect(onChange).toHaveBeenCalledWith({
+      host: 'iperf.example.net', port: 5201, reverse: true, port_range_end: 5210,
+    });
+    expect(screen.getByText(/Reverse enabled: this server supports -R/)).toBeInTheDocument();
+  });
+
+  it('picking a server without -R support does not set reverse or a port range', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [denverIperf], total: 1 }));
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={onChange} />);
+
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
+    fireEvent.click(await screen.findByText('speed.other.net:5202'));
+
+    expect(onChange).toHaveBeenCalledWith({ host: 'speed.other.net', port: 5202 });
   });
 });
 
@@ -389,16 +415,41 @@ describe('Iperf3Fields: advanced options disclosure', () => {
 });
 
 describe('Iperf3ResultsList (tested directly, no Popover)', () => {
-  it('renders host:port, site/country, provider and capability hints', () => {
+  it('renders host:port-port_end, site/country (continent), provider', () => {
     render(
       <Iperf3ResultsList servers={[frankfurtIperf, denverIperf]} isFetching={false} isError={false} onSelect={vi.fn()} />,
     );
-    expect(screen.getByText('iperf.example.net:5201')).toBeInTheDocument();
+    expect(screen.getByText('iperf.example.net:5201–5210')).toBeInTheDocument();
     expect(screen.getByText('speed.other.net:5202')).toBeInTheDocument();
-    expect(screen.getByText(/Frankfurt, DE/)).toBeInTheDocument();
-    expect(screen.getByText(/Example Net/)).toBeInTheDocument();
-    expect(screen.getByText(/supports -R/)).toBeInTheDocument();
-    expect(screen.getByText(/supports UDP/)).toBeInTheDocument();
+    expect(screen.getByText('Frankfurt, DE (Europe), Example Net')).toBeInTheDocument();
+    expect(screen.getByText('Denver, US, Other Net')).toBeInTheDocument();
+  });
+
+  it('shows right-aligned badge chips for gbs, -R, UDP and IPv6', () => {
+    render(
+      <Iperf3ResultsList servers={[frankfurtIperf]} isFetching={false} isError={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByText('10G')).toBeInTheDocument();
+    expect(screen.getByText('-R')).toBeInTheDocument();
+    expect(screen.getByText('UDP')).toBeInTheDocument();
+    expect(screen.getByText('IPv6')).toBeInTheDocument();
+  });
+
+  it('renders a non-numeric gbs value verbatim, without an appended G', () => {
+    render(
+      <Iperf3ResultsList servers={[{ ...frankfurtIperf, gbs: 'n/a' }]} isFetching={false} isError={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.getByText('n/a')).toBeInTheDocument();
+    expect(screen.queryByText('n/aG')).not.toBeInTheDocument();
+  });
+
+  it('omits capability badges a server does not support', () => {
+    render(
+      <Iperf3ResultsList servers={[denverIperf]} isFetching={false} isError={false} onSelect={vi.fn()} />,
+    );
+    expect(screen.queryByText('-R')).not.toBeInTheDocument();
+    expect(screen.queryByText('UDP')).not.toBeInTheDocument();
+    expect(screen.queryByText('IPv6')).not.toBeInTheDocument();
   });
 
   it('calls onSelect with the chosen server, prefilling host and port', () => {
@@ -406,7 +457,7 @@ describe('Iperf3ResultsList (tested directly, no Popover)', () => {
     render(
       <Iperf3ResultsList servers={[frankfurtIperf]} isFetching={false} isError={false} onSelect={onSelect} />,
     );
-    fireEvent.click(screen.getByText('iperf.example.net:5201'));
+    fireEvent.click(screen.getByText('iperf.example.net:5201–5210'));
     expect(onSelect).toHaveBeenCalledWith(frankfurtIperf);
   });
 

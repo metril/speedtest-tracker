@@ -316,19 +316,31 @@ export function Iperf3ResultsList({ servers, isFetching, isError, onSelect }: {
         )}
         {!isFetching && !isError && servers.length > 0 && (
           <CommandGroup heading="Public iperf3 servers">
-            {servers.slice(0, 50).map((s) => (
-              <CommandItem key={`${s.host}:${s.port}`} value={`${s.host}:${s.port}`} onSelect={() => onSelect(s)}>
-                <div className="flex w-full items-baseline justify-between gap-2">
-                  <span className="truncate text-fg">{s.host}:{s.port}</span>
-                  <span className="shrink-0 text-xs text-faint">
-                    {[s.site, s.country].filter(Boolean).join(', ')}
-                    {s.provider ? ` · ${s.provider}` : ''}
-                    {s.supports_reverse ? ' · supports -R' : ''}
-                    {s.supports_udp ? ' · supports UDP' : ''}
-                  </span>
-                </div>
-              </CommandItem>
-            ))}
+            {servers.slice(0, 50).map((s) => {
+              const portLabel = s.port_end && s.port_end > s.port ? `${s.port}–${s.port_end}` : `${s.port}`;
+              const location = [
+                s.site,
+                s.country && s.continent ? `${s.country} (${s.continent})` : (s.country || s.continent),
+                s.provider,
+              ].filter(Boolean).join(', ');
+              const gbsNumeric = s.gbs !== undefined && /^\d+(\.\d+)?$/.test(s.gbs);
+              return (
+                <CommandItem key={`${s.host}:${s.port}`} value={`${s.host}:${s.port}`} onSelect={() => onSelect(s)}>
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <span className="truncate text-fg">{s.host}:{portLabel}</span>
+                      {location && <span className="block truncate text-xs text-faint">{location}</span>}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-1">
+                      {s.gbs && <Badge variant="outline">{gbsNumeric ? `${s.gbs}G` : s.gbs}</Badge>}
+                      {s.supports_reverse && <Badge variant="outline">-R</Badge>}
+                      {s.supports_udp && <Badge variant="outline">UDP</Badge>}
+                      {s.supports_ipv6 && <Badge variant="outline">IPv6</Badge>}
+                    </div>
+                  </div>
+                </CommandItem>
+              );
+            })}
           </CommandGroup>
         )}
       </CommandList>
@@ -436,17 +448,19 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
   const handlePick = (s: Iperf3Server) => {
     let next = setOption(options, 'host', s.host);
     next = setOption(next, 'port', s.port);
+    if (s.supports_reverse) next = setOption(next, 'reverse', true);
+    if (s.port_end && s.port_end > s.port) next = setOption(next, 'port_range_end', s.port_end);
     onChange(next);
     setPickedHints({ reverse: s.supports_reverse, udp: s.supports_udp });
     setSearch(`${s.host}:${s.port}`);
     setFocused(false);
-    // Surface the advanced section so the -R hint below the host field
-    // isn't the only clue that this server needs it ticked.
-    if (s.supports_reverse) setAdvancedOpen(true);
+    // Surface the advanced section: reverse was just turned on for this
+    // pick, and a wider port range is worth showing too.
+    if (s.supports_reverse || (s.port_end && s.port_end > s.port)) setAdvancedOpen(true);
   };
 
   const hints = pickedHints
-    ? [pickedHints.reverse && 'supports -R', pickedHints.udp && 'supports UDP'].filter(Boolean)
+    ? [pickedHints.reverse && 'Reverse enabled: this server supports -R', pickedHints.udp && 'supports UDP'].filter(Boolean)
     : [];
 
   return (
@@ -469,7 +483,7 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
               className={field}
               value={search}
               autoComplete="off"
-              placeholder="host, site, country or provider"
+              placeholder="host, site, country/continent or provider"
               onFocus={() => setFocused(true)}
               onChange={(e) => { setSearch(e.target.value); setFocused(true); }}
             />
@@ -514,6 +528,12 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
         <label className={label} htmlFor="iperf-port">Port</label>
         <input id="iperf-port" className={field} value={text('port')} placeholder="5201"
           onChange={(e) => onChange(setOption(options, 'port', numberOr(e.target.value)))} />
+      </div>
+      <div>
+        <label className={label} htmlFor="iperf-port-range-end">Port range end</label>
+        <input id="iperf-port-range-end" className={field} value={text('port_range_end')}
+          placeholder="retry ports up to this one when busy"
+          onChange={(e) => onChange(setOption(options, 'port_range_end', numberOr(e.target.value)))} />
       </div>
       <div>
         <label className={label} htmlFor="iperf-protocol">Protocol</label>

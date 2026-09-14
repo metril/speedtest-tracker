@@ -59,9 +59,11 @@ export interface Iperf3Server {
   id: number;
   host: string;
   port: number;
+  port_end?: number;
   options?: string;
   supports_reverse: boolean;
   supports_udp: boolean;
+  supports_ipv6: boolean;
   gbs?: string;
   continent?: string;
   country?: string;
