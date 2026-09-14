@@ -137,12 +137,12 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
 function CompactBar({ live, onExpand }: { live: LiveRun; onExpand: () => void }) {
   const pct = Math.round(Math.min(Math.max(live.progress, 0), 1) * 100);
   return (
-    <div className="border-b border-sky-900/60 bg-sky-950/40" aria-live="polite">
+    <div className="border-b border-sky-900/60 bg-sky-950/40">
       <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-2 text-sm">
         <span className="rounded bg-sky-500/20 px-1.5 py-0.5 font-mono text-xs uppercase text-sky-300">
           {live.engine}
         </span>
-        <span className="w-24 capitalize text-slate-300">{live.phase}</span>
+        <span className="w-24 capitalize text-slate-300" aria-live="polite">{live.phase}</span>
         <div
           className="h-1 flex-1 overflow-hidden rounded bg-slate-800"
           role="progressbar"

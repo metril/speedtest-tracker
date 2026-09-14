@@ -47,6 +47,16 @@ describe('LivePanel', () => {
     expect(screen.getByRole('button', { name: /expand live test/i })).toBeInTheDocument();
   });
 
+  it('scopes the live region to the phase text, not the throughput readout', () => {
+    const { container } = renderPanel({ live: live(), expanded: false, open: vi.fn(), close: vi.fn() });
+    const liveRegion = container.querySelector('[aria-live="polite"]');
+    expect(liveRegion).not.toBeNull();
+    expect(liveRegion).toHaveTextContent('download');
+    expect(liveRegion).not.toHaveTextContent('Mbps');
+    expect(screen.getByText(/Mbps/)).not.toHaveAttribute('aria-live');
+    expect(screen.getByText(/Mbps/).closest('[aria-live]')).toBeNull();
+  });
+
   it('cancels the run', async () => {
     const fetchMock = vi.fn(async (..._args: unknown[]) => ({ ok: true, status: 202, statusText: 'ok', text: async () => '{}' }) as Response);
     vi.stubGlobal('fetch', fetchMock);
