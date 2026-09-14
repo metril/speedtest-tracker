@@ -59,7 +59,7 @@ func TestListRunsKeysetPagination(t *testing.T) {
 		ids = append(ids, id)
 	}
 
-	page1, next, err := s.ListRuns(ctx, 2, 0)
+	page1, next, err := s.ListRuns(ctx, RunFilter{Limit: 2})
 	if err != nil {
 		t.Fatalf("ListRuns: %v", err)
 	}
@@ -70,7 +70,7 @@ func TestListRunsKeysetPagination(t *testing.T) {
 		t.Fatalf("next = %d, want %d", next, ids[3])
 	}
 
-	page2, next2, err := s.ListRuns(ctx, 2, next)
+	page2, next2, err := s.ListRuns(ctx, RunFilter{Limit: 2, Cursor: next})
 	if err != nil {
 		t.Fatalf("page2: %v", err)
 	}
@@ -78,7 +78,7 @@ func TestListRunsKeysetPagination(t *testing.T) {
 		t.Fatalf("page2 = %+v", page2)
 	}
 
-	last, next3, err := s.ListRuns(ctx, 2, next2)
+	last, next3, err := s.ListRuns(ctx, RunFilter{Limit: 2, Cursor: next2})
 	if err != nil {
 		t.Fatalf("page3: %v", err)
 	}

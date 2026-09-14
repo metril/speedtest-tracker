@@ -9,3 +9,6 @@ var ErrNotFound = errors.New("store: not found")
 // in a terminal status (done|failed|canceled|skipped): once a run reaches
 // one of those, its status must never be overwritten.
 var ErrInvalidTransition = errors.New("store: invalid run status transition")
+
+// ErrNameConflict reports a UNIQUE constraint violation on a name column.
+var ErrNameConflict = errors.New("store: name already exists")

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 )
 
 // Run is one execution of a set of targets.
@@ -101,16 +102,31 @@ func (s *Store) GetRun(ctx context.Context, id int64) (*Run, error) {
 	return r, nil
 }
 
-// ListRuns returns up to limit runs newest-first. cursor is the id
-// returned by the previous page (0 for the first page); the returned
-// cursor is 0 when the listing is exhausted. Keyset, never OFFSET.
-func (s *Store) ListRuns(ctx context.Context, limit int, cursor int64) ([]Run, int64, error) {
-	limit = clampLimit(limit)
-	q := `SELECT ` + runColumns + ` FROM runs`
+// RunFilter narrows a runs listing. Cursor is the id returned by the
+// previous page (0 for the first page).
+type RunFilter struct {
+	ScheduleID *int64
+	Limit      int
+	Cursor     int64
+}
+
+// ListRuns returns up to Limit runs newest-first plus the cursor for the
+// next page (0 when exhausted). Keyset on id; never OFFSET.
+func (s *Store) ListRuns(ctx context.Context, f RunFilter) ([]Run, int64, error) {
+	limit := clampLimit(f.Limit)
+	where := []string{}
 	args := []any{}
-	if cursor > 0 {
-		q += ` WHERE id < ?`
-		args = append(args, cursor)
+	if f.Cursor > 0 {
+		where = append(where, `id < ?`)
+		args = append(args, f.Cursor)
+	}
+	if f.ScheduleID != nil {
+		where = append(where, `schedule_id = ?`)
+		args = append(args, *f.ScheduleID)
+	}
+	q := `SELECT ` + runColumns + ` FROM runs`
+	if len(where) > 0 {
+		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
 	q += ` ORDER BY id DESC LIMIT ?`
 	args = append(args, limit+1)
