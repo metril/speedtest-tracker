@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as api from './api';
 import {
-  queryKeys, useCronPreview, useReexecute, useRunTarget, useUpdateSettings,
+  queryKeys, useCronPreview, useReexecute, useRunTarget, useTargetHistory, useUpdateSettings,
 } from './queries';
 
 function wrapper(client: QueryClient) {
@@ -66,6 +66,39 @@ describe('useCronPreview', () => {
     vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ ok: true, next: ['2026-09-13T03:00:00Z'] })));
     const { result } = renderHook(() => useCronPreview('0 3 * * *', 'UTC'), { wrapper: wrapper(new QueryClient()) });
     await waitFor(() => expect(result.current.data).toEqual(['2026-09-13T03:00:00Z']));
+  });
+});
+
+describe('useTargetHistory', () => {
+  it('fetches offset 0 by default, with a query key that includes it', async () => {
+    const spy = vi.spyOn(api, 'targetHistory').mockResolvedValue(
+      { target_id: 1, from: '', to: '', bucket_seconds: 3600, points: [] },
+    );
+    const { result } = renderHook(() => useTargetHistory(1, '24h'), { wrapper: wrapper(new QueryClient()) });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(spy).toHaveBeenCalledWith(1, '24h', undefined);
+  });
+
+  it('fetches offset 1 when asked, under a distinct query key from offset 0', async () => {
+    const spy = vi.spyOn(api, 'targetHistory').mockResolvedValue(
+      { target_id: 1, from: '', to: '', bucket_seconds: 3600, points: [] },
+    );
+    const { result } = renderHook(
+      () => useTargetHistory(1, '24h', { offset: 1 }), { wrapper: wrapper(new QueryClient()) },
+    );
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(spy).toHaveBeenCalledWith(1, '24h', 1);
+    expect(queryKeys.history(1, '24h', 1)).not.toEqual(queryKeys.history(1, '24h'));
+  });
+
+  it('stays disabled when enabled:false, regardless of offset', () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    const { result } = renderHook(
+      () => useTargetHistory(1, '24h', { offset: 1, enabled: false }), { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(result.current.fetchStatus).toBe('idle');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

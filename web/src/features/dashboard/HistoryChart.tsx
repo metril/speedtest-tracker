@@ -14,6 +14,10 @@ export interface Series<R extends Row = Row> {
   label: string;
   color: string;
   unit: (n: number) => string;
+  /** dashed renders this series as a dashed, 40%-opacity line -- used for
+   * a previous-period overlay so it reads as a faint echo of the current
+   * line rather than a second first-class series. */
+  dashed?: boolean;
 }
 
 /** HistoryChart plots pre-downsampled buckets. The server already limited
@@ -62,7 +66,9 @@ export function HistoryChart<R extends Row>({ title, points, series, height = 24
             <Legend wrapperStyle={{ fontSize: 12 }} />
             {series.map((s) => (
               <Line key={String(s.key)} type="monotone" dataKey={String(s.key)} name={s.label}
-                stroke={s.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls />
+                stroke={s.color} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls
+                strokeDasharray={s.dashed ? '4 3' : undefined}
+                strokeOpacity={s.dashed ? 0.4 : undefined} />
             ))}
           </LineChart>
         </ResponsiveContainer>

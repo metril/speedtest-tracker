@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { SwitchField } from '../components/SwitchField';
 import { HistoryChart, type Series } from '../features/dashboard/HistoryChart';
 import { OutageStrip } from '../features/dashboard/OutageStrip';
 import { RangePicker } from '../features/dashboard/RangePicker';
@@ -44,14 +45,44 @@ function mergeByBucket(
 /** useAllTargetHistories fetches every target's history for `range` and
  * shares its cache entries (by query key) with whoever else asks for the
  * same target+range -- the per-card sparkline query and HistorySection's
- * merged charts both read through the same underlying fetches. */
-function useAllTargetHistories(targets: TargetSummary[], range: Range) {
+ * merged charts both read through the same underlying fetches. Pass
+ * `offset: 1` to fetch the immediately-preceding window instead (used for
+ * the "compare with previous period" overlay); that variant is gated by
+ * `enabled` so it only fires once the toggle is on. */
+function useAllTargetHistories(
+  targets: TargetSummary[], range: Range, opts?: { offset?: 0 | 1; enabled?: boolean },
+) {
+  const offset = opts?.offset;
+  const enabled = opts?.enabled ?? true;
   return useQueries({
     queries: targets.map((t) => ({
-      queryKey: queryKeys.history(t.target_id, range),
-      queryFn: () => api.targetHistory(t.target_id, range),
+      queryKey: queryKeys.history(t.target_id, range, offset),
+      queryFn: () => api.targetHistory(t.target_id, range, offset),
       staleTime: 60_000,
+      enabled,
     })),
+  });
+}
+
+/** mergePrevByIndex overlays a previous-period history onto rows already
+ * merged onto the current window's x-axis (mergeByBucket): the previous
+ * window's timestamps are different, so alignment is positional -- the
+ * i-th previous bucket's value lands on the i-th current row, under
+ * `<key>_<id>_prev`. */
+function mergePrevByIndex(
+  rows: Record<string, number | string>[],
+  prevHistories: Map<number, HistoryPoint[]>,
+  targetIds: number[],
+  keys: (keyof HistoryPoint)[],
+): Record<string, number | string>[] {
+  return rows.map((row, i) => {
+    const next = { ...row };
+    for (const id of targetIds) {
+      const p = (prevHistories.get(id) ?? [])[i];
+      if (!p) continue;
+      for (const key of keys) next[`${key}_${id}_prev`] = Number(p[key]);
+    }
+    return next;
   });
 }
 
@@ -89,9 +120,13 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
   );
   const outages = useOutages(range);
   const historyQueries = useAllTargetHistories(targets, range);
+  const [compare, setCompare] = useState(false);
+  const prevHistoryQueries = useAllTargetHistories(targets, range, { offset: 1, enabled: compare });
 
   const histories = new Map<number, HistoryPoint[]>();
   targets.forEach((t, i) => histories.set(t.target_id, historyQueries[i].data?.points ?? []));
+  const prevHistories = new Map<number, HistoryPoint[]>();
+  targets.forEach((t, i) => prevHistories.set(t.target_id, prevHistoryQueries[i].data?.points ?? []));
 
   const visibleTargets = targets.filter((t) => visible.has(t.target_id));
   const visibleIds = visibleTargets.map((t) => t.target_id);
@@ -104,38 +139,54 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
     });
   };
 
-  const throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
-  const latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
+  let throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
+  let latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
+  if (compare) {
+    throughputPoints = mergePrevByIndex(throughputPoints, prevHistories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
+    latencyPoints = mergePrevByIndex(latencyPoints, prevHistories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
+  }
 
-  const throughputSeries: Series[] = visibleTargets.flatMap((t, i) => [
-    {
-      key: `avg_download_bps_${t.target_id}`,
-      label: `${t.target_name} download`,
-      color: COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length],
-      unit: formatBps,
-    },
-    {
-      key: `avg_upload_bps_${t.target_id}`,
-      label: `${t.target_name} upload`,
-      color: COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length],
-      unit: formatBps,
-    },
-  ]);
+  const throughputSeries: Series[] = visibleTargets.flatMap((t, i) => {
+    const downloadColor = COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length];
+    const uploadColor = COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length];
+    const base: Series[] = [
+      { key: `avg_download_bps_${t.target_id}`, label: `${t.target_name} download`, color: downloadColor, unit: formatBps },
+      { key: `avg_upload_bps_${t.target_id}`, label: `${t.target_name} upload`, color: uploadColor, unit: formatBps },
+    ];
+    if (!compare) return base;
+    return [
+      ...base,
+      {
+        key: `avg_download_bps_${t.target_id}_prev`, label: `${t.target_name} download (prev)`,
+        color: downloadColor, unit: formatBps, dashed: true,
+      },
+      {
+        key: `avg_upload_bps_${t.target_id}_prev`, label: `${t.target_name} upload (prev)`,
+        color: uploadColor, unit: formatBps, dashed: true,
+      },
+    ];
+  });
 
-  const latencySeries: Series[] = visibleTargets.flatMap((t, i) => [
-    {
-      key: `avg_ping_ms_${t.target_id}`,
-      label: `${t.target_name} ping`,
-      color: COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length],
-      unit: formatMs,
-    },
-    {
-      key: `avg_jitter_ms_${t.target_id}`,
-      label: `${t.target_name} jitter`,
-      color: COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length],
-      unit: formatMs,
-    },
-  ]);
+  const latencySeries: Series[] = visibleTargets.flatMap((t, i) => {
+    const pingColor = COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length];
+    const jitterColor = COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length];
+    const base: Series[] = [
+      { key: `avg_ping_ms_${t.target_id}`, label: `${t.target_name} ping`, color: pingColor, unit: formatMs },
+      { key: `avg_jitter_ms_${t.target_id}`, label: `${t.target_name} jitter`, color: jitterColor, unit: formatMs },
+    ];
+    if (!compare) return base;
+    return [
+      ...base,
+      {
+        key: `avg_ping_ms_${t.target_id}_prev`, label: `${t.target_name} ping (prev)`,
+        color: pingColor, unit: formatMs, dashed: true,
+      },
+      {
+        key: `avg_jitter_ms_${t.target_id}_prev`, label: `${t.target_name} jitter (prev)`,
+        color: jitterColor, unit: formatMs, dashed: true,
+      },
+    ];
+  });
 
   return (
     <div className="grid gap-4">
@@ -165,6 +216,12 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 w-fit">
+            <SwitchField
+              id="compare-previous-period" label="Compare with previous period"
+              checked={compare} onCheckedChange={setCompare}
+            />
+          </div>
           <Tabs defaultValue="throughput">
             <TabsList>
               <TabsTrigger value="throughput">Throughput</TabsTrigger>

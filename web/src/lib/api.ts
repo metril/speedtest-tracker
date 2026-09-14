@@ -341,8 +341,8 @@ export const validateCron = async (cron: string, timezone: string) =>
 export const listRuns = (scheduleId?: number) =>
   request<RunsPage>(`/runs${query({ schedule_id: scheduleId, limit: 20 })}`);
 
-export const targetHistory = (id: number, range: Range) =>
-  request<History>(`/targets/${id}/history${query({ range })}`);
+export const targetHistory = (id: number, range: Range, offset?: 0 | 1) =>
+  request<History>(`/targets/${id}/history${query({ range, offset })}`);
 export const statsSummary = (range: Range, offset?: 0 | 1) =>
   request<SummaryStats>(`/stats/summary${query({ range, offset })}`);
 export const listOutages = (range: Range) =>

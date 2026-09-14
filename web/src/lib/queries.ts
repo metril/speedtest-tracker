@@ -237,10 +237,12 @@ export function usePreviousSummary(range: Range) {
   return useSummary(range, { offset: 1 });
 }
 
-export function useTargetHistory(id: number, range: Range, enabled = true) {
+export function useTargetHistory(id: number, range: Range, opts?: { enabled?: boolean; offset?: 0 | 1 }) {
+  const enabled = opts?.enabled ?? true;
+  const offset = opts?.offset;
   return useQuery({
-    queryKey: queryKeys.history(id, range),
-    queryFn: () => api.targetHistory(id, range),
+    queryKey: queryKeys.history(id, range, offset),
+    queryFn: () => api.targetHistory(id, range, offset),
     enabled,
     staleTime: 60_000,
   });
