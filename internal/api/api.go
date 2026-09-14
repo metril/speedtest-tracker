@@ -34,6 +34,9 @@ type Deps struct {
 	// ReloadSchedules asks the scheduler to rebuild its cron entries after
 	// a schedule mutation. Optional: nil means no scheduler is running.
 	ReloadSchedules func(context.Context) error
+
+	// summary caches /stats/summary bodies; New fills it in.
+	summary *summaryCache
 }
 
 // requestTimeout bounds every /api/v1 request except the SSE stream.
@@ -61,8 +64,11 @@ func New(deps Deps) http.Handler {
 		if deps.Store == nil {
 			return
 		}
+		if deps.summary == nil {
+			deps.summary = newSummaryCache(summaryTTL)
+		}
 		v1.Route("/targets", func(t chi.Router) {
-			t.Get("/", deps.listTargets)
+			t.Get("/", etagJSON(deps.listTargets))
 			t.Post("/", deps.createTarget)
 			t.Post("/test", deps.testTarget)
 			t.Get("/{id}", deps.getTarget)
@@ -73,7 +79,7 @@ func New(deps Deps) http.Handler {
 			t.Get("/{id}/history", deps.targetHistory)
 		})
 		v1.Route("/schedules", func(s chi.Router) {
-			s.Get("/", deps.listSchedules)
+			s.Get("/", etagJSON(deps.listSchedules))
 			s.Post("/", deps.createSchedule)
 			s.Post("/validate", deps.validateCron)
 			s.Get("/{id}", deps.getSchedule)
@@ -84,13 +90,13 @@ func New(deps Deps) http.Handler {
 		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
 		v1.Route("/runs", func(rt chi.Router) {
-			rt.Get("/", deps.listRuns)
+			rt.Get("/", etagJSON(deps.listRuns))
 			rt.Post("/", deps.createRun)
 			rt.Get("/{id}", deps.getRun)
 			rt.Delete("/{id}", deps.cancelRun)
 		})
 		v1.Route("/results", func(rs chi.Router) {
-			rs.Get("/", deps.listResults)
+			rs.Get("/", etagJSON(deps.listResults))
 			rs.Get("/{id}", deps.getResult)
 			rs.Delete("/{id}", deps.deleteResult)
 			rs.Post("/{id}/reexecute", deps.reexecuteResult)
@@ -98,6 +104,7 @@ func New(deps Deps) http.Handler {
 		})
 		v1.Get("/tags", deps.listTags)
 		v1.Get("/outages", deps.outages)
+		v1.Get("/stats/summary", deps.statsSummary)
 	})
 
 	if deps.UI != nil {

@@ -46,7 +46,7 @@ func rangeWindow(w http.ResponseWriter, r *http.Request) (string, string, bool) 
 		errBadRequest(w, "range must be one of 24h, 7d, 30d, or an explicit from/to pair")
 		return "", "", false
 	}
-	now := time.Now().UTC()
+	now := time.Now().UTC().Truncate(summaryTTL)
 	return now.Add(-span).Format(dbTimeFormat), now.Format(dbTimeFormat), true
 }
 

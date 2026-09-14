@@ -97,6 +97,18 @@ func do(t *testing.T, h http.Handler, method, path string, body any) *httptest.R
 	return rec
 }
 
+func newRequest(t *testing.T, method, path string, body io.Reader) *http.Request {
+	t.Helper()
+	return httptest.NewRequest(method, path, body)
+}
+
+func serve(t *testing.T, h http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
 func TestTargetsCRUDRoutes(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
