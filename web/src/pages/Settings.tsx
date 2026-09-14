@@ -1,56 +1,25 @@
-import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { LabelsEditor } from '../components/LabelsEditor';
-import { SwitchField } from '../components/SwitchField';
-import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
-import { ChannelEditor } from '../features/settings/ChannelEditor';
-import { Iperf3ServerListSection } from '../features/settings/Iperf3ServerListSection';
-import { fieldClass, inputClass, labelClass } from '../features/settings/styles';
-import { TokenPanel } from '../features/settings/TokenPanel';
-import { ThresholdFields, validateThresholds } from '../features/targets/ThresholdFields';
+import { NavLink, Outlet, useLocation } from 'react-router';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import type { SectionKey, SettingsOutletContext, TestResult } from '../features/settings/settingsContext';
+import { stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
+import { validateAuthSettings } from '../features/settings/AuthSection';
+import { validateThresholds } from '../features/targets/ThresholdFields';
 import type {
   AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
 } from '../lib/api';
-import { isChannelUnsaved, stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
 import { ApiError } from '../lib/api';
 import {
   useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
 } from '../lib/queries';
 
-type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications' | 'auth';
-
-function Section({
-  id, title, onSave, saving, error, saved, children,
-}: {
-  id: string;
-  title: string;
-  onSave: () => void;
-  saving: boolean;
-  error?: string;
-  saved: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <Card aria-labelledby={id} role="region" className="space-y-4">
-      <CardHeader className="pb-0">
-        <CardTitle id={id} className="text-lg">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        {children}
-        <div className="flex items-center gap-3">
-          <Button type="button" disabled={saving} onClick={onSave}>
-            Save {title}
-          </Button>
-          {saved && <p className="text-sm text-ok">Saved</p>}
-        </div>
-        {error && <p role="alert" className="text-sm text-bad">{error}</p>}
-      </CardContent>
-    </Card>
-  );
-}
+const TABS: { key: SectionKey; to: string; label: string }[] = [
+  { key: 'general', to: 'general', label: 'General' },
+  { key: 'engines', to: 'engines', label: 'Engines' },
+  { key: 'integrations', to: 'integrations', label: 'Integrations' },
+  { key: 'notifications', to: 'notifications', label: 'Notifications' },
+  { key: 'auth', to: 'auth', label: 'Auth' },
+];
 
 /** useSavedFlash shows a "Saved" message for a few seconds after a
  * successful save, per section. */
@@ -74,7 +43,14 @@ function useSavedFlash() {
   return { saved, flash };
 }
 
+/** Settings is the shell for /settings/*: a header, a sub-nav (a left
+ * column on md+, a Tabs strip below it), and an <Outlet/> for the active
+ * tab's content. It owns every section's local edit state, the fetch, the
+ * seed-once-from-server effect and the save/error/saved-flash cycle, and
+ * hands all of it down through useOutletContext so switching tabs never
+ * loses an in-progress, unsaved edit in another section. */
 export function Settings() {
+  const location = useLocation();
   const settings = useSettings();
   const update = useUpdateSettings();
   const test = useTestIntegration();
@@ -87,9 +63,9 @@ export function Settings() {
   const [auth, setAuth] = useState<AuthSettings | null>(null);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
   const { saved, flash } = useSavedFlash();
-  const [vmResult, setVmResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [vlResult, setVlResult] = useState<{ ok: boolean; message: string } | null>(null);
-  const [channelResults, setChannelResults] = useState<Record<string, { ok: boolean; message: string }>>({});
+  const [vmResult, setVmResult] = useState<TestResult | null>(null);
+  const [vlResult, setVlResult] = useState<TestResult | null>(null);
+  const [channelResults, setChannelResults] = useState<Record<string, TestResult>>({});
   const [testingChannelId, setTestingChannelId] = useState<string | null>(null);
 
   // Seed local edit state from the fetched settings exactly once. Refetches
@@ -116,12 +92,8 @@ export function Settings() {
     });
   };
 
-  const runTest = (
-    target: 'vm' | 'vl',
-    url: string,
-    authHeader: string,
-    setResult: (r: { ok: boolean; message: string } | null) => void,
-  ) => {
+  const runTest = (target: 'vm' | 'vl', url: string, authHeader: string) => {
+    const setResult = target === 'vm' ? setVmResult : setVlResult;
     setResult(null);
     test.mutate(
       { target, body: { url, auth_header: authHeader } },
@@ -204,263 +176,62 @@ export function Settings() {
     return <h1 className="text-xl font-semibold">Settings</h1>;
   }
 
+  const activeTab = TABS.find((t) => location.pathname.includes(`/settings/${t.to}`))?.key ?? 'general';
+
+  const context: SettingsOutletContext = {
+    locked: settings.data?.locked ?? [],
+    saving: update.isPending,
+    errors,
+    saved,
+    save,
+    general, setGeneral,
+    engines, setEngines,
+    integrations, setIntegrations,
+    testPending: test.isPending,
+    vmResult, vlResult, runTest,
+    notifications, setNotifications,
+    savedChannels: settings.data?.notifications.channels,
+    addChannel, updateChannel, removeChannel, runChannelTest, channelResults, testingChannelId, saveNotifications,
+    auth, setAuth, saveAuth,
+  };
+
   return (
     <div className="grid gap-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
-      <div className="space-y-8">
-        <Section
-          id="auth-heading" title="Auth" saving={update.isPending}
-          error={errors.auth} saved={saved.auth}
-          onSave={saveAuth}
-        >
-          <AuthSection value={auth} locked={settings.data?.locked ?? []} onChange={setAuth} />
 
-          <div className="grid gap-2 border-t border-line pt-4">
-            <h3 className="text-sm font-semibold text-fg">API tokens</h3>
-            <p className="text-sm text-faint">
-              Send a token as <code>Authorization: Bearer &lt;token&gt;</code>. The live-events
-              stream also accepts <code>?token=</code>.
-            </p>
-            <TokenPanel />
-          </div>
-        </Section>
+      <Tabs value={activeTab} onValueChange={() => {}} className="md:hidden">
+        <TabsList className="w-full justify-start overflow-x-auto">
+          {TABS.map((tab) => (
+            <TabsTrigger key={tab.key} value={tab.key} asChild>
+              <NavLink to={`/settings/${tab.to}`}>{tab.label}</NavLink>
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
 
-        <Section
-          id="general-heading" title="General" saving={update.isPending}
-          error={errors.general} saved={saved.general}
-          onSave={() => save('general', { general })}
-        >
-          <div className={fieldClass}>
-            <label htmlFor="general-base-url" className={labelClass}>Base URL</label>
-            <Input id="general-base-url" value={general.base_url}
-              onChange={(e) => setGeneral({ ...general, base_url: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-timezone" className={labelClass}>Timezone</label>
-            <Input id="general-timezone" value={general.timezone}
-              onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-units" className={labelClass}>Units</label>
-            <select id="general-units" className={inputClass} value={general.units}
-              onChange={(e) => setGeneral({ ...general, units: e.target.value })}>
-              <option value="Mbps">Mbps</option>
-              <option value="MB/s">MB/s</option>
-            </select>
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-log-level" className={labelClass}>Log level</label>
-            <select id="general-log-level" className={inputClass} value={general.log_level}
-              onChange={(e) => setGeneral({ ...general, log_level: e.target.value })}>
-              <option value="debug">debug</option>
-              <option value="info">info</option>
-              <option value="warn">warn</option>
-              <option value="error">error</option>
-            </select>
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-retention-results" className={labelClass}>Results retention (days)</label>
-            <Input id="general-retention-results" type="number" min={1}
-              value={general.retention_days_results}
-              onChange={(e) => setGeneral({ ...general, retention_days_results: Number(e.target.value) })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-retention-runs" className={labelClass}>Runs retention (days)</label>
-            <Input id="general-retention-runs" type="number" min={1}
-              value={general.retention_days_runs}
-              onChange={(e) => setGeneral({ ...general, retention_days_runs: Number(e.target.value) })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="general-prune-interval" className={labelClass}>Prune interval (minutes)</label>
-            <Input id="general-prune-interval" type="number" min={1}
-              value={general.retention_prune_interval_minutes}
-              onChange={(e) => setGeneral({ ...general, retention_prune_interval_minutes: Number(e.target.value) })} />
-          </div>
-        </Section>
-
-        <Section
-          id="engines-heading" title="Engines" saving={update.isPending}
-          error={errors.engines} saved={saved.engines}
-          onSave={() => save('engines', { engines })}
-        >
-          <div className={fieldClass}>
-            <label htmlFor="engines-speedtest-bin" className={labelClass}>Speedtest binary path</label>
-            <Input id="engines-speedtest-bin" value={engines.speedtest_bin}
-              onChange={(e) => setEngines({ ...engines, speedtest_bin: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="engines-iperf3-bin" className={labelClass}>iperf3 binary path</label>
-            <Input id="engines-iperf3-bin" value={engines.iperf3_bin}
-              onChange={(e) => setEngines({ ...engines, iperf3_bin: e.target.value })} />
-          </div>
-          <SwitchField
-            id="engines-ookla-accept-license" label="Accept Ookla license"
-            checked={engines.ookla_accept_license}
-            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_license: checked })}
-          />
-          <SwitchField
-            id="engines-ookla-accept-gdpr" label="Accept Ookla GDPR terms"
-            checked={engines.ookla_accept_gdpr}
-            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_gdpr: checked })}
-          />
-          <div className={fieldClass}>
-            <label htmlFor="engines-ttl" className={labelClass}>Server list TTL (seconds)</label>
-            <Input id="engines-ttl" type="number" min={1}
-              value={engines.server_list_ttl_seconds}
-              onChange={(e) => setEngines({ ...engines, server_list_ttl_seconds: Number(e.target.value) })} />
-          </div>
-
-          <div className="grid gap-2 border-t border-line pt-4">
-            <h3 className="text-sm font-semibold text-fg">iperf3 server list</h3>
-            <p className="text-sm text-faint">
-              A cached list of public iperf3 servers, refreshed daily, used by the target form's
-              &quot;Pick from public list&quot; picker. Clear the URL to disable the list entirely.
-            </p>
-            <div className={fieldClass}>
-              <label htmlFor="engines-iperf3-list-url" className={labelClass}>iperf3 server list URL</label>
-              <Input id="engines-iperf3-list-url" value={engines.iperf3_list_url}
-                onChange={(e) => setEngines({ ...engines, iperf3_list_url: e.target.value })} />
-            </div>
-            <Iperf3ServerListSection />
-          </div>
-        </Section>
-
-        <Section
-          id="integrations-heading" title="Integrations" saving={update.isPending}
-          error={errors.integrations} saved={saved.integrations}
-          onSave={() => save('integrations', { integrations })}
-        >
-          <SwitchField
-            id="vm-enabled" label="Enable VictoriaMetrics"
-            checked={integrations.vm_enabled}
-            onCheckedChange={(checked) => setIntegrations({ ...integrations, vm_enabled: checked })}
-          />
-          <div className={fieldClass}>
-            <label htmlFor="vm-url" className={labelClass}>VictoriaMetrics URL</label>
-            <Input id="vm-url" value={integrations.vm_url}
-              onChange={(e) => setIntegrations({ ...integrations, vm_url: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="vm-auth" className={labelClass}>VictoriaMetrics auth header</label>
-            <Input id="vm-auth" type="password" placeholder="leave unchanged"
-              value={integrations.vm_auth_header}
-              onChange={(e) => setIntegrations({ ...integrations, vm_auth_header: e.target.value })} />
-          </div>
-          <LabelsEditor
-            label="VictoriaMetrics extra labels"
-            value={integrations.vm_extra_labels}
-            onChange={(v) => setIntegrations({ ...integrations, vm_extra_labels: v })}
-          />
-          <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" disabled={test.isPending}
-              onClick={() => runTest('vm', integrations.vm_url, integrations.vm_auth_header, setVmResult)}>
-              Test VictoriaMetrics
-            </Button>
-            {vmResult && (
-              <p className={vmResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vmResult.message}</p>
-            )}
-          </div>
-
-          <SwitchField
-            id="vl-enabled" label="Enable VictoriaLogs"
-            checked={integrations.vl_enabled}
-            onCheckedChange={(checked) => setIntegrations({ ...integrations, vl_enabled: checked })}
-          />
-          <div className={fieldClass}>
-            <label htmlFor="vl-url" className={labelClass}>VictoriaLogs URL</label>
-            <Input id="vl-url" value={integrations.vl_url}
-              onChange={(e) => setIntegrations({ ...integrations, vl_url: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="vl-auth" className={labelClass}>VictoriaLogs auth header</label>
-            <Input id="vl-auth" type="password" placeholder="leave unchanged"
-              value={integrations.vl_auth_header}
-              onChange={(e) => setIntegrations({ ...integrations, vl_auth_header: e.target.value })} />
-          </div>
-          <LabelsEditor
-            label="Extra stream fields"
-            value={integrations.vl_stream_fields}
-            onChange={(v) => setIntegrations({ ...integrations, vl_stream_fields: v })}
-          />
-          <div className="flex items-center gap-3">
-            <Button type="button" variant="outline" disabled={test.isPending}
-              onClick={() => runTest('vl', integrations.vl_url, integrations.vl_auth_header, setVlResult)}>
-              Test VictoriaLogs
-            </Button>
-            {vlResult && (
-              <p className={vlResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vlResult.message}</p>
-            )}
-          </div>
-
-          <SwitchField
-            id="metrics-enabled" label="Enable /metrics endpoint"
-            hint="/metrics answers 404 while disabled"
-            checked={integrations.metrics_enabled}
-            onCheckedChange={(checked) => setIntegrations({ ...integrations, metrics_enabled: checked })}
-          />
-        </Section>
-
-        <Section
-          id="notifications-heading" title="Notifications" saving={update.isPending}
-          error={errors.notifications} saved={saved.notifications}
-          onSave={saveNotifications}
-        >
-          <SwitchField
-            id="notifications-enabled" label="Enabled"
-            hint="Nothing is delivered while this is off."
-            checked={notifications.enabled}
-            onCheckedChange={(checked) => setNotifications({ ...notifications, enabled: checked })}
-          />
-
-          <div className="grid gap-3">
-            {notifications.channels.map((channel) => (
-              <ChannelEditor
-                key={channel.id}
-                value={channel}
-                onChange={(next) => updateChannel(channel.id, next)}
-                onRemove={() => removeChannel(channel.id)}
-                onTest={() => runChannelTest(channel)}
-                testResult={channelResults[channel.id]}
-                testPending={testingChannelId === channel.id}
-                unsaved={isChannelUnsaved(channel, settings.data?.notifications.channels)}
-              />
+      <div className="grid gap-6 md:grid-cols-[12rem_1fr]">
+        <nav className="hidden md:block" aria-label="Settings sections">
+          <ul className="grid gap-1">
+            {TABS.map((tab) => (
+              <li key={tab.key}>
+                <NavLink
+                  to={`/settings/${tab.to}`}
+                  className={({ isActive }) =>
+                    `block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
+                      isActive ? 'bg-raised text-accent' : 'text-muted hover:bg-raised hover:text-fg'
+                    }`
+                  }
+                >
+                  {tab.label}
+                </NavLink>
+              </li>
             ))}
-            <Button type="button" variant="outline" onClick={addChannel}>Add channel</Button>
-          </div>
+          </ul>
+        </nav>
 
-          <div className={fieldClass}>
-            <label htmlFor="notifications-cooldown" className={labelClass}>Cooldown (minutes)</label>
-            <Input id="notifications-cooldown" type="number" min={1}
-              value={notifications.cooldown_minutes}
-              onChange={(e) => setNotifications({ ...notifications, cooldown_minutes: Number(e.target.value) })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="notifications-quiet-start" className={labelClass}>Quiet hours start</label>
-            <Input id="notifications-quiet-start" type="time"
-              value={notifications.quiet_hours_start}
-              onChange={(e) => setNotifications({ ...notifications, quiet_hours_start: e.target.value })} />
-          </div>
-          <div className={fieldClass}>
-            <label htmlFor="notifications-quiet-end" className={labelClass}>Quiet hours end</label>
-            <Input id="notifications-quiet-end" type="time"
-              value={notifications.quiet_hours_end}
-              onChange={(e) => setNotifications({ ...notifications, quiet_hours_end: e.target.value })} />
-          </div>
-          <SwitchField
-            id="notifications-notify-recovery" label="Send recovery notifications"
-            checked={notifications.notify_recovery}
-            onCheckedChange={(checked) => setNotifications({ ...notifications, notify_recovery: checked })}
-          />
-
-          <div className="grid gap-2">
-            <h3 className="text-sm font-semibold text-fg">Default thresholds</h3>
-            <p className="text-sm text-faint">Targets can override any of these in the target form.</p>
-            <ThresholdFields
-              value={notifications.default_thresholds}
-              onChange={(next) => setNotifications({ ...notifications, default_thresholds: next })}
-            />
-          </div>
-        </Section>
+        <div className="min-w-0">
+          <Outlet context={context} />
+        </div>
       </div>
     </div>
   );

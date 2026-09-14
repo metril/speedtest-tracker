@@ -1,12 +1,17 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import type { ReactNode } from 'react';
+import { MemoryRouter, Navigate, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../lib/api';
 import { ApiError } from '../lib/api';
 import type { NotifyChannel, Settings as SettingsType } from '../lib/api';
 import { Settings } from './Settings';
+import { GeneralSection } from '../features/settings/GeneralSection';
+import { EnginesSection } from '../features/settings/EnginesSection';
+import { IntegrationsSection } from '../features/settings/IntegrationsSection';
+import { NotificationsSection } from '../features/settings/NotificationsSection';
+import { AuthSettingsSection } from '../features/settings/AuthSettingsSection';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
@@ -88,11 +93,15 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** renderSettings mounts the same nested-route tree App.tsx wires up for
+ * /settings/*, so each test can deep-link straight to the tab it's
+ * exercising (matching how a real reload or bookmark behaves). */
 function renderSettings(opts: {
   put?: ReturnType<typeof vi.fn>;
   test?: ReturnType<typeof vi.fn>;
   testChannel?: ReturnType<typeof vi.fn>;
   settings?: SettingsType;
+  path?: string;
 } = {}) {
   const settings = opts.settings ?? settingsFixture();
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
@@ -108,11 +117,33 @@ function renderSettings(opts: {
   if (opts.testChannel) vi.spyOn(api, 'testNotifyChannel').mockImplementation(opts.testChannel);
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const wrap = (node: ReactNode) => <QueryClientProvider client={qc}>{node}</QueryClientProvider>;
-  return { ...render(wrap(<Settings />)), qc };
+  return {
+    ...render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={[opts.path ?? '/settings/general']}>
+          <Routes>
+            <Route path="/settings" element={<Settings />}>
+              <Route index element={<Navigate to="general" replace />} />
+              <Route path="general" element={<GeneralSection />} />
+              <Route path="engines" element={<EnginesSection />} />
+              <Route path="integrations" element={<IntegrationsSection />} />
+              <Route path="notifications" element={<NotificationsSection />} />
+              <Route path="auth" element={<AuthSettingsSection />} />
+            </Route>
+          </Routes>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    ),
+    qc,
+  };
 }
 
 describe('Settings page', () => {
+  it('redirects /settings to /settings/general', async () => {
+    renderSettings({ path: '/settings' });
+    expect(await screen.findByLabelText('Timezone')).toBeInTheDocument();
+  });
+
   it('saves only the edited section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({ put });
@@ -128,7 +159,7 @@ describe('Settings page', () => {
 
   it('saves an edited iperf3 server list URL, including clearing it to disable', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/engines' });
     const urlField = await screen.findByLabelText('iperf3 server list URL');
     await userEvent.clear(urlField);
     await userEvent.click(
@@ -139,14 +170,14 @@ describe('Settings page', () => {
 
   it('keeps a stored secret when the field is left untouched', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put, settings: settingsFixture({ vm_auth_header: '***' }) });
+    renderSettings({ put, settings: settingsFixture({ vm_auth_header: '***' }), path: '/settings/integrations' });
     await userEvent.click(await screen.findByRole('button', { name: 'Save Integrations' }));
     expect(put.mock.calls[0][0].integrations.vm_auth_header).toBe('***');
   });
 
   it('shows the server validation message inline', async () => {
     const put = vi.fn().mockRejectedValue(new ApiError(400, 'invalid_request', 'vm_url must be http or https'));
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/integrations' });
     await userEvent.click(await screen.findByRole('button', { name: 'Save Integrations' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('vm_url must be http or https');
   });
@@ -166,14 +197,14 @@ describe('Settings page', () => {
 
   it('reports a connection test result inline', async () => {
     const test = vi.fn().mockResolvedValue({ ok: false, error: 'connection refused' });
-    renderSettings({ test });
+    renderSettings({ test, path: '/settings/integrations' });
     await userEvent.click(await screen.findByRole('button', { name: 'Test VictoriaMetrics' }));
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
   });
 
   it('saves only the notifications section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/notifications' });
     await screen.findByLabelText('Cooldown (minutes)');
     await userEvent.clear(screen.getByLabelText('Cooldown (minutes)'));
     await userEvent.type(screen.getByLabelText('Cooldown (minutes)'), '15');
@@ -187,6 +218,7 @@ describe('Settings page', () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({
       put,
+      path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
           id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', token: '***',
@@ -204,6 +236,7 @@ describe('Settings page', () => {
     const testChannel = vi.fn().mockResolvedValue({ ok: false, error: 'connection refused' });
     renderSettings({
       testChannel,
+      path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
           id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
@@ -216,6 +249,7 @@ describe('Settings page', () => {
 
   it('disables Test with a save-first hint for a dirty/unsaved channel', async () => {
     renderSettings({
+      path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
           id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
@@ -242,6 +276,7 @@ describe('Settings page', () => {
     const testChannel = vi.fn().mockImplementation(() => new Promise((resolve) => { resolveTest = resolve; }));
     renderSettings({
       testChannel,
+      path: '/settings/notifications',
       settings: settingsFixture({
         channels: [
           {
@@ -270,6 +305,7 @@ describe('Settings page', () => {
 
   it('shows only the fields the selected channel type uses', async () => {
     renderSettings({
+      path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
           id: 'c1', type: 'webhook', name: 'hook', enabled: true, url: 'https://hook',
@@ -285,7 +321,7 @@ describe('Settings page', () => {
 
   it('saves only the auth section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/auth' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     await userEvent.type(screen.getByLabelText('Trusted proxy CIDRs'), '10.0.0.0/8');
     await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
@@ -298,7 +334,7 @@ describe('Settings page', () => {
 
   it('drops a trailing newline and blank lines from trusted proxy CIDRs before saving', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/auth' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     const textarea = screen.getByLabelText('Trusted proxy CIDRs');
     await userEvent.type(textarea, '10.0.0.0/8{enter}{enter}192.168.0.0/16{enter}');
@@ -310,7 +346,7 @@ describe('Settings page', () => {
   });
 
   it('disables a field that is set by the environment', async () => {
-    renderSettings({ settings: settingsFixture({ locked: ['auth.mode'] }) });
+    renderSettings({ settings: settingsFixture({ locked: ['auth.mode'] }), path: '/settings/auth' });
     expect(await screen.findByLabelText('Auth mode')).toBeDisabled();
     expect(within(screen.getByRole('region', { name: 'Auth' }))
       .getByText('set by environment')).toBeInTheDocument();
@@ -319,7 +355,7 @@ describe('Settings page', () => {
 
   it('blocks a forward_auth switch with no trusted proxies before calling the API', async () => {
     const put = vi.fn();
-    renderSettings({ put });
+    renderSettings({ put, path: '/settings/auth' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
     expect(put).not.toHaveBeenCalled();
@@ -332,10 +368,24 @@ describe('Settings page', () => {
     );
     renderSettings({
       put,
+      path: '/settings/auth',
       settings: settingsFixture({ auth: { mode: 'open', trusted_proxies: ['10.0.0.0/8'] } }),
     });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Remote-User/);
+  });
+
+  it('switching tabs keeps unsaved edits in the tab left behind', async () => {
+    renderSettings({ path: '/settings/general' });
+    const tz = await screen.findByLabelText('Timezone');
+    await userEvent.clear(tz);
+    await userEvent.type(tz, 'Asia/Kolkata');
+
+    await userEvent.click(screen.getByRole('link', { name: 'Engines' }));
+    await screen.findByLabelText('iperf3 server list URL');
+
+    await userEvent.click(screen.getByRole('link', { name: 'General' }));
+    expect(await screen.findByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
   });
 });

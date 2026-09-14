@@ -1,3 +1,4 @@
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
@@ -32,6 +33,18 @@ export function ChannelEditor({
 
   return (
     <div className="grid gap-3 rounded border border-line p-3">
+      <div className="flex items-center justify-between gap-3">
+        <div className="flex items-center gap-2">
+          <Badge variant="secondary" className="uppercase">{value.type}</Badge>
+          <span className="text-sm font-medium text-fg">{value.name}</span>
+        </div>
+        <SwitchField
+          id={`channel-${id}-enabled`} label="Enabled"
+          checked={value.enabled}
+          onCheckedChange={(checked) => onChange({ ...value, enabled: checked })}
+        />
+      </div>
+
       <div className={fieldClass}>
         <label htmlFor={`channel-${id}-name`} className={labelClass}>Name</label>
         <Input id={`channel-${id}-name`} value={value.name}
@@ -47,12 +60,6 @@ export function ChannelEditor({
           <option value="apprise">apprise</option>
         </select>
       </div>
-
-      <SwitchField
-        id={`channel-${id}-enabled`} label="Enabled"
-        checked={value.enabled}
-        onCheckedChange={(checked) => onChange({ ...value, enabled: checked })}
-      />
 
       <div className={fieldClass}>
         <label htmlFor={`channel-${id}-url`} className={labelClass}>URL</label>
