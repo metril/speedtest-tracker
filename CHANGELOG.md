@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.6.0](https://github.com/metril/speedtest-tracker/compare/v0.5.0...v0.6.0) (2026-09-14)
+
+
+### Features
+
+* per-target Custom notification gate with per-metric disable ([6f5bc54](https://github.com/metril/speedtest-tracker/commit/6f5bc5462c2965bc2431e9cc2212aa6cd167c1a7))
+* **web:** cloudflare size presets with a Custom sizes toggle ([1c7cb91](https://github.com/metril/speedtest-tracker/commit/1c7cb917d293294689ddd94620f010afd31797b2))
+
 ## [0.5.0](https://github.com/metril/speedtest-tracker/compare/v0.4.0...v0.5.0) (2026-09-14)
 
 
