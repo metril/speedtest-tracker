@@ -1,13 +1,17 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { describe, expect, it } from 'vitest';
 import { Layout } from './Layout';
 
 function renderLayout(path = '/') {
+  const client = new QueryClient();
   return render(
-    <MemoryRouter initialEntries={[path]}>
-      <Layout />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={[path]}>
+        <Layout />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

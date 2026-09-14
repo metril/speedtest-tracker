@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router';
+import { LiveRunBanner } from './LiveRunBanner';
 
 const NAV = [
   { to: '/', label: 'Dashboard' },
@@ -30,6 +31,7 @@ export function Layout() {
           </nav>
         </div>
       </header>
+      <LiveRunBanner />
       <main className="mx-auto max-w-6xl px-4 py-6">
         <Outlet />
       </main>
