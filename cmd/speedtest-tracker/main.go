@@ -102,7 +102,9 @@ func (s storeTokens) LookupToken(ctx context.Context, hash string) (int64, bool,
 	return t.ID, ok, err
 }
 
-func (s storeTokens) TouchToken(ctx context.Context, id int64) error { return s.db.TouchAPIToken(ctx, id) }
+func (s storeTokens) TouchToken(ctx context.Context, id int64) error {
+	return s.db.TouchAPIToken(ctx, id)
+}
 
 // authConfigurer is the subset of *auth.Middleware that applyAuth needs.
 // It exists so authAdapter (below) can also satisfy it: *auth.Middleware
@@ -389,6 +391,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		time.Duration(engineCfg.ServerListTTLSeconds)*time.Second)
 	ooklaSearch := ooklaweb.NewClient()
 	ooklaSearch.Logger = logger
+	ooklaSearch.UserAgent = fmt.Sprintf("speedtest-tracker/%s (+https://github.com/metril/speedtest-tracker)", version)
 
 	hub := sse.NewHub()
 	rn := runner.New(runner.Config{

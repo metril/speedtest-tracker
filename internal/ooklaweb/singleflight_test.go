@@ -24,7 +24,7 @@ func TestSingleflightGroupRecoversPanicAndReleasesWaiters(t *testing.T) {
 	go func() {
 		defer leaderWG.Done()
 		defer func() { leaderPanic = recover() }()
-		_, _ = g.Do("k", func() ([]ookla.Server, error) {
+		_, _ = g.Do("k", func() (SearchResult, error) {
 			close(started)
 			<-release
 			panic("boom")
@@ -37,9 +37,9 @@ func TestSingleflightGroupRecoversPanicAndReleasesWaiters(t *testing.T) {
 	var waiterErr error
 	go func() {
 		defer close(waiterDone)
-		_, waiterErr = g.Do("k", func() ([]ookla.Server, error) {
+		_, waiterErr = g.Do("k", func() (SearchResult, error) {
 			t.Error("the waiter's own fn ran; it should have shared the leader's in-flight call instead")
-			return nil, nil
+			return SearchResult{}, nil
 		})
 	}()
 
@@ -67,8 +67,8 @@ func TestSingleflightGroupRecoversPanicAndReleasesWaiters(t *testing.T) {
 
 	// The panicked call must have been removed from the group so a later
 	// Do for the same key runs fresh rather than reusing it.
-	got, err := g.Do("k", func() ([]ookla.Server, error) { return []ookla.Server{{ID: "1"}}, nil })
-	if err != nil || len(got) != 1 || got[0].ID != "1" {
+	got, err := g.Do("k", func() (SearchResult, error) { return SearchResult{Servers: []ookla.Server{{ID: "1"}}}, nil })
+	if err != nil || len(got.Servers) != 1 || got.Servers[0].ID != "1" {
 		t.Fatalf("Do after panic = %+v, %v, want a fresh successful call", got, err)
 	}
 }

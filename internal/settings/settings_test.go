@@ -170,6 +170,51 @@ func TestGeneralFallsBackToDefaultOnMissingKey(t *testing.T) {
 	}
 }
 
+func TestGeneralSLADefaultsToNil(t *testing.T) {
+	s := newTestStore(t)
+	g, err := s.General(context.Background())
+	if err != nil {
+		t.Fatalf("General: %v", err)
+	}
+	if g.SLADownloadMbps != nil || g.SLAUploadMbps != nil {
+		t.Errorf("SLA plan = %+v, want both nil by default", g)
+	}
+}
+
+func TestGeneralSLARoundTrip(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	dl, ul := 500.0, 50.0
+	if err := s.Set(ctx, KeySLADownloadMbps, &dl); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.Set(ctx, KeySLAUploadMbps, &ul); err != nil {
+		t.Fatal(err)
+	}
+	g, err := s.General(ctx)
+	if err != nil {
+		t.Fatalf("General: %v", err)
+	}
+	if g.SLADownloadMbps == nil || *g.SLADownloadMbps != 500 {
+		t.Errorf("SLADownloadMbps = %v, want 500", g.SLADownloadMbps)
+	}
+	if g.SLAUploadMbps == nil || *g.SLAUploadMbps != 50 {
+		t.Errorf("SLAUploadMbps = %v, want 50", g.SLAUploadMbps)
+	}
+
+	// Clearing (explicit null) round-trips back to nil.
+	if err := s.Set(ctx, KeySLADownloadMbps, (*float64)(nil)); err != nil {
+		t.Fatal(err)
+	}
+	g, err = s.General(ctx)
+	if err != nil {
+		t.Fatalf("General: %v", err)
+	}
+	if g.SLADownloadMbps != nil {
+		t.Errorf("SLADownloadMbps after clearing = %v, want nil", g.SLADownloadMbps)
+	}
+}
+
 func TestIntegrationsDefaults(t *testing.T) {
 	s := newTestStore(t)
 	got, err := s.Integrations(context.Background())

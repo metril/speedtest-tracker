@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/ooklaweb"
 )
 
 // ServerLister supplies the local Ookla server list (`speedtest -L`,
@@ -21,7 +22,7 @@ type ServerLister interface {
 // (speedtest.net's unofficial search API, widened via geocoding — see
 // internal/ooklaweb). Optional: nil means only the local list is served.
 type ServerSearcher interface {
-	Search(ctx context.Context, q string, limit int) ([]ookla.Server, error)
+	Search(ctx context.Context, req ooklaweb.SearchRequest) (ooklaweb.SearchResult, error)
 }
 
 // defaultOoklaSearchLimit bounds the merged result count when the request
@@ -112,7 +113,17 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 	lowerQ := strings.ToLower(q)
 	limit := parseOoklaLimit(r.URL.Query().Get("limit"))
 
+	country := ""
+	if raw := strings.TrimSpace(r.URL.Query().Get("country")); raw != "" {
+		if len(raw) != 2 || !isASCIILetters(raw) {
+			errBadRequest(w, "country must be a 2-letter country code")
+			return
+		}
+		country = strings.ToLower(raw)
+	}
+
 	out := []ookla.Server{}
+	near := ""
 	seen := make(map[string]bool)
 
 	var localErr error
@@ -145,14 +156,15 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			remoteAttempted = true
-			remote, err := d.OoklaSearch.Search(r.Context(), q, limit)
+			remote, err := d.OoklaSearch.Search(r.Context(), ooklaweb.SearchRequest{Q: q, Country: country, Limit: limit})
 			if err != nil {
 				remoteErr = err
 				if d.Logger != nil {
 					d.Logger.Warn("ookla remote search failed", "query", q, "error", err)
 				}
 			} else {
-				for _, s := range remote {
+				near = remote.Near
+				for _, s := range remote.Servers {
 					if seen[s.ID] {
 						continue
 					}
@@ -172,7 +184,7 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 		out = out[:limit]
 	}
 
-	writeJSON(w, http.StatusOK, out)
+	writeJSON(w, http.StatusOK, map[string]any{"servers": out, "near": near})
 }
 
 func parseOoklaLimit(raw string) int {
@@ -196,4 +208,15 @@ func matchesServer(s ookla.Server, q string) bool {
 		}
 	}
 	return false
+}
+
+// isASCIILetters reports whether s consists only of ASCII letters (upper
+// or lower case).
+func isASCIILetters(s string) bool {
+	for _, r := range s {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') {
+			return false
+		}
+	}
+	return true
 }

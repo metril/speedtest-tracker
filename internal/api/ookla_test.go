@@ -12,44 +12,59 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/ooklaweb"
 )
 
 // stubSearcher is a scripted ServerSearcher.
 type stubSearcher struct {
-	servers []ookla.Server
-	err     error
+	result ooklaweb.SearchResult
+	err    error
 
-	calls    int
-	gotQ     string
-	gotLimit int
+	calls      int
+	gotQ       string
+	gotCountry string
+	gotLimit   int
 }
 
-func (s *stubSearcher) Search(_ context.Context, q string, limit int) ([]ookla.Server, error) {
+func (s *stubSearcher) Search(_ context.Context, req ooklaweb.SearchRequest) (ooklaweb.SearchResult, error) {
 	s.calls++
-	s.gotQ = q
-	s.gotLimit = limit
+	s.gotQ = req.Q
+	s.gotCountry = req.Country
+	s.gotLimit = req.Limit
 	if s.err != nil {
-		return nil, s.err
+		return ooklaweb.SearchResult{}, s.err
 	}
-	return s.servers, nil
+	return s.result, nil
+}
+
+// ooklaListResponse mirrors GET /ookla/servers' response shape.
+type ooklaListResponse struct {
+	Servers []ookla.Server `json:"servers"`
+	Near    string         `json:"near"`
+}
+
+func decodeOoklaList(t *testing.T, body *bytes.Buffer) ooklaListResponse {
+	t.Helper()
+	var got ooklaListResponse
+	if err := json.NewDecoder(body).Decode(&got); err != nil {
+		t.Fatal(err)
+	}
+	return got
 }
 
 func TestOoklaServerSearchMergesNewRemoteHits(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{
 		{ID: "101", Name: "Comcast", Location: "Denver, CO", Country: "United States",
 			Sponsor: "Comcast", Host: "denver.example:8080", Lat: 39.7, Lon: -104.9, DistanceKm: 1.1},
-	}}
+	}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=denver", nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].ID != "101" || got[0].DistanceKm != 1.1 || got[0].Sponsor != "Comcast" {
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 1 || got.Servers[0].ID != "101" || got.Servers[0].DistanceKm != 1.1 || got.Servers[0].Sponsor != "Comcast" {
 		t.Fatalf("got = %+v", got)
 	}
 	if search.calls != 1 || search.gotQ != "denver" {
@@ -58,22 +73,19 @@ func TestOoklaServerSearchMergesNewRemoteHits(t *testing.T) {
 }
 
 func TestOoklaServerSearchDedupesRemoteAgainstLocalMatches(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{
 		{ID: "1", Name: "Frankfurt Fiber", Location: "Frankfurt", Country: "Germany", Host: "fra.example:8080"}, // dup of local id 1
 		{ID: "55", Name: "Vodafone", Location: "Frankfurt", Country: "Germany", Host: "fra2.example:8080"},
-	}}
+	}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=frank", nil)
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d servers, want 2 (local id=1 kept once, remote id=55 added): %+v", len(got), got)
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 2 {
+		t.Fatalf("got %d servers, want 2 (local id=1 kept once, remote id=55 added): %+v", len(got.Servers), got)
 	}
 	ids := map[string]bool{}
-	for _, s := range got {
+	for _, s := range got.Servers {
 		ids[s.ID] = true
 	}
 	if !ids["1"] || !ids["55"] {
@@ -93,11 +105,8 @@ func TestOoklaServerSearchFallsBackOnRemoteError(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (local list still served)", rec.Code)
 	}
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].ID != "1" {
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 1 || got.Servers[0].ID != "1" {
 		t.Fatalf("got = %+v, want local-only match", got)
 	}
 	if !strings.Contains(buf.String(), "level=WARN") || !strings.Contains(buf.String(), "upstream unreachable") {
@@ -106,16 +115,13 @@ func TestOoklaServerSearchFallsBackOnRemoteError(t *testing.T) {
 }
 
 func TestOoklaServerSearchSkipsRemoteWithoutQuery(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{{ID: "999", Name: "Should not appear"}}}
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{{ID: "999", Name: "Should not appear"}}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers", nil)
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d servers, want 2 (local only)", len(got))
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 2 {
+		t.Fatalf("got %d servers, want 2 (local only)", len(got.Servers))
 	}
 	if search.calls != 0 {
 		t.Errorf("search called %d times, want 0 for an empty query", search.calls)
@@ -123,18 +129,15 @@ func TestOoklaServerSearchSkipsRemoteWithoutQuery(t *testing.T) {
 }
 
 func TestOoklaServerSearchRespectsLimit(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{
 		{ID: "101", Name: "A"}, {ID: "102", Name: "B"}, {ID: "103", Name: "C"},
-	}}
+	}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=x&limit=2", nil)
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 2 {
-		t.Fatalf("got %d servers, want 2 (limit)", len(got))
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 2 {
+		t.Fatalf("got %d servers, want 2 (limit)", len(got.Servers))
 	}
 	if search.gotLimit != 2 {
 		t.Errorf("search called with limit=%d, want 2", search.gotLimit)
@@ -148,7 +151,7 @@ type errServerList struct{ err error }
 func (e errServerList) Servers(context.Context) ([]ookla.Server, error) { return nil, e.err }
 
 func TestOoklaServerSearchCapsLimit(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{{ID: "101", Name: "A"}}}
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{{ID: "101", Name: "A"}}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
 
 	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=x&limit=5000", nil)
@@ -161,9 +164,9 @@ func TestOoklaServerSearchCapsLimit(t *testing.T) {
 }
 
 func TestOoklaServerSearchLocalErrorFallsBackToRemote(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{
 		{ID: "101", Name: "Comcast", Location: "Denver, CO"},
-	}}
+	}}}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) {
 		d.ServerList = errServerList{err: errors.New(`exec: "speedtest": executable file not found in $PATH`)}
 		d.OoklaSearch = search
@@ -173,11 +176,8 @@ func TestOoklaServerSearchLocalErrorFallsBackToRemote(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (remote still served despite local failure)", rec.Code)
 	}
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].ID != "101" {
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 1 || got.Servers[0].ID != "101" {
 		t.Fatalf("got = %+v, want remote-only hit", got)
 	}
 }
@@ -218,7 +218,7 @@ func (l *denyLimiter) Allow() bool { l.calls++; return false }
 // response is 200 (never an error), and the denial is logged at debug.
 func TestOoklaServerSearchRateLimiterDeniesFallsBackToLocal(t *testing.T) {
 	var buf bytes.Buffer
-	search := &stubSearcher{servers: []ookla.Server{{ID: "999", Name: "Should not appear"}}}
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{{ID: "999", Name: "Should not appear"}}}}
 	limiter := &denyLimiter{}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) {
 		d.OoklaSearch = search
@@ -230,11 +230,8 @@ func TestOoklaServerSearchRateLimiterDeniesFallsBackToLocal(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (limiter denial must not error)", rec.Code)
 	}
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 1 || got[0].ID != "1" {
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 1 || got.Servers[0].ID != "1" {
 		t.Fatalf("got = %+v, want local-only match", got)
 	}
 	if search.calls != 0 {
@@ -254,7 +251,7 @@ type allowLimiter struct{ calls int }
 func (l *allowLimiter) Allow() bool { l.calls++; return true }
 
 func TestOoklaServerSearchLimiterAllowsRemoteSearch(t *testing.T) {
-	search := &stubSearcher{servers: []ookla.Server{{ID: "101", Name: "Comcast"}}}
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{{ID: "101", Name: "Comcast"}}}}
 	limiter := &allowLimiter{}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) {
 		d.OoklaSearch = search
@@ -308,11 +305,43 @@ func TestOoklaServerSearchLocalErrorWithEmptyQueryReturnsEmptyList(t *testing.T)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200 (empty query never attempts remote, so this isn't a hard failure)", rec.Code)
 	}
-	var got []ookla.Server
-	if err := json.NewDecoder(rec.Body).Decode(&got); err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 0 {
+	got := decodeOoklaList(t, rec.Body)
+	if len(got.Servers) != 0 {
 		t.Fatalf("got = %+v, want []", got)
+	}
+}
+
+func TestOoklaServerSearchPassesCountryAndNear(t *testing.T) {
+	search := &stubSearcher{result: ooklaweb.SearchResult{
+		Servers: []ookla.Server{{ID: "101", Name: "A"}},
+		Near:    "Denver, Colorado",
+	}}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
+
+	rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=80202&country=US", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	if search.gotCountry != "us" {
+		t.Errorf("gotCountry = %q, want lowercased \"us\"", search.gotCountry)
+	}
+	got := decodeOoklaList(t, rec.Body)
+	if got.Near != "Denver, Colorado" {
+		t.Errorf("near = %q, want %q", got.Near, "Denver, Colorado")
+	}
+}
+
+func TestOoklaServerSearchRejectsInvalidCountry(t *testing.T) {
+	search := &stubSearcher{result: ooklaweb.SearchResult{Servers: []ookla.Server{}}}
+	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OoklaSearch = search })
+
+	for _, country := range []string{"USA", "1", "u1"} {
+		rec := do(t, h, http.MethodGet, "/api/v1/ookla/servers?q=x&country="+country, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("country=%q: status = %d, want 400", country, rec.Code)
+		}
+	}
+	if search.calls != 0 {
+		t.Errorf("search called %d times, want 0 for a rejected country", search.calls)
 	}
 }

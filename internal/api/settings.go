@@ -106,6 +106,17 @@ type settingsBody struct {
 		RetentionDaysResults          *int    `json:"retention_days_results"`
 		RetentionDaysRuns             *int    `json:"retention_days_runs"`
 		RetentionPruneIntervalMinutes *int    `json:"retention_prune_interval_minutes"`
+
+		// SLADownloadMbps/SLAUploadMbps: like every other field here, nil
+		// (omitted, or an explicit JSON null — Go's encoding/json can't
+		// tell those apart for a pointer-typed field) leaves the stored
+		// plan untouched; a value sets it. To disable/clear a plan, PUT 0
+		// (or a negative value) — store.resolvePlan treats a non-positive
+		// plan speed as unset, which is the documented way to clear one,
+		// since this endpoint otherwise can't distinguish omitted from
+		// explicit null on a plain pointer field.
+		SLADownloadMbps *float64 `json:"sla_download_mbps"`
+		SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
 	} `json:"general"`
 	Engines       *enginesBody       `json:"engines"`
 	Integrations  *integrationsBody  `json:"integrations"`
@@ -296,6 +307,8 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			func() error {
 				return setPtr(ctx, d.Settings, settings.KeyRetentionPruneIntervalMinutes, g.RetentionPruneIntervalMinutes)
 			},
+			func() error { return setPtr(ctx, d.Settings, settings.KeySLADownloadMbps, g.SLADownloadMbps) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeySLAUploadMbps, g.SLAUploadMbps) },
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -887,6 +900,12 @@ func validateSettings(body settingsBody, current settings.Integrations) error {
 		if g.RetentionPruneIntervalMinutes != nil && *g.RetentionPruneIntervalMinutes < 1 {
 			return fmt.Errorf("retention_prune_interval_minutes must be at least 1")
 		}
+		if g.SLADownloadMbps != nil && *g.SLADownloadMbps < 0 {
+			return fmt.Errorf("sla_download_mbps must be >= 0")
+		}
+		if g.SLAUploadMbps != nil && *g.SLAUploadMbps < 0 {
+			return fmt.Errorf("sla_upload_mbps must be >= 0")
+		}
 	}
 
 	if i := body.Integrations; i != nil {
@@ -984,6 +1003,8 @@ func validateThresholds(t settings.Thresholds) error {
 		{"ping_ms_max", t.PingMsMax, nil},
 		{"jitter_ms_max", t.JitterMsMax, nil},
 		{"loss_pct_max", t.LossPctMax, float64Ptr(100)},
+		{"sla_download_mbps", t.SLADownloadMbps, nil},
+		{"sla_upload_mbps", t.SLAUploadMbps, nil},
 	}
 	for _, f := range fields {
 		if f.v == nil {

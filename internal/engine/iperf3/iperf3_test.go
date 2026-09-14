@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -180,6 +183,151 @@ exit 0`
 	}
 	if res.UploadBps != 100_000_000 {
 		t.Errorf("UploadBps = %v", res.UploadBps)
+	}
+}
+
+// busyThenSucceedScript returns a fake iperf3 script that logs every port
+// it was invoked with (one per line) to logFile, answers with the busy
+// error for any port strictly less than succeedPort, and succeeds (tcp.json)
+// on succeedPort or above.
+func busyThenSucceedScript(t *testing.T, logFile string, succeedPort int) string {
+	t.Helper()
+	body := fmt.Sprintf(`case "$1" in
+  --version) echo "iperf 3.12"; exit 0;;
+esac
+port=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-p" ]; then port="$a"; fi
+  prev="$a"
+done
+echo "$port" >> %q
+if [ "$port" -lt %d ]; then
+  cat %q
+  exit 1
+fi
+cat %q
+exit 0`, logFile, succeedPort, abs(t, "busy.json"), abs(t, "tcp.json"))
+	return exectest.Build(t, "iperf3", body)
+}
+
+func TestRunRetriesOnBusyUntilPortSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	logFile := dir + "/ports.log"
+	bin := busyThenSucceedScript(t, logFile, 5203)
+	e := &Engine{Bin: bin, ForceSummary: true}
+
+	opts := json.RawMessage(`{"host":"nas.lan","port":5201,"port_range_end":5205}`)
+	var events []engine.Progress
+	res, err := e.Run(context.Background(), opts, func(p engine.Progress) { events = append(events, p) })
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.UploadBps != 100_000_000 {
+		t.Errorf("UploadBps = %v", res.UploadBps)
+	}
+
+	logged, rerr := os.ReadFile(logFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	ports := strings.Fields(string(logged))
+	if !reflect.DeepEqual(ports, []string{"5201", "5202", "5203"}) {
+		t.Fatalf("attempted ports = %v, want [5201 5202 5203]", ports)
+	}
+
+	var connecting []string
+	for _, ev := range events {
+		if ev.Phase == engine.PhaseConnecting {
+			connecting = append(connecting, ev.ServerName)
+		}
+	}
+	want := []string{"nas.lan:5201", "nas.lan:5202", "nas.lan:5203"}
+	if !reflect.DeepEqual(connecting, want) {
+		t.Errorf("PhaseConnecting ServerNames = %v, want %v", connecting, want)
+	}
+}
+
+func TestRunFailsImmediatelyOnNonBusyErrorWithoutRetrying(t *testing.T) {
+	// error.json is "Connection refused", not a busy error: even with a
+	// port range configured, only the first port is tried.
+	dir := t.TempDir()
+	logFile := dir + "/ports.log"
+	body := fmt.Sprintf(`case "$1" in
+  --version) echo "iperf 3.12"; exit 0;;
+esac
+port=""
+prev=""
+for a in "$@"; do
+  if [ "$prev" = "-p" ]; then port="$a"; fi
+  prev="$a"
+done
+echo "$port" >> %q
+cat %q
+exit 1`, logFile, abs(t, "error.json"))
+	bin := exectest.Build(t, "iperf3", body)
+	e := &Engine{Bin: bin, ForceSummary: true}
+
+	opts := json.RawMessage(`{"host":"nas.lan","port":5201,"port_range_end":5205}`)
+	_, err := e.Run(context.Background(), opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "Connection refused") {
+		t.Fatalf("err = %v, want the Connection refused error", err)
+	}
+	logged, rerr := os.ReadFile(logFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	ports := strings.Fields(string(logged))
+	if !reflect.DeepEqual(ports, []string{"5201"}) {
+		t.Fatalf("attempted ports = %v, want [5201] (no retry on a non-busy error)", ports)
+	}
+}
+
+func TestRunCapsRetriesAtFiveAttemptsTotal(t *testing.T) {
+	// succeedPort is far beyond what 5 attempts starting at 5201 can
+	// reach (5201..5205), so every attempt is busy and the range is
+	// bounded by maxPortAttempts, not by port_range_end.
+	dir := t.TempDir()
+	logFile := dir + "/ports.log"
+	bin := busyThenSucceedScript(t, logFile, 9999)
+	e := &Engine{Bin: bin, ForceSummary: true}
+
+	opts := json.RawMessage(`{"host":"nas.lan","port":5201,"port_range_end":5300}`)
+	_, err := e.Run(context.Background(), opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err = %v, want a busy error", err)
+	}
+	logged, rerr := os.ReadFile(logFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	ports := strings.Fields(string(logged))
+	want := []string{"5201", "5202", "5203", "5204", "5205"}
+	if !reflect.DeepEqual(ports, want) {
+		t.Fatalf("attempted ports = %v, want %v (capped at 5 attempts)", ports, want)
+	}
+}
+
+func TestRunNoRetryWithoutPortRangeEnd(t *testing.T) {
+	dir := t.TempDir()
+	logFile := dir + "/ports.log"
+	bin := busyThenSucceedScript(t, logFile, 5203)
+	e := &Engine{Bin: bin, ForceSummary: true}
+
+	// No port_range_end: a busy server fails the run outright on the
+	// single configured port.
+	opts := json.RawMessage(`{"host":"nas.lan","port":5201}`)
+	_, err := e.Run(context.Background(), opts, nil)
+	if err == nil || !strings.Contains(err.Error(), "busy") {
+		t.Fatalf("err = %v, want a busy error", err)
+	}
+	logged, rerr := os.ReadFile(logFile)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	ports := strings.Fields(string(logged))
+	if !reflect.DeepEqual(ports, []string{"5201"}) {
+		t.Fatalf("attempted ports = %v, want [5201] (no port_range_end, no retry)", ports)
 	}
 }
 

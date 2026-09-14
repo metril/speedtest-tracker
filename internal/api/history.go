@@ -7,6 +7,29 @@ import (
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
+// shiftWindow shifts [from,to] (dbTimeFormat bounds) back by its own span
+// when offset is 1, giving the caller the immediately preceding period of
+// equal length for a previous-period comparison; offset 0 returns from,to
+// unchanged. Store queries are inclusive on both ends ([from,to]), so the
+// shifted window's "to" is nudged back one millisecond (the stored
+// timestamps' precision) to stay adjacent rather than overlapping the
+// current window. ok is false (with from/to both "") only when from can't
+// be parsed — callers should treat that as an internal invariant
+// violation, since rangeWindow always returns a parseable from.
+func shiftWindow(from, to string, offset int) (string, string, bool) {
+	if offset == 0 {
+		return from, to, true
+	}
+	span := windowSpan(from, to)
+	f, err := time.Parse(dbTimeFormat, from)
+	if err != nil {
+		return "", "", false
+	}
+	to = f.Add(-time.Millisecond).Format(dbTimeFormat)
+	from = f.Add(-span).Format(dbTimeFormat)
+	return from, to, true
+}
+
 // namedRanges are the chart presets the UI offers.
 var namedRanges = map[string]time.Duration{
 	"24h": 24 * time.Hour,
@@ -90,8 +113,11 @@ func windowSpan(from, to string) time.Duration {
 	return t.Sub(f)
 }
 
-// targetHistory answers GET /targets/{id}/history: buckets computed in
-// SQL, so the response is bounded no matter how long the window is.
+// targetHistory answers GET /targets/{id}/history?range=&offset=: buckets
+// computed in SQL, so the response is bounded no matter how long the
+// window is. offset=1 shifts the resolved window back by its own span
+// (see shiftWindow), giving the immediately preceding period of equal
+// length — e.g. for a "compare with previous period" chart overlay.
 func (d Deps) targetHistory(w http.ResponseWriter, r *http.Request) {
 	id, ok := pathID(w, r)
 	if !ok {
@@ -100,8 +126,21 @@ func (d Deps) targetHistory(w http.ResponseWriter, r *http.Request) {
 	if _, err := d.Store.GetTarget(r.Context(), id); storeError(w, d.Logger, "target", err) {
 		return
 	}
+	offset, ok := intQuery(w, r, "offset", 0)
+	if !ok {
+		return
+	}
+	if offset > 1 {
+		errBadRequest(w, "offset must be 0 or 1")
+		return
+	}
 	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
 	if !ok {
+		return
+	}
+	from, to, ok = shiftWindow(from, to, offset)
+	if !ok {
+		errBadRequest(w, "invalid window")
 		return
 	}
 	bucket := store.BucketSecondsFor(windowSpan(from, to))

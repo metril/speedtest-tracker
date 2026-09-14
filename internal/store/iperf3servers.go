@@ -8,7 +8,7 @@ import (
 	"strings"
 )
 
-const iperf3ServerColumns = `id,host,port,options,supports_reverse,supports_udp,gbs,continent,country,site,provider`
+const iperf3ServerColumns = `id,host,port,port_end,options,supports_reverse,supports_udp,supports_ipv6,gbs,continent,country,site,provider`
 
 // defaultIperf3SearchLimit bounds SearchIperf3Servers when the caller
 // passes a non-positive limit, so a stray zero can never turn into an
@@ -21,9 +21,11 @@ type Iperf3Server struct {
 	ID              int64  `json:"id"`
 	Host            string `json:"host"`
 	Port            int    `json:"port"`
+	PortEnd         int    `json:"port_end,omitempty"`
 	Options         string `json:"options,omitempty"`
 	SupportsReverse bool   `json:"supports_reverse"`
 	SupportsUDP     bool   `json:"supports_udp"`
+	SupportsIPv6    bool   `json:"supports_ipv6"`
 	GBs             string `json:"gbs,omitempty"`
 	Continent       string `json:"continent,omitempty"`
 	Country         string `json:"country,omitempty"`
@@ -33,8 +35,8 @@ type Iperf3Server struct {
 
 func scanIperf3Server(sc interface{ Scan(...any) error }) (Iperf3Server, error) {
 	var s Iperf3Server
-	if err := sc.Scan(&s.ID, &s.Host, &s.Port, &s.Options, &s.SupportsReverse, &s.SupportsUDP,
-		&s.GBs, &s.Continent, &s.Country, &s.Site, &s.Provider); err != nil {
+	if err := sc.Scan(&s.ID, &s.Host, &s.Port, &s.PortEnd, &s.Options, &s.SupportsReverse, &s.SupportsUDP,
+		&s.SupportsIPv6, &s.GBs, &s.Continent, &s.Country, &s.Site, &s.Provider); err != nil {
 		return Iperf3Server{}, err
 	}
 	return s, nil
@@ -63,16 +65,16 @@ func (s *Store) ReplaceIperf3Servers(ctx context.Context, servers []Iperf3Server
 
 	stmt, err := tx.PrepareContext(ctx, `
 		INSERT OR IGNORE INTO iperf3_servers
-			(host,port,options,supports_reverse,supports_udp,gbs,continent,country,site,provider)
-		VALUES (?,?,?,?,?,?,?,?,?,?)`)
+			(host,port,port_end,options,supports_reverse,supports_udp,supports_ipv6,gbs,continent,country,site,provider)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
 	if err != nil {
 		return fmt.Errorf("prepare insert iperf3 server: %w", err)
 	}
 	defer stmt.Close()
 
 	for _, srv := range servers {
-		if _, err := stmt.ExecContext(ctx, srv.Host, srv.Port, srv.Options, srv.SupportsReverse, srv.SupportsUDP,
-			srv.GBs, srv.Continent, srv.Country, srv.Site, srv.Provider); err != nil {
+		if _, err := stmt.ExecContext(ctx, srv.Host, srv.Port, srv.PortEnd, srv.Options, srv.SupportsReverse, srv.SupportsUDP,
+			srv.SupportsIPv6, srv.GBs, srv.Continent, srv.Country, srv.Site, srv.Provider); err != nil {
 			return fmt.Errorf("insert iperf3 server %s:%d: %w", srv.Host, srv.Port, err)
 		}
 	}

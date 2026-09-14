@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 // summaryTTL is how long a computed summary is reused. The dashboard
@@ -60,6 +62,19 @@ func (c *summaryCache) set(key string, body []byte) {
 	}
 }
 
+// slaKeyPart renders sla into a cache-key fragment that changes whenever
+// the resolved plan does, so a settings change invalidates the cache
+// immediately instead of waiting out summaryTTL.
+func slaKeyPart(sla store.SLAPlan) string {
+	f := func(v *float64) string {
+		if v == nil {
+			return ""
+		}
+		return strconv.FormatFloat(*v, 'g', -1, 64)
+	}
+	return f(sla.DownloadMbps) + "," + f(sla.UploadMbps)
+}
+
 // statsSummary answers GET /stats/summary?range=[&offset=], serving a
 // cached body for up to summaryTTL. offset=1 shifts the resolved window
 // back by its own span, giving the caller the immediately preceding
@@ -81,22 +96,27 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if offset == 1 {
-		span := windowSpan(from, to)
-		f, err := time.Parse(dbTimeFormat, from)
+	from, to, ok = shiftWindow(from, to, offset)
+	if !ok {
+		errBadRequest(w, "invalid window")
+		return
+	}
+
+	// The general SLA plan is resolved before the cache lookup (not just
+	// before the miss-path Store.Summary call) and folded into the cache
+	// key, so a plan change via PUT /settings is reflected immediately
+	// instead of possibly serving a stale sla_compliance for up to
+	// summaryTTL.
+	sla := store.SLAPlan{}
+	if d.Settings != nil {
+		g, err := d.Settings.General(r.Context())
 		if err != nil {
-			errBadRequest(w, "invalid window")
+			internalError(w, d.Logger, "load general settings", err)
 			return
 		}
-		// Store.Summary is inclusive on both ends ([from,to]), matching
-		// history/outages; without this, a result timestamped exactly at
-		// the boundary would be double-counted in both the current and
-		// previous windows. One millisecond (the stored timestamps'
-		// precision) keeps the previous window adjacent, not overlapping.
-		to = f.Add(-time.Millisecond).Format(dbTimeFormat)
-		from = f.Add(-span).Format(dbTimeFormat)
+		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps}
 	}
-	key := from + "|" + to + "|" + strconv.Itoa(offset)
+	key := from + "|" + to + "|" + strconv.Itoa(offset) + "|" + slaKeyPart(sla)
 	w.Header().Set("Cache-Control", "max-age=30")
 	if body, hit := d.summary.get(key); hit {
 		if d.Metrics != nil {
@@ -110,7 +130,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if d.Metrics != nil {
 		d.Metrics.SummaryCacheMiss()
 	}
-	stats, err := d.Store.Summary(r.Context(), from, to)
+	stats, err := d.Store.Summary(r.Context(), from, to, sla)
 	if err != nil {
 		internalError(w, d.Logger, "summary failed", err)
 		return

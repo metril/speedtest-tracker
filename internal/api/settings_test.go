@@ -116,14 +116,49 @@ func TestPutSettingsClearsSecretOnExplicitEmpty(t *testing.T) {
 	}
 }
 
+func TestPutSettingsGeneralSLARoundTrip(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"sla_download_mbps": 500, "sla_upload_mbps": 50},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	g, _ := st.General(ctx)
+	if g.SLADownloadMbps == nil || *g.SLADownloadMbps != 500 {
+		t.Errorf("SLADownloadMbps = %v, want 500", g.SLADownloadMbps)
+	}
+	if g.SLAUploadMbps == nil || *g.SLAUploadMbps != 50 {
+		t.Errorf("SLAUploadMbps = %v, want 50", g.SLAUploadMbps)
+	}
+
+	// A PUT that omits sla_upload_mbps leaves it untouched.
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"sla_download_mbps": 900},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	g, _ = st.General(ctx)
+	if g.SLADownloadMbps == nil || *g.SLADownloadMbps != 900 {
+		t.Errorf("SLADownloadMbps = %v, want 900", g.SLADownloadMbps)
+	}
+	if g.SLAUploadMbps == nil || *g.SLAUploadMbps != 50 {
+		t.Errorf("SLAUploadMbps should be untouched by omission, got %v", g.SLAUploadMbps)
+	}
+}
+
 func TestPutSettingsValidation(t *testing.T) {
 	h, _, _ := newTestAPIWithSettings(t)
 	for name, body := range map[string]map[string]any{
-		"bad vm url":     {"integrations": map[string]any{"vm_enabled": true, "vm_url": "ftp://vm"}},
-		"enabled no url": {"integrations": map[string]any{"vm_enabled": true, "vm_url": ""}},
-		"zero retention": {"general": map[string]any{"retention_days_results": 0}},
-		"bad log level":  {"general": map[string]any{"log_level": "shout"}},
-		"bad label name": {"integrations": map[string]any{"vm_extra_labels": map[string]string{"1bad": "x"}}},
+		"bad vm url":      {"integrations": map[string]any{"vm_enabled": true, "vm_url": "ftp://vm"}},
+		"enabled no url":  {"integrations": map[string]any{"vm_enabled": true, "vm_url": ""}},
+		"zero retention":  {"general": map[string]any{"retention_days_results": 0}},
+		"bad log level":   {"general": map[string]any{"log_level": "shout"}},
+		"bad label name":  {"integrations": map[string]any{"vm_extra_labels": map[string]string{"1bad": "x"}}},
+		"negative sla dl": {"general": map[string]any{"sla_download_mbps": -1}},
+		"negative sla ul": {"general": map[string]any{"sla_upload_mbps": -1}},
 	} {
 		rec := do(t, h, http.MethodPut, "/api/v1/settings", body)
 		if rec.Code != http.StatusBadRequest {

@@ -190,7 +190,7 @@ restart to switch back.
 | --- | --- | --- |
 | `ookla` | `speedtest -f jsonl --progress=yes --accept-license --accept-gdpr [-s ID]`; server list from `speedtest -L -f json`, cached | `server_id` |
 | `cloudflare` | native Go against `speed.cloudflare.com` (`/cdn-cgi/trace`, `/__down`, `/__up`), p90 of per-transfer throughput | `download_sizes`, `upload_sizes`, `latency_samples`, `base_url` |
-| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
+| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `port_range_end`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
 | `fake` | deterministic, no I/O; used by tests | `fail`, `download_bps`, `upload_bps` |
 
 Binary paths and the Ookla consent flags live in the Engines settings section
@@ -211,6 +211,43 @@ paths and the Ookla consent flags match whatever the server has configured.
 `--speedtest-bin`/`--iperf3-bin` override just the binary path for that one
 invocation. The Result JSON goes to stdout; progress events stream to
 stderr as JSON lines.
+
+When `port_range_end` is set above `port`, a run that fails because the
+server reports it is busy running another test (`the server is busy
+running a test. try again later`) is retried on the next port up through
+`port_range_end`, capped at 5 attempts total. Any other error, or running
+out of ports, fails the run with that attempt's error. Without
+`port_range_end`, a busy server fails the run outright on the single
+configured port.
+
+### Ookla server search
+
+`GET /api/v1/ookla/servers?q=&country=&limit=` merges the local
+`speedtest -L` list with a wider speedtest.net search, returning
+`{"servers": [...], "near": "..."}`. A postcode-shaped `q` (e.g. `80202`,
+`SW1A 1AA`) is geocoded via Nominatim (`postalcode=` scoped by
+`countrycodes=` when `country` is given, falling back to an unscoped
+postcode search, then a free-form `q=` search, then Open-Meteo as a last
+resort) so postcodes resolve correctly instead of falling through to a
+generic name search. `country`, when given, must be a 2-letter code
+(case-insensitive; the server lowercases it) or the request is rejected
+with 400. `near` is the resolved place's name (first two comma-separated
+parts of the geocoder's result), present whenever a geocode point was
+used to widen and sort the results by distance. Nominatim requests are
+capped at 1/second and always carry an identifying `User-Agent`
+(`speedtest-tracker/<version> (+https://github.com/metril/speedtest-tracker)`),
+per its usage policy.
+
+### Public iperf3 server list
+
+`GET /api/v1/iperf3/servers?q=&limit=` searches a cached copy of
+[export.iperf3serverlist.net](https://export.iperf3serverlist.net)
+(refreshed daily, or on demand via `POST /api/v1/iperf3/servers/refresh`).
+Each entry carries `port_end` (the end of the server's advertised port
+range, omitted when it only offers a single port), `supports_reverse`,
+`supports_udp` and `supports_ipv6` (parsed from the feed's `OPTIONS`
+column: `-R`, `-u`, `-6`), plus `gbs`, `continent`, `country`, `site` and
+`provider` for display/search.
 
 ## Schedules
 
@@ -267,6 +304,30 @@ returns `{bucket_seconds, points[]}` with at most ~500 buckets, each carrying
 avg/min/max download, upload and ping plus the test and failure counts for that
 bucket. `GET /api/v1/stats/summary?range=` is cached in-memory for 30 seconds
 and sent with `Cache-Control: max-age=30`.
+
+Both `/stats/summary` and `/targets/{id}/history` accept `offset=1` (0 is the
+default) to shift the resolved window back by its own span, returning the
+immediately preceding period of equal length instead of the current one —
+the data behind a "compare with previous period" overlay.
+
+### SLA compliance
+
+Setting a plan speed — General settings `sla_download_mbps`/`sla_upload_mbps`,
+or a per-target override via that target's `thresholds.sla_download_mbps`/
+`sla_upload_mbps` (either field independently; an unset field falls back to
+the general plan) — adds `sla_compliance` to `GET /api/v1/stats/summary`: a
+0..1 fraction, per target and overall (the overall figure weighted by each
+target's own successful-result count, not a plain average across targets).
+It is the share of successful (`status=ok`) results in the window whose
+download **and** upload speed both met the resolved plan; `null` when
+neither the target nor the general settings set a plan, or per-target when
+there were no successful results in the window to judge. A direction the
+engine didn't actually measure (e.g. iperf3 reverse-only or forward-only,
+which leaves the other direction's speed at 0) is skipped rather than
+counted as a miss; if neither applicable direction was measured, that
+result is excluded from the compliance fraction entirely. Set a plan speed
+to 0 to disable it — the settings API can't distinguish an omitted field
+from an explicit null, so 0 is the documented way to clear a plan.
 
 ## Outages
 
