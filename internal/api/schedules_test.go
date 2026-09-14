@@ -334,3 +334,28 @@ func TestListRunsFilteredByScheduleID(t *testing.T) {
 		t.Fatalf("runs = %+v", body.Runs)
 	}
 }
+
+func TestScheduleNextReturnsEmptyForDisabledSchedule(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	id := createTestTarget(t, h, "t")
+	rec := doJSON(t, h, http.MethodPost, "/api/v1/schedules", map[string]any{
+		"name": "s", "cron": "*/15 * * * *", "enabled": false, "timezone": "UTC", "target_ids": []int64{id}})
+	var created struct {
+		Schedule struct {
+			ID int64 `json:"id"`
+		} `json:"schedule"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+
+	got := doJSON(t, h, http.MethodGet, "/api/v1/schedules/"+itoa(created.Schedule.ID)+"/next", nil)
+	if got.Code != http.StatusOK {
+		t.Fatalf("status %d body %s", got.Code, got.Body.String())
+	}
+	var body struct {
+		Next []string `json:"next"`
+	}
+	json.Unmarshal(got.Body.Bytes(), &body)
+	if len(body.Next) != 0 {
+		t.Fatalf("next = %v, want empty", body.Next)
+	}
+}

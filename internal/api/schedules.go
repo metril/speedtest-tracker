@@ -298,6 +298,10 @@ func (d Deps) scheduleNext(w http.ResponseWriter, r *http.Request) {
 	if d.scheduleStoreError(w, err) {
 		return
 	}
+	if !sc.Enabled {
+		writeJSON(w, http.StatusOK, map[string]any{"next": []string{}})
+		return
+	}
 	times, err := scheduler.NextFireTimes(sc.Cron, sc.Timezone, nextRunCount, time.Now())
 	if err != nil {
 		errBadRequest(w, err.Error())
