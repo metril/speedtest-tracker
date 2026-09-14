@@ -1,13 +1,13 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../components/LabelsEditor';
 import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
 import { ChannelEditor } from '../features/settings/ChannelEditor';
 import { Iperf3ServerListSection } from '../features/settings/Iperf3ServerListSection';
-import {
-  buttonClass, fieldClass, inputClass, labelClass,
-} from '../features/settings/styles';
+import { fieldClass, inputClass, labelClass } from '../features/settings/styles';
 import { TokenPanel } from '../features/settings/TokenPanel';
 import { ThresholdFields, validateThresholds } from '../features/targets/ThresholdFields';
 import type {
@@ -40,9 +40,9 @@ function Section({
       <CardContent className="grid gap-4">
         {children}
         <div className="flex items-center gap-3">
-          <button type="button" className={buttonClass} disabled={saving} onClick={onSave}>
+          <Button type="button" disabled={saving} onClick={onSave}>
             Save {title}
-          </button>
+          </Button>
           {saved && <p className="text-sm text-ok">Saved</p>}
         </div>
         {error && <p role="alert" className="text-sm text-bad">{error}</p>}
@@ -231,12 +231,12 @@ export function Settings() {
         >
           <div className={fieldClass}>
             <label htmlFor="general-base-url" className={labelClass}>Base URL</label>
-            <input id="general-base-url" className={inputClass} value={general.base_url}
+            <Input id="general-base-url" value={general.base_url}
               onChange={(e) => setGeneral({ ...general, base_url: e.target.value })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="general-timezone" className={labelClass}>Timezone</label>
-            <input id="general-timezone" className={inputClass} value={general.timezone}
+            <Input id="general-timezone" value={general.timezone}
               onChange={(e) => setGeneral({ ...general, timezone: e.target.value })} />
           </div>
           <div className={fieldClass}>
@@ -259,19 +259,19 @@ export function Settings() {
           </div>
           <div className={fieldClass}>
             <label htmlFor="general-retention-results" className={labelClass}>Results retention (days)</label>
-            <input id="general-retention-results" type="number" min={1} className={inputClass}
+            <Input id="general-retention-results" type="number" min={1}
               value={general.retention_days_results}
               onChange={(e) => setGeneral({ ...general, retention_days_results: Number(e.target.value) })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="general-retention-runs" className={labelClass}>Runs retention (days)</label>
-            <input id="general-retention-runs" type="number" min={1} className={inputClass}
+            <Input id="general-retention-runs" type="number" min={1}
               value={general.retention_days_runs}
               onChange={(e) => setGeneral({ ...general, retention_days_runs: Number(e.target.value) })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="general-prune-interval" className={labelClass}>Prune interval (minutes)</label>
-            <input id="general-prune-interval" type="number" min={1} className={inputClass}
+            <Input id="general-prune-interval" type="number" min={1}
               value={general.retention_prune_interval_minutes}
               onChange={(e) => setGeneral({ ...general, retention_prune_interval_minutes: Number(e.target.value) })} />
           </div>
@@ -284,12 +284,12 @@ export function Settings() {
         >
           <div className={fieldClass}>
             <label htmlFor="engines-speedtest-bin" className={labelClass}>Speedtest binary path</label>
-            <input id="engines-speedtest-bin" className={inputClass} value={engines.speedtest_bin}
+            <Input id="engines-speedtest-bin" value={engines.speedtest_bin}
               onChange={(e) => setEngines({ ...engines, speedtest_bin: e.target.value })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="engines-iperf3-bin" className={labelClass}>iperf3 binary path</label>
-            <input id="engines-iperf3-bin" className={inputClass} value={engines.iperf3_bin}
+            <Input id="engines-iperf3-bin" value={engines.iperf3_bin}
               onChange={(e) => setEngines({ ...engines, iperf3_bin: e.target.value })} />
           </div>
           <label className="flex items-center gap-2 text-sm text-muted">
@@ -304,7 +304,7 @@ export function Settings() {
           </label>
           <div className={fieldClass}>
             <label htmlFor="engines-ttl" className={labelClass}>Server list TTL (seconds)</label>
-            <input id="engines-ttl" type="number" min={1} className={inputClass}
+            <Input id="engines-ttl" type="number" min={1}
               value={engines.server_list_ttl_seconds}
               onChange={(e) => setEngines({ ...engines, server_list_ttl_seconds: Number(e.target.value) })} />
           </div>
@@ -317,7 +317,7 @@ export function Settings() {
             </p>
             <div className={fieldClass}>
               <label htmlFor="engines-iperf3-list-url" className={labelClass}>iperf3 server list URL</label>
-              <input id="engines-iperf3-list-url" className={inputClass} value={engines.iperf3_list_url}
+              <Input id="engines-iperf3-list-url" value={engines.iperf3_list_url}
                 onChange={(e) => setEngines({ ...engines, iperf3_list_url: e.target.value })} />
             </div>
             <Iperf3ServerListSection />
@@ -336,12 +336,12 @@ export function Settings() {
           </label>
           <div className={fieldClass}>
             <label htmlFor="vm-url" className={labelClass}>VictoriaMetrics URL</label>
-            <input id="vm-url" className={inputClass} value={integrations.vm_url}
+            <Input id="vm-url" value={integrations.vm_url}
               onChange={(e) => setIntegrations({ ...integrations, vm_url: e.target.value })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="vm-auth" className={labelClass}>VictoriaMetrics auth header</label>
-            <input id="vm-auth" type="password" placeholder="leave unchanged" className={inputClass}
+            <Input id="vm-auth" type="password" placeholder="leave unchanged"
               value={integrations.vm_auth_header}
               onChange={(e) => setIntegrations({ ...integrations, vm_auth_header: e.target.value })} />
           </div>
@@ -351,10 +351,10 @@ export function Settings() {
             onChange={(v) => setIntegrations({ ...integrations, vm_extra_labels: v })}
           />
           <div className="flex items-center gap-3">
-            <button type="button" className={buttonClass} disabled={test.isPending}
+            <Button type="button" variant="outline" disabled={test.isPending}
               onClick={() => runTest('vm', integrations.vm_url, integrations.vm_auth_header, setVmResult)}>
               Test VictoriaMetrics
-            </button>
+            </Button>
             {vmResult && (
               <p className={vmResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vmResult.message}</p>
             )}
@@ -367,12 +367,12 @@ export function Settings() {
           </label>
           <div className={fieldClass}>
             <label htmlFor="vl-url" className={labelClass}>VictoriaLogs URL</label>
-            <input id="vl-url" className={inputClass} value={integrations.vl_url}
+            <Input id="vl-url" value={integrations.vl_url}
               onChange={(e) => setIntegrations({ ...integrations, vl_url: e.target.value })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="vl-auth" className={labelClass}>VictoriaLogs auth header</label>
-            <input id="vl-auth" type="password" placeholder="leave unchanged" className={inputClass}
+            <Input id="vl-auth" type="password" placeholder="leave unchanged"
               value={integrations.vl_auth_header}
               onChange={(e) => setIntegrations({ ...integrations, vl_auth_header: e.target.value })} />
           </div>
@@ -382,10 +382,10 @@ export function Settings() {
             onChange={(v) => setIntegrations({ ...integrations, vl_stream_fields: v })}
           />
           <div className="flex items-center gap-3">
-            <button type="button" className={buttonClass} disabled={test.isPending}
+            <Button type="button" variant="outline" disabled={test.isPending}
               onClick={() => runTest('vl', integrations.vl_url, integrations.vl_auth_header, setVlResult)}>
               Test VictoriaLogs
-            </button>
+            </Button>
             {vlResult && (
               <p className={vlResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vlResult.message}</p>
             )}
@@ -424,24 +424,24 @@ export function Settings() {
                 unsaved={isChannelUnsaved(channel, settings.data?.notifications.channels)}
               />
             ))}
-            <button type="button" className={buttonClass} onClick={addChannel}>Add channel</button>
+            <Button type="button" variant="outline" onClick={addChannel}>Add channel</Button>
           </div>
 
           <div className={fieldClass}>
             <label htmlFor="notifications-cooldown" className={labelClass}>Cooldown (minutes)</label>
-            <input id="notifications-cooldown" type="number" min={1} className={inputClass}
+            <Input id="notifications-cooldown" type="number" min={1}
               value={notifications.cooldown_minutes}
               onChange={(e) => setNotifications({ ...notifications, cooldown_minutes: Number(e.target.value) })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="notifications-quiet-start" className={labelClass}>Quiet hours start</label>
-            <input id="notifications-quiet-start" type="time" className={inputClass}
+            <Input id="notifications-quiet-start" type="time"
               value={notifications.quiet_hours_start}
               onChange={(e) => setNotifications({ ...notifications, quiet_hours_start: e.target.value })} />
           </div>
           <div className={fieldClass}>
             <label htmlFor="notifications-quiet-end" className={labelClass}>Quiet hours end</label>
-            <input id="notifications-quiet-end" type="time" className={inputClass}
+            <Input id="notifications-quiet-end" type="time"
               value={notifications.quiet_hours_end}
               onChange={(e) => setNotifications({ ...notifications, quiet_hours_end: e.target.value })} />
           </div>

@@ -1,3 +1,5 @@
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import type { ResultFilters, Target } from '../../lib/api';
 import { useTags } from '../../lib/queries';
 
@@ -7,7 +9,11 @@ interface Props {
   targets: Target[];
 }
 
-const control = 'rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
+// Radix's Select (ui/select) doesn't support userEvent.selectOptions /
+// fireEvent.change the way these filters (and their tests) rely on, so
+// these stay native <select> elements, styled to match ui/Input instead
+// of adopting the Radix component.
+const control = 'flex h-9 items-center rounded-md border border-input bg-transparent px-3 py-1 text-sm text-fg shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring';
 
 const pad = (n: number) => String(n).padStart(2, '0');
 
@@ -61,16 +67,15 @@ export function ResultFiltersBar({ value, onChange, targets }: Props) {
         <option value="">All tags</option>
         {(tags.data ?? []).map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
       </select>
-      <input className={control} type="datetime-local" aria-label="From"
+      <Input type="datetime-local" aria-label="From" className="w-auto"
         value={isoToLocalInput(value.from)}
         onChange={(e) => set({ from: localInputToISO(e.target.value) })} />
-      <input className={control} type="datetime-local" aria-label="To"
+      <Input type="datetime-local" aria-label="To" className="w-auto"
         value={isoToLocalInput(value.to)}
         onChange={(e) => set({ to: localInputToISO(e.target.value) })} />
-      <button className="rounded border border-line px-2 py-1 text-sm text-muted hover:bg-raised"
-        onClick={() => onChange({})}>
+      <Button type="button" variant="outline" size="sm" onClick={() => onChange({})}>
         Clear
-      </button>
+      </Button>
     </div>
   );
 }

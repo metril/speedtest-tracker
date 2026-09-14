@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "tw-animate-css";
 
 /* Tailwind v4's dark: variant keys off a class on <html>, not the media
    query, so an explicit light/dark choice can override the OS. */
