@@ -56,6 +56,16 @@ function settingsFixture({ channels, ...integrationOverrides }: FixtureOverrides
       quiet_hours_end: '',
       notify_recovery: true,
     },
+    auth: {
+      mode: 'open',
+      user_header: '',
+      groups_header: '',
+      groups_separator: ',',
+      trusted_proxies: [],
+      admin_group: '',
+      allow_tokens: false,
+    },
+    locked: [],
   };
 }
 

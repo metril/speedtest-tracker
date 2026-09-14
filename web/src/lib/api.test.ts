@@ -130,4 +130,50 @@ describe('settings client', () => {
     expect(fetchMock.mock.calls[0][0]).toContain('/settings/test/notify/c1');
     expect((fetchMock.mock.calls[0][1] as RequestInit).method).toBe('POST');
   });
+
+  it('surfaces a 400 from the lockout guard as an ApiError message', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({ error: { code: 'invalid_request', message: 'trusted_proxies must not be empty' } }, 400)));
+    await expect(api.updateSettings({ auth: { mode: 'forward_auth' } }))
+      .rejects.toThrow(/trusted_proxies/);
+  });
+});
+
+describe('auth client', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('parses the me endpoint', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse({
+      mode: 'forward_auth', user: 'alice', groups: ['users'], is_admin: false,
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(api.getMe()).resolves.toEqual({
+      mode: 'forward_auth', user: 'alice', groups: ['users'], is_admin: false,
+    });
+    expect(String(fetchMock.mock.calls[0][0])).toBe('/api/v1/me');
+  });
+
+  it('unwraps the tokens envelope', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      tokens: [{ id: 1, name: 'ha', prefix: 'stt_abc', created_at: 'x' }],
+    })));
+    await expect(api.listTokens()).resolves.toHaveLength(1);
+  });
+
+  it('returns the plaintext token exactly as the server sent it', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => jsonResponse({
+      id: 1, name: 'ha', prefix: 'stt_abc', created_at: 'x', token: 'stt_abcdef',
+    }, 201)));
+    await expect(api.createToken('ha')).resolves.toMatchObject({ token: 'stt_abcdef' });
+  });
+
+  it('deletes a token by id', async () => {
+    const fetchMock = vi.fn(async (..._args: Parameters<typeof fetch>) => jsonResponse(undefined, 204));
+    vi.stubGlobal('fetch', fetchMock);
+    await api.deleteToken(3);
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(String(url)).toBe('/api/v1/tokens/3');
+    expect((init as RequestInit).method).toBe('DELETE');
+  });
 });

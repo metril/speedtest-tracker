@@ -353,11 +353,25 @@ export interface NotificationSettings {
   notify_recovery: boolean;
 }
 
+export type AuthMode = 'open' | 'forward_auth' | 'token';
+
+export interface AuthSettings {
+  mode: AuthMode;
+  user_header: string;
+  groups_header: string;
+  groups_separator: string;
+  trusted_proxies: string[];
+  admin_group: string;
+  allow_tokens: boolean;
+}
+
 export interface Settings {
   general: GeneralSettings;
   engines: EngineSettings;
   integrations: IntegrationSettings;
   notifications: NotificationSettings;
+  auth: AuthSettings;
+  locked: string[];
 }
 
 export type SettingsPatch = {
@@ -365,6 +379,7 @@ export type SettingsPatch = {
   engines?: Partial<EngineSettings>;
   integrations?: Partial<IntegrationSettings>;
   notifications?: Partial<NotificationSettings>;
+  auth?: Partial<AuthSettings>;
 };
 
 export interface ConnectionTest {
@@ -381,3 +396,33 @@ export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth_
   request<ConnectionTest>(`/settings/test/${target}`, { method: 'POST', body: JSON.stringify(body) });
 export const testNotifyChannel = (channelId: string) =>
   request<ConnectionTest>(`/settings/test/notify/${encodeURIComponent(channelId)}`, { method: 'POST' });
+
+export interface Me {
+  mode: AuthMode;
+  user: string;
+  groups: string[];
+  is_admin: boolean;
+}
+
+export const getMe = () => request<Me>('/me');
+
+/** ApiTokenInfo never carries the token itself -- only CreatedToken does,
+ * and only in the response to the request that created it. */
+export interface ApiTokenInfo {
+  id: number;
+  name: string;
+  prefix: string;
+  created_at: string;
+  last_used_at?: string;
+}
+
+export interface CreatedToken extends ApiTokenInfo {
+  token: string;
+}
+
+export const listTokens = async () =>
+  (await request<{ tokens: ApiTokenInfo[] }>('/tokens')).tokens;
+export const createToken = (name: string) =>
+  request<CreatedToken>('/tokens', { method: 'POST', body: JSON.stringify({ name }) });
+export const deleteToken = (id: number) =>
+  request<void>(`/tokens/${id}`, { method: 'DELETE' });

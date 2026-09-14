@@ -18,6 +18,8 @@ export const queryKeys = {
   summary: (range: Range) => ['summary', range] as const,
   outages: (range: Range) => ['outages', range] as const,
   settings: ['settings'] as const,
+  me: ['me'] as const,
+  tokens: ['tokens'] as const,
 };
 
 export function useTargets() {
@@ -220,7 +222,42 @@ export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (patch: api.SettingsPatch) => api.updateSettings(patch),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.settings }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.settings });
+      qc.invalidateQueries({ queryKey: queryKeys.me });
+    },
+  });
+}
+
+/** useMe is the caller's identity under the active auth mode. It never
+ * changes under a live session, so it is fetched once and never retried --
+ * a failure here is an answer (not authenticated), not a transient error. */
+export function useMe() {
+  return useQuery({
+    queryKey: queryKeys.me,
+    queryFn: api.getMe,
+    staleTime: Infinity,
+    retry: false,
+  });
+}
+
+export function useTokens() {
+  return useQuery({ queryKey: queryKeys.tokens, queryFn: api.listTokens });
+}
+
+export function useCreateToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => api.createToken(name),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.tokens }),
+  });
+}
+
+export function useDeleteToken() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteToken(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.tokens }),
   });
 }
 
