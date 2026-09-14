@@ -1,13 +1,14 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { LabelsEditor } from '../components/LabelsEditor';
+import { AuthSection, validateAuthSettings } from '../features/settings/AuthSection';
 import { ChannelEditor } from '../features/settings/ChannelEditor';
 import {
   buttonClass, fieldClass, inputClass, labelClass,
 } from '../features/settings/styles';
 import { ThresholdFields, validateThresholds } from '../features/targets/ThresholdFields';
 import type {
-  EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
+  AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
 } from '../lib/api';
 import { isChannelUnsaved, stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
 import { ApiError } from '../lib/api';
@@ -15,7 +16,7 @@ import {
   useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
 } from '../lib/queries';
 
-type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications';
+type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications' | 'auth';
 
 function Section({
   id, title, onSave, saving, error, saved, children,
@@ -47,7 +48,7 @@ function Section({
  * successful save, per section. */
 function useSavedFlash() {
   const [saved, setSaved] = useState<Record<SectionKey, boolean>>({
-    general: false, engines: false, integrations: false, notifications: false,
+    general: false, engines: false, integrations: false, notifications: false, auth: false,
   });
   const timers = useRef<Partial<Record<SectionKey, ReturnType<typeof setTimeout>>>>({});
 
@@ -75,6 +76,7 @@ export function Settings() {
   const [engines, setEngines] = useState<EngineSettings | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationSettings | null>(null);
   const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
+  const [auth, setAuth] = useState<AuthSettings | null>(null);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
   const { saved, flash } = useSavedFlash();
   const [vmResult, setVmResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -93,6 +95,7 @@ export function Settings() {
     setEngines(settings.data.engines);
     setIntegrations(settings.data.integrations);
     setNotifications(settings.data.notifications);
+    setAuth(settings.data.auth);
   }, [settings.data]);
 
   const message = (err: unknown) => (err instanceof ApiError ? err.message : err ? String(err) : 'Save failed.');
@@ -163,6 +166,16 @@ export function Settings() {
     });
   };
 
+  const saveAuth = () => {
+    if (!auth) return;
+    const authError = validateAuthSettings(auth);
+    if (authError) {
+      setErrors((e) => ({ ...e, auth: authError }));
+      return;
+    }
+    save('auth', { auth });
+  };
+
   const saveNotifications = () => {
     if (!notifications) return;
     const thresholdError = validateThresholds(notifications.default_thresholds);
@@ -175,7 +188,7 @@ export function Settings() {
     });
   };
 
-  if (settings.isLoading || !general || !engines || !integrations || !notifications) {
+  if (settings.isLoading || !general || !engines || !integrations || !notifications || !auth) {
     return <h1 className="text-xl font-semibold">Settings</h1>;
   }
 
@@ -183,6 +196,14 @@ export function Settings() {
     <div className="grid gap-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
       <div className="space-y-8">
+        <Section
+          id="auth-heading" title="Auth" saving={update.isPending}
+          error={errors.auth} saved={saved.auth}
+          onSave={saveAuth}
+        >
+          <AuthSection value={auth} locked={settings.data?.locked ?? []} onChange={setAuth} />
+        </Section>
+
         <Section
           id="general-heading" title="General" saving={update.isPending}
           error={errors.general} saved={saved.general}

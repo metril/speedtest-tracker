@@ -1,6 +1,7 @@
 import { NavLink, Outlet } from 'react-router';
 import { LivePanel } from '../features/live/LivePanel';
 import { LiveRunProvider } from '../features/live/LiveRunProvider';
+import { OpenModeBanner } from './OpenModeBanner';
 import { ThemeToggle } from './ThemeToggle';
 
 const NAV = [
@@ -15,6 +16,7 @@ export function Layout() {
   return (
     <LiveRunProvider>
       <div className="min-h-screen bg-app text-fg">
+        <OpenModeBanner />
         <header className="border-b border-line">
           <div className="mx-auto flex max-w-6xl items-center gap-6 px-4 py-3">
             <span className="font-semibold tracking-tight">speedtest-tracker</span>

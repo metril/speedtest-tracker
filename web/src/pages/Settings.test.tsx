@@ -12,9 +12,15 @@ function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
 }
 
-type FixtureOverrides = Partial<SettingsType['integrations']> & { channels?: NotifyChannel[] };
+type FixtureOverrides = Partial<SettingsType['integrations']> & {
+  channels?: NotifyChannel[];
+  auth?: Partial<SettingsType['auth']>;
+  locked?: string[];
+};
 
-function settingsFixture({ channels, ...integrationOverrides }: FixtureOverrides = {}): SettingsType {
+function settingsFixture({
+  channels, auth: authOverrides, locked, ...integrationOverrides
+}: FixtureOverrides = {}): SettingsType {
   return {
     general: {
       base_url: 'http://localhost:8080',
@@ -64,8 +70,9 @@ function settingsFixture({ channels, ...integrationOverrides }: FixtureOverrides
       trusted_proxies: [],
       admin_group: '',
       allow_tokens: false,
+      ...authOverrides,
     },
-    locked: [],
+    locked: locked ?? [],
   };
 }
 
@@ -259,5 +266,48 @@ describe('Settings page', () => {
     await userEvent.selectOptions(screen.getByLabelText('Type'), 'ntfy');
     expect(screen.getByLabelText('Priority')).toBeInTheDocument();
     expect(screen.queryByLabelText('Headers')).not.toBeInTheDocument();
+  });
+
+  it('saves only the auth section', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
+    await userEvent.type(screen.getByLabelText('Trusted proxy CIDRs'), '10.0.0.0/8');
+    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
+      .getByRole('button', { name: 'Save Auth' }));
+    expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
+      mode: 'forward_auth', trusted_proxies: ['10.0.0.0/8'],
+    }) });
+    expect(put.mock.calls[0][0].general).toBeUndefined();
+  });
+
+  it('disables a field that is set by the environment', async () => {
+    renderSettings({ settings: settingsFixture({ locked: ['auth.mode'] }) });
+    expect(await screen.findByLabelText('Auth mode')).toBeDisabled();
+    expect(within(screen.getByRole('region', { name: 'Auth' }))
+      .getByText('set by environment')).toBeInTheDocument();
+    expect(screen.getByLabelText('Admin group')).not.toBeDisabled();
+  });
+
+  it('blocks a forward_auth switch with no trusted proxies before calling the API', async () => {
+    const put = vi.fn();
+    renderSettings({ put });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
+    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/at least one trusted proxy/i);
+  });
+
+  it('shows the server lockout-guard message', async () => {
+    const put = vi.fn().mockRejectedValue(
+      new ApiError(400, 'invalid_request', 'this request does not carry the Remote-User header from a trusted proxy'),
+    );
+    renderSettings({
+      put,
+      settings: settingsFixture({ auth: { mode: 'open', trusted_proxies: ['10.0.0.0/8'] } }),
+    });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
+    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Remote-User/);
   });
 });
