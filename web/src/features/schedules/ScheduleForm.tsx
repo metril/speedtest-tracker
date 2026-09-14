@@ -3,6 +3,8 @@ import type { Schedule, ScheduleInput, Target } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { useCronPreview } from '../../lib/queries';
 import { formatDateTime } from '../../lib/format';
+import { SortableTargetList } from './SortableTargetList';
+import { TargetPicker } from './TargetPicker';
 
 /** Presets cover the schedules people actually create; anything else is
  * typed straight into the expression field. */
@@ -61,17 +63,6 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
   const preview = useCronPreview(debouncedCron, debouncedTimezone);
   const byID = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
   const isCustomTimezone = timezone !== '' && !CURATED_TIMEZONES.includes(timezone);
-  const available = targets.filter((t) => !selected.includes(t.id));
-
-  const move = (index: number, delta: number) => {
-    setSelected((prev) => {
-      const next = [...prev];
-      const to = index + delta;
-      if (to < 0 || to >= next.length) return prev;
-      [next[index], next[to]] = [next[to], next[index]];
-      return next;
-    });
-  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -143,32 +134,8 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
 
       <fieldset className="grid gap-2">
         <legend className="text-xs uppercase tracking-wide text-faint">Targets, in run order</legend>
-        <ol className="grid gap-1">
-          {selected.map((id, i) => (
-            <li key={id} className="flex items-center gap-2 rounded border border-line px-2 py-1 text-sm">
-              <span className="w-5 text-right font-mono text-xs text-faint">{i + 1}</span>
-              <span className="flex-1 text-fg">{byID.get(id)?.name ?? `#${id}`}</span>
-              <button type="button" aria-label={`Move ${byID.get(id)?.name ?? id} up`} disabled={i === 0}
-                className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
-                onClick={() => move(i, -1)}>↑</button>
-              <button type="button" aria-label={`Move ${byID.get(id)?.name ?? id} down`} disabled={i === selected.length - 1}
-                className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
-                onClick={() => move(i, 1)}>↓</button>
-              <button type="button" aria-label={`Remove ${byID.get(id)?.name ?? id}`}
-                className="rounded border border-line px-1.5 text-xs text-muted"
-                onClick={() => setSelected((prev) => prev.filter((x) => x !== id))}>×</button>
-            </li>
-          ))}
-        </ol>
-        <div className="flex flex-wrap gap-2">
-          {available.map((t) => (
-            <button key={t.id} type="button" aria-label={`Add ${t.name}`}
-              className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-surface"
-              onClick={() => setSelected((prev) => [...prev, t.id])}>
-              + {t.name}
-            </button>
-          ))}
-        </div>
+        <SortableTargetList selected={selected} byID={byID} onChange={setSelected} />
+        <TargetPicker targets={targets} selected={selected} onChange={setSelected} />
       </fieldset>
 
       <label className="flex items-center gap-2 text-sm text-muted">

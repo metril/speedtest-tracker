@@ -1,5 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import {
+  render, screen, waitFor, within,
+} from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../lib/api';
@@ -102,10 +104,26 @@ describe('Schedules page', () => {
     await screen.findByText('nightly');
     await userEvent.click(screen.getByRole('button', { name: 'New schedule' }));
     await userEvent.type(screen.getByLabelText('Name'), 'new-one');
-    await userEvent.click(await screen.findByRole('button', { name: 'Add t1' }));
+    await userEvent.click(await screen.findByRole('checkbox', { name: /t1/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
 
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Save schedule' })).not.toBeInTheDocument());
     expect(screen.getAllByText(/overlaps with schedule "nightly"/).length).toBe(1);
+  });
+
+  it('shows the target count and expands to chip names on click', async () => {
+    wrap();
+    await screen.findByText('nightly');
+
+    // "nightly" has one target (t1); clicking the count expands its row.
+    const nightlyRow = screen.getByText('nightly').closest('tr')!;
+    const countButton = within(nightlyRow).getByRole('button', { name: '1' });
+    expect(screen.queryByText('t1')).not.toBeInTheDocument();
+
+    await userEvent.click(countButton);
+    expect(await screen.findByText('t1')).toBeInTheDocument();
+
+    await userEvent.click(countButton);
+    expect(screen.queryByText('t1')).not.toBeInTheDocument();
   });
 });

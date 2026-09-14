@@ -38,8 +38,8 @@ describe('ScheduleForm', () => {
     wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'nightly');
     await userEvent.click(screen.getByRole('button', { name: 'Daily 03:00' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add home' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add nas' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /home/ }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /nas/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
       name: 'nightly', cron: '0 3 * * *', enabled: true, target_ids: [1, 2],
@@ -50,8 +50,8 @@ describe('ScheduleForm', () => {
     const onSubmit = vi.fn();
     wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 's');
-    await userEvent.click(screen.getByRole('button', { name: 'Add home' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Add nas' }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /home/ }));
+    await userEvent.click(screen.getByRole('checkbox', { name: /nas/ }));
     await userEvent.click(screen.getByRole('button', { name: 'Move nas up' }));
     await userEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
     expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ target_ids: [2, 1] }));

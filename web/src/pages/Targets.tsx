@@ -6,7 +6,7 @@ import type { Target, TargetInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import {
   useCreateTarget, useDeletedTargets, useDeleteTarget, useRestoreTarget, useRunTarget,
-  useTargets, useUpdateTarget,
+  useSchedules, useTargets, useUpdateTarget,
 } from '../lib/queries';
 
 /** RecentlyDeleted lists targets whose most recent history entry is a
@@ -71,6 +71,7 @@ type Editing = { mode: 'none' } | { mode: 'new' } | { mode: 'edit'; target: Targ
 /** Targets lists every target and hosts the create/edit form. */
 export function Targets() {
   const targets = useTargets();
+  const schedules = useSchedules();
   const create = useCreateTarget();
   const update = useUpdateTarget();
   const remove = useDeleteTarget();
@@ -78,6 +79,16 @@ export function Targets() {
   const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [notice, setNotice] = useState('');
+  // Reverse map: target id -> names of schedules that include it, built
+  // from the schedules' own target_ids rather than a per-target fetch.
+  const schedulesByTarget = new Map<number, string[]>();
+  for (const s of schedules.data ?? []) {
+    for (const id of s.target_ids) {
+      const names = schedulesByTarget.get(id) ?? [];
+      names.push(s.name);
+      schedulesByTarget.set(id, names);
+    }
+  }
   // run.variables is the target id of whichever "Run now" mutation is
   // currently in flight, so each row's button can show pending state
   // independently instead of every row disabling at once.
@@ -141,6 +152,7 @@ export function Targets() {
               <th className="py-2 pr-3 font-medium">Engine</th>
               <th className="py-2 pr-3 font-medium">Lane</th>
               <th className="py-2 pr-3 font-medium">State</th>
+              <th className="py-2 pr-3 font-medium">Schedules</th>
               <th className="py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
@@ -158,6 +170,9 @@ export function Targets() {
                   <span className={t.enabled ? 'text-ok' : 'text-faint'}>
                     {t.enabled ? 'enabled' : 'disabled'}
                   </span>
+                </td>
+                <td className="py-2 pr-3 text-muted">
+                  {(schedulesByTarget.get(t.id) ?? []).join(', ') || '—'}
                 </td>
                 <td className="py-2 text-right">
                   <div className="flex justify-end gap-2">

@@ -46,6 +46,7 @@ describe('Targets page delete confirmation', () => {
       const url = String(input);
       if (url.endsWith('/targets')) return jsonResponse(targets);
       if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.spyOn(window, 'confirm').mockReturnValue(false);
@@ -70,6 +71,7 @@ describe('Targets page delete confirmation', () => {
       if (url.endsWith('/targets') && (!init || init.method === undefined)) return jsonResponse(targets);
       if (url.endsWith('/targets/1') && init?.method === 'DELETE') return { ok: true, status: 204, statusText: 'no content', text: async () => '' } as Response;
       if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       return jsonResponse(targets);
     });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -107,6 +109,7 @@ describe('Targets page delete confirmation', () => {
           }]
           : []);
       }
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       throw new Error(`unexpected fetch: ${url}`);
     });
     vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -143,6 +146,7 @@ describe('Targets page per-row run pending state', () => {
         await new Promise<void>((resolve) => { resolveRun = resolve; });
         return jsonResponse({ run_id: 9 });
       }
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
       return jsonResponse(targets);
     });
 
@@ -165,5 +169,35 @@ describe('Targets page per-row run pending state', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Running…' })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('Targets page schedules column', () => {
+  it('lists the schedules that include each target, and a dash for targets in none', async () => {
+    const targets = [target({ id: 1, name: 'home' }), target({ id: 2, name: 'office' })];
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/targets')) return jsonResponse(targets);
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) {
+        return jsonResponse({
+          schedules: [
+            {
+              id: 1, name: 'nightly', cron: '0 3 * * *', enabled: true, timezone: 'UTC',
+              target_ids: [1], next_run: '', last_run: null, created_at: '', updated_at: '',
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+
+    expect(screen.getByText('nightly')).toBeInTheDocument();
+    const rows = screen.getAllByRole('row');
+    const officeRow = rows.find((r) => r.textContent?.includes('office'));
+    expect(officeRow?.textContent).toContain('—');
   });
 });

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { Fragment, useState } from 'react';
 import { ScheduleForm } from '../features/schedules/ScheduleForm';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { Schedule, ScheduleInput, ScheduleRun, ScheduleSaved } from '../lib/api';
@@ -36,6 +36,16 @@ export function Schedules() {
   const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [warnings, setWarnings] = useState<string[]>([]);
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const targetByID = new Map((targets.data ?? []).map((t) => [t.id, t]));
+
+  const toggleExpanded = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
 
   const message = (err: unknown) => (err instanceof ApiError ? err.message : err ? String(err) : undefined);
 
@@ -100,41 +110,64 @@ export function Schedules() {
               <th className="py-2 pr-3 font-medium">Cron</th>
               <th className="py-2 pr-3 font-medium">Next run</th>
               <th className="py-2 pr-3 font-medium">Last run</th>
+              <th className="py-2 pr-3 font-medium">Targets</th>
               <th className="py-2 text-right font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {schedules.data.map((s) => (
-              <tr key={s.id} className="border-b border-line hover:bg-raised">
-                <td className="py-2 pr-3 text-fg">
-                  {s.name}
-                  {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}
-                </td>
-                <td className="py-2 pr-3 font-mono text-xs text-muted">{s.cron}</td>
-                <td className="py-2 pr-3 text-muted">
-                  {s.next_run ? formatDateTime(s.next_run) : '—'}
-                  <span className="ml-2 text-xs text-faint">{s.timezone}</span>
-                </td>
-                <td className="py-2 pr-3"><LastRun last={s.last_run} /></td>
-                <td className="py-2 text-right">
-                  <div className="flex justify-end gap-2">
-                    <button
-                      className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
-                      disabled={run.isPending && run.variables === s.id}
-                      onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
-                      Run now
+              <Fragment key={s.id}>
+                <tr className="border-b border-line hover:bg-raised">
+                  <td className="py-2 pr-3 text-fg">
+                    {s.name}
+                    {!s.enabled && <span className="ml-2 text-xs text-faint">disabled</span>}
+                  </td>
+                  <td className="py-2 pr-3 font-mono text-xs text-muted">{s.cron}</td>
+                  <td className="py-2 pr-3 text-muted">
+                    {s.next_run ? formatDateTime(s.next_run) : '—'}
+                    <span className="ml-2 text-xs text-faint">{s.timezone}</span>
+                  </td>
+                  <td className="py-2 pr-3"><LastRun last={s.last_run} /></td>
+                  <td className="py-2 pr-3">
+                    <button type="button" className="text-muted underline decoration-dotted hover:text-fg"
+                      onClick={() => toggleExpanded(s.id)}>
+                      {s.target_ids.length}
                     </button>
-                    <button className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
-                      onClick={() => { setWarnings([]); setEditing({ mode: 'edit', schedule: s }); }}>
-                      Edit
-                    </button>
-                    <button className="rounded border border-line px-2 py-1 text-xs text-bad hover:bg-bad/20"
-                      onClick={() => { if (window.confirm(`Delete schedule "${s.name}"?`)) remove.mutate(s.id); }}>
-                      Delete
-                    </button>
-                  </div>
-                </td>
-              </tr>
+                  </td>
+                  <td className="py-2 text-right">
+                    <div className="flex justify-end gap-2">
+                      <button
+                        className="rounded border border-accent px-2 py-1 text-xs text-accent hover:bg-accent/20 disabled:opacity-50"
+                        disabled={run.isPending && run.variables === s.id}
+                        onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
+                        Run now
+                      </button>
+                      <button className="rounded border border-line px-2 py-1 text-xs text-muted hover:bg-raised"
+                        onClick={() => { setWarnings([]); setEditing({ mode: 'edit', schedule: s }); }}>
+                        Edit
+                      </button>
+                      <button className="rounded border border-line px-2 py-1 text-xs text-bad hover:bg-bad/20"
+                        onClick={() => { if (window.confirm(`Delete schedule "${s.name}"?`)) remove.mutate(s.id); }}>
+                        Delete
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+                {expanded.has(s.id) && (
+                  <tr className="border-b border-line bg-raised/50">
+                    <td colSpan={6} className="py-2 pr-3">
+                      <div className="flex flex-wrap gap-1.5">
+                        {s.target_ids.length === 0 && <span className="text-xs text-faint">No targets.</span>}
+                        {s.target_ids.map((id) => (
+                          <span key={id} className="rounded-full border border-line px-2 py-0.5 text-xs text-muted">
+                            {targetByID.get(id)?.name ?? `#${id}`}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </Fragment>
             ))}
           </tbody>
         </table>
