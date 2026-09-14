@@ -16,6 +16,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/fake"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
+	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/settings"
@@ -153,11 +154,14 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
 	vl.Start()
 	defer vl.Close(context.Background())
+	nt := notify.New(notify.Config{Store: db, Logger: logger})
+	nt.Start()
+	defer nt.Close(context.Background())
 
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, &metricsEnabled, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, &metricsEnabled, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)

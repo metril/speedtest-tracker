@@ -20,6 +20,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 	"github.com/metril/speedtest-tracker/internal/metrics"
+	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/prune"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
@@ -116,7 +117,7 @@ func parseLevel(s string) slog.Level {
 // never race the notification past a subscriber that isn't listening yet.
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
-	vm *vmpush.Writer, vl *vlpush.Handler, metricsEnabled *atomic.Bool, logger *slog.Logger) {
+	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, metricsEnabled *atomic.Bool, logger *slog.Logger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -150,7 +151,18 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 					logger.Error("reload schedules after timezone change", "error", err)
 					continue
 				}
+				// Quiet hours are also evaluated in the general timezone.
+				if err := applyNotifications(ctx, st, nt, logger); err != nil {
+					logger.Error("reload notifications after timezone change", "error", err)
+					continue
+				}
 				logger.Info("schedules reloaded after timezone change")
+			case strings.HasPrefix(key, "notifications."):
+				if err := applyNotifications(ctx, st, nt, logger); err != nil {
+					logger.Error("reload notifications", "error", err)
+					continue
+				}
+				logger.Info("notifications reloaded", "changed_key", key)
 			case strings.HasPrefix(key, "integrations."):
 				if err := applyIntegrations(ctx, st, vm, vl, metricsEnabled, logger); err != nil {
 					logger.Error("reload integrations", "error", err)
@@ -177,6 +189,29 @@ func applyIntegrations(ctx context.Context, st *settings.Store, vm *vmpush.Write
 	vl.Configure(i.VLEnabled, i.VLURL, i.VLAuthHeader, i.VLStreamFields)
 	metricsEnabled.Store(i.MetricsEnabled)
 	logger.Debug("integrations applied", "vm_enabled", i.VMEnabled, "vl_enabled", i.VLEnabled)
+	return nil
+}
+
+// applyNotifications pushes the stored Notifications section into the live
+// notifier, resolving quiet hours against the general timezone. It runs at
+// startup and on every notifications.* or general.timezone change, which
+// is what makes channel edits take effect without a restart.
+func applyNotifications(ctx context.Context, st *settings.Store, n *notify.Notifier, logger *slog.Logger) error {
+	cfg, err := st.Notifications(ctx)
+	if err != nil {
+		return err
+	}
+	g, err := st.General(ctx)
+	if err != nil {
+		return err
+	}
+	loc, err := time.LoadLocation(g.Timezone)
+	if err != nil {
+		logger.Warn("notification quiet hours falling back to UTC", "timezone", g.Timezone, "error", err)
+		loc = time.UTC
+	}
+	n.Configure(cfg, loc)
+	logger.Debug("notifications applied", "enabled", cfg.Enabled, "channels", len(cfg.Channels))
 	return nil
 }
 
@@ -221,6 +256,19 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		return err
 	}
 
+	nt := notify.New(notify.Config{Store: db, Logger: logger})
+	nt.Start()
+	defer func() {
+		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := nt.Close(shutCtx); err != nil {
+			logger.Warn("notifier shutdown", "error", err)
+		}
+	}()
+	if err := applyNotifications(ctx, st, nt, logger); err != nil {
+		return err
+	}
+
 	engineCfg, err := st.Engines(ctx)
 	if err != nil {
 		return err
@@ -238,6 +286,9 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			}),
 			runner.SinkFunc(func(_ context.Context, res *store.Result, meta runner.ResultMeta) {
 				m.ObserveResult(res, meta.ScheduleName)
+			}),
+			runner.SinkFunc(func(ctx context.Context, res *store.Result, meta runner.ResultMeta) {
+				nt.OnResult(ctx, res, notify.Meta{ScheduleName: meta.ScheduleName})
 			}),
 		},
 	})
@@ -261,6 +312,16 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		func() float64 { return float64(vm.Stats().Queued) })
 	m.AddGaugeFunc("speedtest_vl_lines_dropped_total", "log lines dropped from the VictoriaLogs queue",
 		func() float64 { return float64(vlHandler.Dropped()) })
+	m.AddGaugeFunc("speedtest_notifications_sent_total", "notifications delivered to a channel",
+		func() float64 { return float64(nt.Stats().Sent) })
+	m.AddGaugeFunc("speedtest_notifications_failed_total", "notification deliveries that returned an error",
+		func() float64 { return float64(nt.Stats().Failed) })
+	m.AddGaugeFunc("speedtest_notifications_suppressed_total", "notifications withheld by quiet hours",
+		func() float64 { return float64(nt.Stats().Suppressed) })
+	m.AddGaugeFunc("speedtest_notifications_dropped_total", "results dropped from the notifier queue",
+		func() float64 { return float64(nt.Stats().Dropped) })
+	m.AddGaugeFunc("speedtest_notifications_queued", "results currently queued for notification",
+		func() float64 { return float64(nt.Stats().Queued) })
 
 	sch := scheduler.New(scheduler.Config{Store: db, Runner: rn, Logger: logger})
 	if err := sch.Reload(ctx); err != nil {
@@ -273,7 +334,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	defer unsubscribe()
 	watchCtx, stopWatch := context.WithCancel(context.Background())
 	defer stopWatch()
-	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, &metricsEnabled, logger)
+	go watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, &metricsEnabled, logger)
 	go pj.Run(watchCtx)
 
 	srv := &http.Server{
@@ -290,9 +351,10 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			ReloadSchedules: sch.Reload,
 			Scheduler:       sch,
 			Settings:        st,
+			Notifier:        nt,
 			Metrics:         m,
 			MetricsHandler:  m.Handler(),
-			MetricsEnabled: metricsEnabled.Load,
+			MetricsEnabled:  metricsEnabled.Load,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

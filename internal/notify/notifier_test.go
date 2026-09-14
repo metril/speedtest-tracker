@@ -83,6 +83,53 @@ func result(targetID int64, downloadBps float64) *store.Result {
 	}
 }
 
+// TestConfigureAppliesLive is a regression guard for Configure being
+// re-read per result (via snapshot) rather than captured once at Start:
+// toggling Enabled between two process calls on the same Notifier must
+// change behaviour immediately, with no restart. notifications(t, 60)
+// alone carries no channels, so both configs here attach one explicitly —
+// the point under test is Enabled taking effect live, not delivery itself.
+func TestConfigureAppliesLive(t *testing.T) {
+	n, db, _, _ := newHarness(t, notifications(t, 60))
+	id := seedTarget(t, db, `{"download_mbps_min":100}`)
+
+	var mu sync.Mutex
+	got := []Message{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var m Message
+		json.NewDecoder(r.Body).Decode(&m)
+		mu.Lock()
+		got = append(got, m)
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+	ch := []settings.Channel{{ID: "c2", Type: "webhook", Enabled: true, URL: srv.URL}}
+
+	off := notifications(t, 60)
+	off.Enabled = false
+	off.Channels = ch
+	n.Configure(off, time.UTC)
+	n.process(context.Background(), result(id, 1e6))
+	mu.Lock()
+	gotLen := len(got)
+	mu.Unlock()
+	if gotLen != 0 {
+		t.Fatalf("Configure(disabled) did not take effect: %+v", got)
+	}
+
+	on := notifications(t, 60)
+	on.Channels = ch
+	n.Configure(on, time.UTC)
+	n.process(context.Background(), result(id, 1e6))
+	mu.Lock()
+	gotLen = len(got)
+	mu.Unlock()
+	if gotLen != 1 {
+		t.Fatalf("Configure(enabled) did not take effect: %+v", got)
+	}
+}
+
 func TestFiresOnceThenRespectsCooldown(t *testing.T) {
 	n, db, got, clock := newHarness(t, notifications(t, 60)) // cooldown 60m
 	id := seedTarget(t, db, `{"download_mbps_min":100}`)
