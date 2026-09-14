@@ -332,7 +332,10 @@ which leaves the other direction's speed at 0) is skipped rather than
 counted as a miss; if neither applicable direction was measured, that
 result is excluded from the compliance fraction entirely. Set a plan speed
 to 0 to disable it — the settings API can't distinguish an omitted field
-from an explicit null, so 0 is the documented way to clear a plan.
+from an explicit null, so 0 is the documented way to clear a plan. A
+per-target override of 0 re-inherits the general plan for that field rather
+than opting the target out of SLA tracking entirely — there is currently no
+per-target opt-out.
 
 ## Outages
 

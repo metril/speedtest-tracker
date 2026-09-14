@@ -55,7 +55,13 @@ exit 0`
 	bin := exectest.Build(t, "iperf3", body)
 
 	var n int
-	res, err := New(bin).Run(context.Background(), json.RawMessage(`{"host":"nas.lan","duration_s":2}`), func(engine.Progress) { n++ })
+	var connecting []engine.Progress
+	res, err := New(bin).Run(context.Background(), json.RawMessage(`{"host":"nas.lan","port":5202,"duration_s":2}`), func(p engine.Progress) {
+		n++
+		if p.Phase == engine.PhaseConnecting {
+			connecting = append(connecting, p)
+		}
+	})
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -64,6 +70,16 @@ exit 0`
 	}
 	if n < 3 {
 		t.Errorf("progress events = %d, want >= 3", n)
+	}
+	// Exactly one PhaseConnecting event per attempt, carrying host:port —
+	// not the stream's own "start" event (which would duplicate it and
+	// discard the port; see parse.go) and not the summary-mode emit
+	// either (stream mode never falls back to it).
+	if len(connecting) != 1 {
+		t.Fatalf("PhaseConnecting events = %d, want exactly 1: %+v", len(connecting), connecting)
+	}
+	if connecting[0].ServerName != "nas.lan:5202" {
+		t.Errorf("PhaseConnecting ServerName = %q, want %q", connecting[0].ServerName, "nas.lan:5202")
 	}
 }
 

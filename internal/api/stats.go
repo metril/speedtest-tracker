@@ -88,7 +88,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if offset > 1 {
+	if offset < 0 || offset > 1 {
 		errBadRequest(w, "offset must be 0 or 1")
 		return
 	}

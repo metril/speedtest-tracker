@@ -173,9 +173,11 @@ func TestStatsSummaryRejectsExplicitFromTo(t *testing.T) {
 
 func TestStatsSummaryRejectsBadOffset(t *testing.T) {
 	h, _, _ := newTestAPI(t)
-	rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h&offset=2", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	for _, offset := range []string{"2", "-1"} {
+		rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h&offset="+offset, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("offset=%s: status = %d, want 400", offset, rec.Code)
+		}
 	}
 }
 

@@ -144,19 +144,25 @@ func TestParseStreamJSONL(t *testing.T) {
 	if res.UploadBps != 100_000_000 {
 		t.Errorf("UploadBps = %v", res.UploadBps)
 	}
-	if len(events) < 3 {
-		t.Fatalf("got %d events, want at least 3", len(events))
+	if len(events) < 2 {
+		t.Fatalf("got %d events, want at least 2", len(events))
 	}
-	if events[0].Phase != engine.PhaseConnecting {
+	// parseStreamJSONL itself no longer emits PhaseConnecting for the
+	// stream's "start" event: Run emits exactly one PhaseConnecting per
+	// attempt (with host:port) ahead of calling it, so a second one here
+	// would duplicate it and discard the port (see iperf3.go).
+	if events[0].Phase != engine.PhaseUpload || events[0].Bps != 100_000_000 || events[0].ElapsedMs != 1000 {
 		t.Errorf("events[0] = %+v", events[0])
 	}
-	if events[1].Phase != engine.PhaseUpload || events[1].Bps != 100_000_000 || events[1].ElapsedMs != 1000 {
-		t.Errorf("events[1] = %+v", events[1])
-	}
-	if events[1].Progress != 0.5 {
-		t.Errorf("progress = %v, want 0.5 (1s of a 2s test)", events[1].Progress)
+	if events[0].Progress != 0.5 {
+		t.Errorf("progress = %v, want 0.5 (1s of a 2s test)", events[0].Progress)
 	}
 	if last := events[len(events)-1]; last.Phase != engine.PhaseDone {
 		t.Errorf("last = %+v", last)
+	}
+	for _, ev := range events {
+		if ev.Phase == engine.PhaseConnecting {
+			t.Errorf("unexpected PhaseConnecting event from parseStreamJSONL itself: %+v", ev)
+		}
 	}
 }

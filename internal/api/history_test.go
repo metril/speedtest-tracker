@@ -38,9 +38,11 @@ func TestHistoryRangeReturnsBucketedPoints(t *testing.T) {
 func TestHistoryRejectsBadOffset(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	tid, _ := seedResults(t, db, 1)
-	rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=24h&offset=2", nil)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status = %d, want 400", rec.Code)
+	for _, offset := range []string{"2", "-1"} {
+		rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(tid)+"/history?range=24h&offset="+offset, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("offset=%s: status = %d, want 400", offset, rec.Code)
+		}
 	}
 }
 

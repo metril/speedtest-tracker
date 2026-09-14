@@ -126,7 +126,10 @@ func parseStreamJSONL(r io.Reader, o Options, prog func(engine.Progress)) (*engi
 		}
 		switch l.Event {
 		case "start":
-			engine.Emit(prog, engine.Progress{Phase: engine.PhaseConnecting, ServerName: o.Host})
+			// No PhaseConnecting emit here: Run already emitted exactly
+			// one per attempt (ServerName "host:port") before starting
+			// the client (see iperf3.go), and a second one here would
+			// both duplicate it and discard the port.
 		case "interval":
 			var d struct {
 				Sum sum `json:"sum"`
