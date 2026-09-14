@@ -80,6 +80,8 @@ type runState struct {
 	ctx      context.Context
 	cancel   context.CancelFunc
 	pending  int // lane jobs not yet finished
+	total    int // targets in the whole run, for the UI stepper
+	done     int // targets that have produced a result
 	failed   bool
 	canceled bool
 	started  bool // true once any lane has begun executing (running written)
@@ -236,11 +238,11 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 			r.cfg.Logger.Error("set run status", "error", err, "run_id", runID)
 		} else if err == nil {
-			r.publishRun(runID, "canceled", "shutting down")
+			r.publishRun(runID, "canceled", "shutting down", len(targets), 0)
 		}
 		return 0, ErrShuttingDown
 	}
-	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: len(order)}
+	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: len(order), total: len(targets)}
 
 	chans := make([]chan job, 0, len(order))
 	for _, lane := range order {
@@ -253,7 +255,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	// clients never observe "running" before "queued". Hub.Publish is
 	// in-process and non-blocking (buffered channels with a default case),
 	// so this adds no meaningful time under the lock.
-	r.publishRun(runID, "queued", "")
+	r.publishRun(runID, "queued", "", len(targets), 0)
 
 	queueFull := false
 	for i, lane := range order {
@@ -274,7 +276,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 
 	if queueFull {
 		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "lane queue full")
-		r.publishRun(runID, "failed", "lane queue full")
+		r.publishRun(runID, "failed", "lane queue full", len(targets), 0)
 		return 0, ErrQueueFull
 	}
 	return runID, nil
@@ -300,6 +302,7 @@ func (r *Runner) Cancel(runID int64) bool {
 	}
 	st.canceled = true
 	notStarted := !st.started
+	total := st.total
 	if notStarted {
 		delete(r.runs, runID)
 	}
@@ -311,7 +314,7 @@ func (r *Runner) Cancel(runID int64) bool {
 		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 			r.cfg.Logger.Error("cancel: set run status", "error", err, "run_id", runID)
 		} else if err == nil {
-			r.publishRun(runID, "canceled", "")
+			r.publishRun(runID, "canceled", "", total, 0)
 		}
 	}
 	return true
@@ -338,10 +341,11 @@ func (r *Runner) execute(j job) {
 		return
 	}
 	st.started = true
+	total := st.total
 	r.mu.Unlock()
 
 	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
-		r.publishRun(j.runID, "running", "")
+		r.publishRun(j.runID, "running", "", total, r.doneCount(j.runID))
 	}
 
 	laneFailed := false
@@ -351,6 +355,10 @@ func (r *Runner) execute(j job) {
 		}
 		if failed := r.runTarget(ctx, j.runID, t, j.snapshots[t.ID]); failed {
 			laneFailed = true
+		}
+		// The result row for this target has landed: advance the stepper.
+		if total, done, ok := r.markTargetDone(j.runID); ok {
+			r.publishRun(j.runID, "running", "", total, done)
 		}
 	}
 	r.finishLane(j.runID, laneFailed, ctx.Err() != nil)
@@ -462,6 +470,7 @@ func (r *Runner) finishLane(runID int64, failed, canceled bool) {
 		return
 	}
 	delete(r.runs, runID)
+	total, done := st.total, st.done
 	status := "done"
 	switch {
 	case st.canceled:
@@ -479,32 +488,60 @@ func (r *Runner) finishLane(runID int64, failed, canceled bool) {
 		r.cfg.Logger.Error("set run status", "error", err, "run_id", runID)
 	}
 	if err == nil {
-		r.publishRun(runID, status, "")
+		r.publishRun(runID, status, "", total, done)
 	}
 }
 
-// publishRun emits the run SSE event.
-func (r *Runner) publishRun(runID int64, status, errMsg string) {
+// publishRun emits the run SSE event. total/done drive the UI's per-target
+// stepper; they are passed explicitly because some callers publish after
+// the runState has already been removed from r.runs.
+func (r *Runner) publishRun(runID int64, status, errMsg string, total, done int) {
 	r.cfg.Hub.Publish(r.cfg.Hub.Marshal(sse.EventRun, map[string]any{
 		"run_id": runID, "status": status, "error": errMsg,
+		"targets_total": total, "targets_done": done,
 	}))
 }
 
-// claimForForceCancel atomically removes id from r.runs if it is still
-// present there, reporting whether it did. Deleting and checking under the
-// same r.mu critical section is what makes this race-free against
-// finishLane, which deletes the same map entry (under r.mu too) right
-// before it persists the run's real terminal status: at most one of the
-// two calls can observe the entry and delete it, so exactly one of them
-// gets to write the run's final status — the loser must not overwrite it.
-func (r *Runner) claimForForceCancel(id int64) bool {
+// markTargetDone increments the run's completed-target count and returns
+// the new totals, or ok=false when the run is no longer tracked.
+func (r *Runner) markTargetDone(runID int64) (total, done int, ok bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.runs[id]; !ok {
-		return false
+	st, ok := r.runs[runID]
+	if !ok {
+		return 0, 0, false
+	}
+	st.done++
+	return st.total, st.done, true
+}
+
+// doneCount reports the run's current stepper counts, 0/0 when untracked.
+func (r *Runner) doneCount(runID int64) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if st, ok := r.runs[runID]; ok {
+		return st.done
+	}
+	return 0
+}
+
+// claimForForceCancel atomically removes id from r.runs if it is still
+// present there, reporting whether it did, along with its stepper counts.
+// Deleting and checking under the same r.mu critical section is what makes
+// this race-free against finishLane, which deletes the same map entry
+// (under r.mu too) right before it persists the run's real terminal status:
+// at most one of the two calls can observe the entry and delete it, so
+// exactly one of them gets to write the run's final status — the loser must
+// not overwrite it.
+func (r *Runner) claimForForceCancel(id int64) (total, done int, ok bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	st, ok := r.runs[id]
+	if !ok {
+		return 0, 0, false
 	}
 	delete(r.runs, id)
-	return true
+	return st.total, st.done, true
 }
 
 // Shutdown stops accepting work, waits up to Grace for in-flight lanes,
@@ -556,7 +593,8 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	}
 
 	for _, id := range stuck {
-		if !r.claimForForceCancel(id) {
+		total, done, ok := r.claimForForceCancel(id)
+		if !ok {
 			// finishLane already claimed and persisted the run's real
 			// terminal status (done/failed/canceled); do not overwrite it.
 			continue
@@ -566,7 +604,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
 			r.cfg.Logger.Error("mark canceled", "error", err, "run_id", id)
 		} else if err == nil {
-			r.publishRun(id, "canceled", "server shutdown")
+			r.publishRun(id, "canceled", "server shutdown", total, done)
 		}
 		cancel()
 	}

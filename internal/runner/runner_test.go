@@ -564,7 +564,7 @@ func TestShutdownClaimNeverOverwritesFinishedRun(t *testing.T) {
 	}
 
 	// The real method Shutdown's final loop calls for each stuck id.
-	if r.claimForForceCancel(runID) {
+	if _, _, ok := r.claimForForceCancel(runID); ok {
 		t.Fatal("claimForForceCancel returned true for a run finishLane already claimed")
 	}
 	// Shutdown's real loop would `continue` here without ever calling
@@ -615,7 +615,7 @@ func TestClaimForForceCancelIsExclusiveWithFinishLane(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			claimed = r.claimForForceCancel(runID)
+			_, _, claimed = r.claimForForceCancel(runID)
 		}()
 		go func() {
 			defer wg.Done()
@@ -956,4 +956,82 @@ func TestCancelNotStartedNeverDoubleWritesTerminalStatus(t *testing.T) {
 
 	r.Cancel(runA)
 	waitForRun(t, db, runA)
+}
+
+// runEventPayload is the decoded run SSE event.
+type runEventPayload struct {
+	RunID        int64  `json:"run_id"`
+	Status       string `json:"status"`
+	TargetsTotal int    `json:"targets_total"`
+	TargetsDone  int    `json:"targets_done"`
+}
+
+func TestRunEventsCarryTargetStepperCounts(t *testing.T) {
+	r, db, hub := newTestRunner(t)
+	events, unsubscribe := hub.Subscribe()
+	defer unsubscribe()
+
+	ctx := context.Background()
+	ids := []int64{}
+	for _, name := range []string{"one", "two"} {
+		id, err := db.CreateTarget(ctx, &store.Target{
+			Name: name, Engine: "fake", Enabled: true, Lane: "wan",
+			Options: json.RawMessage(`{}`)})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: ids})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, db, runID)
+
+	var seen []runEventPayload
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case e, open := <-events:
+			if !open {
+				t.Fatal("event channel closed early")
+			}
+			if e.Type != sse.EventRun {
+				continue
+			}
+			var p runEventPayload
+			if err := json.Unmarshal(e.Data, &p); err != nil {
+				t.Fatal(err)
+			}
+			if p.RunID != runID {
+				continue
+			}
+			seen = append(seen, p)
+			if p.Status == "done" {
+				if p.TargetsTotal != 2 || p.TargetsDone != 2 {
+					t.Fatalf("final event = %+v, want 2/2", p)
+				}
+				for _, ev := range seen {
+					if ev.TargetsTotal != 2 {
+						t.Fatalf("event %+v has wrong total", ev)
+					}
+				}
+				if seen[0].Status != "queued" || seen[0].TargetsDone != 0 {
+					t.Fatalf("first event = %+v, want queued 0 done", seen[0])
+				}
+				var sawOneDone bool
+				for _, ev := range seen {
+					if ev.Status == "running" && ev.TargetsDone == 1 {
+						sawOneDone = true
+					}
+				}
+				if !sawOneDone {
+					t.Fatalf("no intermediate running 1/2 event: %+v", seen)
+				}
+				return
+			}
+		case <-deadline:
+			t.Fatalf("no terminal run event; saw %+v", seen)
+		}
+	}
 }
