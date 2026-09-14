@@ -3,9 +3,12 @@ const START_DEG = -210;
 const END_DEG = 30;
 const DEFAULT_MAX_MBPS = 1000;
 
+/** The phases a run can report progress for. */
+export type GaugePhase = 'connecting' | 'ping' | 'download' | 'upload' | 'done' | 'error';
+
 /** Per-phase accent. The dial is the one loud element in the live panel,
  * so the phase is carried by colour rather than another label. */
-const PHASE_STROKE: Record<string, string> = {
+const PHASE_STROKE: Record<GaugePhase, string> = {
   connecting: '#64748b',
   ping: '#a78bfa',
   download: '#38bdf8',
@@ -43,7 +46,7 @@ export function arcPath(cx: number, cy: number, r: number, startDeg: number, end
 
 interface GaugeProps {
   bps: number;
-  phase: string;
+  phase: GaugePhase;
   maxMbps?: number;
 }
 
@@ -77,7 +80,7 @@ export function Gauge({ bps, phase, maxMbps = DEFAULT_MAX_MBPS }: GaugeProps) {
             stroke={stroke}
             strokeWidth={14}
             strokeLinecap="round"
-            className="transition-[d] duration-150"
+            className="transition-[d] duration-150 motion-reduce:transition-none"
           />
         )}
       </svg>

@@ -5,9 +5,10 @@ named schedules, SQLite as the source of truth, with an embedded React UI.
 
 ## Status
 
-Milestone 2 (engines): the `Engine` interface plus the Ookla, Cloudflare,
-iperf3 and fake engines with fixture-tested parsers. Targets, schedules and
-the UI arrive in later milestones.
+Milestone 4 (schedules and live runs): the `Engine` interface plus the Ookla,
+Cloudflare, iperf3 and fake engines; targets and schedules with cron-driven
+execution; a React UI for targets, schedules and results, including a live
+view of an in-progress run.
 
 ## Requirements
 
@@ -59,6 +60,49 @@ paths and the Ookla consent flags match whatever the server has configured.
 `--speedtest-bin`/`--iperf3-bin` override just the binary path for that one
 invocation. The Result JSON goes to stdout; progress events stream to
 stderr as JSON lines.
+
+## Schedules
+
+A schedule is a name, a cron expression, a timezone and an **ordered** list of
+targets. Targets in a run execute one after another within a lane, so a
+schedule's order is the order the tests run in.
+
+| Field | Notes |
+| --- | --- |
+| `cron` | Standard 5-field syntax (`*/15 * * * *`, `0 3 * * *`) or a descriptor (`@hourly`, `@daily`, `@every 30m`). Seconds are not accepted. |
+| `timezone` | Any IANA zone (`Europe/Zurich`). Defaults to UTC. |
+| `enabled` | Disabled schedules keep their configuration but are not registered with cron. |
+
+Behaviour:
+
+- A cron fire only **enqueues** a run; the HTTP API and the UI never block on a
+  running test.
+- If the schedule's previous run is still queued or running, or the lane queue
+  is full, the fire is recorded as a `skipped` run row instead of piling up.
+- Missed fires during downtime are never backfilled.
+- Saving a schedule returns `warnings[]` when another enabled schedule sharing a
+  lane fires within 60 seconds of it in the next 24 hours — overlapping tests
+  skew each other's results.
+
+Endpoints:
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/api/v1/schedules` | List schedules with their next fire time |
+| `POST` | `/api/v1/schedules` | Create; returns `{schedule, warnings}` |
+| `GET/PUT/DELETE` | `/api/v1/schedules/{id}` | Read, update, delete |
+| `POST` | `/api/v1/schedules/{id}/run` | Run the schedule's targets now (manual trigger) |
+| `GET` | `/api/v1/schedules/{id}/next` | Next five fire times |
+| `POST` | `/api/v1/schedules/validate` | Validate a cron expression and preview its next runs |
+| `GET` | `/api/v1/runs?schedule_id=N` | Runs of one schedule |
+
+## Live run view
+
+Every run streams `progress`, `result` and `run` events over
+`GET /api/v1/events` (SSE, coalesced to 10 Hz per result). The UI shows a speed
+gauge, a throughput sparkline, ping/jitter/loss tiles, the server and ISP, a
+per-target stepper for multi-target runs and a cancel button. Runs started from
+the UI open the panel directly; scheduled runs appear as a compact bar.
 
 ## API conventions
 

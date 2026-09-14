@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { ResultFiltersBar } from '../features/results/ResultFilters';
 import { ResultsTable } from '../features/results/ResultsTable';
+import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { ResultFilters } from '../lib/api';
 import {
   useDeleteResult, useReexecute, useResults, useSetTags, useTargets,
@@ -14,6 +15,7 @@ export function Results() {
   const remove = useDeleteResult();
   const replay = useReexecute();
   const tag = useSetTags();
+  const { open } = useLivePanel();
 
   const rows = results.data?.pages.flatMap((p) => p.results) ?? [];
 
@@ -38,7 +40,7 @@ export function Results() {
         <ResultsTable
           rows={rows}
           onDelete={(id) => remove.mutate(id)}
-          onReexecute={(id) => replay.mutate(id)}
+          onReexecute={(id) => replay.mutate(id, { onSuccess: () => open() })}
           onTag={(id, tags) => tag.mutate({ id, tags })}
         />
       )}

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { TargetForm } from '../features/targets/TargetForm';
+import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { Target, TargetInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import {
@@ -15,6 +16,7 @@ export function Targets() {
   const update = useUpdateTarget();
   const remove = useDeleteTarget();
   const run = useRunTarget();
+  const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [notice, setNotice] = useState('');
   // run.variables is the target id of whichever "Run now" mutation is
@@ -105,7 +107,7 @@ export function Targets() {
                       disabled={runningTargetID === t.id}
                       onClick={() =>
                         run.mutate(t.id, {
-                          onSuccess: (res) => setNotice(`Queued run #${res.run_id} for ${t.name}`),
+                          onSuccess: (res) => { setNotice(`Queued run #${res.run_id} for ${t.name}`); open(); },
                         })
                       }
                     >

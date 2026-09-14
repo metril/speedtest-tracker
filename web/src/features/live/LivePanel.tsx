@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { formatBps, formatLoss, formatMs } from '../../lib/format';
 import { useCancelRun } from '../../lib/queries';
 import type { LiveRun } from '../../lib/useLiveRun';
-import { Gauge } from './Gauge';
+import { Gauge, type GaugePhase } from './Gauge';
 import { Sparkline } from './Sparkline';
 import { useLivePanel } from './LiveRunProvider';
 
@@ -88,7 +88,7 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
         </header>
 
         <div className="flex justify-center">
-          <Gauge bps={live.bps} phase={live.phase} />
+          <Gauge bps={live.bps} phase={live.phase as GaugePhase} />
         </div>
 
         <Sparkline samples={live.samples} />
