@@ -14,6 +14,10 @@ const maxTokenNameLen = 100
 // listTokens returns every issued API token. The plaintext token is never
 // stored, so it can never appear here — only at creation time.
 func (d Deps) listTokens(w http.ResponseWriter, r *http.Request) {
+	if !requestIsAdmin(r) {
+		errForbidden(w, "admin access required")
+		return
+	}
 	tokens, err := d.Store.ListAPITokens(r.Context())
 	if err != nil {
 		internalError(w, d.Logger, "list api tokens", err)
@@ -25,6 +29,10 @@ func (d Deps) listTokens(w http.ResponseWriter, r *http.Request) {
 // createToken issues a new API token and returns its plaintext exactly
 // once; only the hash and a display prefix are persisted.
 func (d Deps) createToken(w http.ResponseWriter, r *http.Request) {
+	if !requestIsAdmin(r) {
+		errForbidden(w, "admin access required")
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}
@@ -65,6 +73,10 @@ func (d Deps) createToken(w http.ResponseWriter, r *http.Request) {
 // while auth mode is token — that would lock every caller out with no way
 // back in short of an env override.
 func (d Deps) deleteToken(w http.ResponseWriter, r *http.Request) {
+	if !requestIsAdmin(r) {
+		errForbidden(w, "admin access required")
+		return
+	}
 	id, ok := pathID(w, r)
 	if !ok {
 		return
