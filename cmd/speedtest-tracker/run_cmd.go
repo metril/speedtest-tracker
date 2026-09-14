@@ -18,16 +18,23 @@ import (
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
+// buildEngines constructs every engine from the Engines settings section.
+func buildEngines(e settings.Engines) map[string]engine.Engine {
+	return map[string]engine.Engine{
+		"fake": fake.New(),
+		"ookla": ookla.New(e.SpeedtestBin, ookla.Config{
+			AcceptLicense: e.OoklaAcceptLicense,
+			AcceptGDPR:    e.OoklaAcceptGDPR,
+		}),
+		"cloudflare": cloudflare.New(nil),
+		"iperf3":     iperf3.New(e.Iperf3Bin),
+	}
+}
+
 // buildRegistry wires every engine using the Engines settings section.
 func buildRegistry(e settings.Engines) *engine.Registry {
 	r := engine.NewRegistry()
-	r.Register(fake.New())
-	r.Register(ookla.New(e.SpeedtestBin, ookla.Config{
-		AcceptLicense: e.OoklaAcceptLicense,
-		AcceptGDPR:    e.OoklaAcceptGDPR,
-	}))
-	r.Register(cloudflare.New(nil))
-	r.Register(iperf3.New(e.Iperf3Bin))
+	r.Replace(buildEngines(e))
 	return r
 }
 
