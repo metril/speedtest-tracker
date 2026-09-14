@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { inputClass } from '@/features/settings/styles';
 import { SwitchField } from '../../components/SwitchField';
 import { FormField } from '../../components/FormField';
+import { BYTE_UNITS, formatBytes, splitBytes, toBytes, type ByteUnit } from '../../lib/bytes';
 
 export type Options = Record<string, unknown>;
 
@@ -364,46 +365,289 @@ export function Iperf3ResultsList({ servers, isFetching, isError, onSelect }: {
   );
 }
 
+export const CF_SIZE_PRESETS: number[] = [1e5, 1e6, 1e7, 2.5e7, 1e8];
+export const CF_DEFAULT_DOWNLOAD: number[] = [1e6, 1e7, 2.5e7, 1e8];
+export const CF_DEFAULT_UPLOAD: number[] = [1e5, 1e6, 1e7];
+export const CF_LATENCY_PRESETS: number[] = [5, 10, 20, 50];
+export const CF_DEFAULT_LATENCY = 10;
+
+/** sizeList reads a cloudflare size-list option, falling back to `fallback`
+ * (the engine's own default list) when the option isn't a number array. */
+export function sizeList(options: Options, key: string, fallback: number[]): number[] {
+  const v = options[key];
+  return Array.isArray(v) && v.every((n) => typeof n === 'number') ? (v as number[]) : fallback;
+}
+
+/** sameNumbers compares two number arrays regardless of order. */
+export function sameNumbers(a: number[], b: number[]): boolean {
+  if (a.length !== b.length) return false;
+  const sa = [...a].sort((x, y) => x - y);
+  const sb = [...b].sort((x, y) => x - y);
+  return sa.every((v, i) => v === sb[i]);
+}
+
+/** writeSizes stores a sorted copy of `next` under `key`, omitting the key
+ * entirely when the list is empty or matches the engine's own defaults. */
+export function writeSizes(options: Options, key: string, next: number[], defaults: number[]): Options {
+  const sorted = [...next].sort((a, b) => a - b);
+  if (sorted.length === 0 || sameNumbers(sorted, defaults)) return setOption(options, key, '');
+  return setOption(options, key, sorted);
+}
+
+/** hasCustomCloudflareOptions decides Custom sizes' initial state: on iff
+ * any stored download/upload size isn't one of the presets, or a
+ * latency_samples value is set that isn't one of the latency presets. */
+export function hasCustomCloudflareOptions(options: Options): boolean {
+  const hasNonPresetSize = (v: unknown) =>
+    Array.isArray(v) && v.some((n) => typeof n === 'number' && !CF_SIZE_PRESETS.includes(n));
+  if (hasNonPresetSize(options.download_sizes) || hasNonPresetSize(options.upload_sizes)) return true;
+  const latency = options.latency_samples;
+  return latency !== undefined && !CF_LATENCY_PRESETS.includes(latency as number);
+}
+
+interface SizeRow {
+  id: number;
+  value: string;
+  unit: ByteUnit;
+}
+
+function rowsFromList(list: number[], nextId: () => number): SizeRow[] {
+  return list.map((n) => {
+    const split = splitBytes(n);
+    return { id: nextId(), value: String(split.value), unit: split.unit };
+  });
+}
+
+/** SizePresetChips renders one sizes field as a row of preset checkboxes,
+ * used while Custom sizes is off. `usingDefaults` is true when the option
+ * key is unset (either untouched, or emptied back down to nothing — the
+ * engine can't represent "no sizes", so an empty selection reverts to
+ * showing the defaults checked; the note explains why that just happened). */
+function SizePresetChips({ idPrefix, label, presets, selected, emptied, onToggle }: {
+  idPrefix: string;
+  label: string;
+  presets: number[];
+  selected: number[];
+  /** emptied is true right after the user has unchecked every chip in this
+   * field: the engine can't represent "no sizes", so `selected` reverts to
+   * showing the defaults checked again — this flags that revert so a note
+   * can explain it, rather than just silently un-doing the click. */
+  emptied: boolean;
+  onToggle: (size: number, checked: boolean) => void;
+}) {
+  return (
+    <FormField id={`cf-${idPrefix}-sizes`} label={label}>
+      <div data-testid={`cf-${idPrefix}-chips`} className="flex flex-wrap gap-3">
+        {presets.map((size) => {
+          const id = `cf-${idPrefix}-${size}`;
+          return (
+            <Label key={size} htmlFor={id} className="flex items-center gap-2 text-sm text-muted">
+              <Checkbox
+                id={id}
+                checked={selected.includes(size)}
+                onCheckedChange={(checked) => onToggle(size, checked === true)}
+              />
+              {formatBytes(size)}
+            </Label>
+          );
+        })}
+      </div>
+      {emptied && <p className="text-xs text-faint">Using engine defaults</p>}
+    </FormField>
+  );
+}
+
+/** SizeRowsEditor renders one sizes field as editable value+unit rows, used
+ * while Custom sizes is on. Row state (including in-progress unit-less
+ * edits) is kept by the caller so a half-typed row isn't reordered or lost
+ * before it's committed via `onCommit`. */
+function SizeRowsEditor({ idPrefix, label, rows, onRowsChange, onCommit, nextId }: {
+  idPrefix: string;
+  label: string;
+  rows: SizeRow[];
+  onRowsChange: (rows: SizeRow[]) => void;
+  onCommit: (rows: SizeRow[]) => void;
+  nextId: () => number;
+}) {
+  const update = (next: SizeRow[]) => { onRowsChange(next); onCommit(next); };
+  return (
+    <FormField id={`cf-${idPrefix}-sizes`} label={label}>
+      <div className="grid gap-2">
+        {rows.length === 0 && <p className="text-xs text-faint">Using engine defaults</p>}
+        {rows.map((row, i) => (
+          <div key={row.id} className="flex items-center gap-2">
+            <input
+              aria-label={`${idPrefix} size ${i + 1}`}
+              className={inputClass}
+              value={row.value}
+              onChange={(e) => update(rows.map((r) => (r.id === row.id ? { ...r, value: e.target.value } : r)))}
+            />
+            <select
+              aria-label={`${idPrefix} size ${i + 1} unit`}
+              className={inputClass}
+              value={row.unit}
+              onChange={(e) => update(rows.map((r) => (r.id === row.id ? { ...r, unit: e.target.value as ByteUnit } : r)))}
+            >
+              {BYTE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+            <button
+              type="button"
+              className="shrink-0 text-xs text-faint hover:text-fg"
+              onClick={() => update(rows.filter((r) => r.id !== row.id))}
+            >
+              Remove
+            </button>
+          </div>
+        ))}
+        <button
+          type="button"
+          className="w-fit text-xs text-accent hover:underline"
+          onClick={() => update([...rows, { id: nextId(), value: '1', unit: 'MB' }])}
+        >
+          Add size
+        </button>
+      </div>
+    </FormField>
+  );
+}
+
 function CloudflareFields({ options, onChange }: Omit<Props, 'engine'>) {
-  const sizes = (key: string) =>
-    Array.isArray(options[key]) ? (options[key] as number[]).join(',') : '';
-  const parseSizes = (raw: string) =>
-    raw.split(',').map((s) => Number(s.trim())).filter((n) => Number.isFinite(n) && n > 0);
+  // Custom sizes starts on iff any stored option is outside the presets —
+  // see hasCustomCloudflareOptions.
+  const [custom, setCustom] = useState(() => hasCustomCloudflareOptions(options));
+  const rowIdRef = useRef(0);
+  const nextRowId = () => { rowIdRef.current += 1; return rowIdRef.current; };
+
+  const [downloadRows, setDownloadRows] = useState<SizeRow[]>(
+    () => rowsFromList(sizeList(options, 'download_sizes', CF_DEFAULT_DOWNLOAD), nextRowId),
+  );
+  const [uploadRows, setUploadRows] = useState<SizeRow[]>(
+    () => rowsFromList(sizeList(options, 'upload_sizes', CF_DEFAULT_UPLOAD), nextRowId),
+  );
+
+  // Tracks "the user just unchecked the last chip in this field" — see
+  // SizePresetChips' `emptied` doc. Local (not derived from options)
+  // because the option key ends up omitted either way, same as it is on a
+  // fresh, untouched target.
+  const [downloadEmptied, setDownloadEmptied] = useState(false);
+  const [uploadEmptied, setUploadEmptied] = useState(false);
+
+  // The server stores sizes as a Go []int, so a fractional byte count (e.g.
+  // 1.5 B, or 16.1 MB — which is 16100000.000000002 through toBytes due to
+  // float multiplication) must be rounded before it's sent, and a value
+  // that rounds to <= 0 is dropped rather than sent as a non-positive size.
+  const commitRows = (key: string, defaults: number[]) => (rows: SizeRow[]) => {
+    const bytes = rows
+      .map((r) => {
+        const n = Number(r.value);
+        if (!Number.isFinite(n)) return undefined;
+        const rounded = Math.round(toBytes(n, r.unit));
+        return rounded > 0 ? rounded : undefined;
+      })
+      .filter((n): n is number => n !== undefined);
+    onChange(writeSizes(options, key, bytes, defaults));
+  };
+
+  const toggleSize = (key: string, defaults: number[], setEmptied: (v: boolean) => void) => (
+    size: number, checked: boolean,
+  ) => {
+    const current = sizeList(options, key, defaults);
+    const next = checked ? [...current, size] : current.filter((n) => n !== size);
+    setEmptied(next.length === 0);
+    onChange(writeSizes(options, key, next, defaults));
+  };
+
+  const handleCustomChange = (next: boolean) => {
+    if (next) {
+      setDownloadRows(rowsFromList(sizeList(options, 'download_sizes', CF_DEFAULT_DOWNLOAD), nextRowId));
+      setUploadRows(rowsFromList(sizeList(options, 'upload_sizes', CF_DEFAULT_UPLOAD), nextRowId));
+    } else {
+      const dl = sizeList(options, 'download_sizes', CF_DEFAULT_DOWNLOAD).filter((n) => CF_SIZE_PRESETS.includes(n));
+      const ul = sizeList(options, 'upload_sizes', CF_DEFAULT_UPLOAD).filter((n) => CF_SIZE_PRESETS.includes(n));
+      let nextOptions = writeSizes(options, 'download_sizes', dl, CF_DEFAULT_DOWNLOAD);
+      nextOptions = writeSizes(nextOptions, 'upload_sizes', ul, CF_DEFAULT_UPLOAD);
+      // A custom latency value (e.g. 7) has no matching <option> in the
+      // preset <select> once Custom sizes goes off — drop it, same as the
+      // size lists above, so the select doesn't render with a stale value.
+      const lat = nextOptions.latency_samples;
+      if (typeof lat === 'number' && !CF_LATENCY_PRESETS.includes(lat)) {
+        nextOptions = setOption(nextOptions, 'latency_samples', '');
+      }
+      onChange(nextOptions);
+    }
+    setDownloadEmptied(false);
+    setUploadEmptied(false);
+    setCustom(next);
+  };
+
+  // The server wants an integer >= 0; round fractional input and drop
+  // negative input entirely rather than send a value it would reject.
+  const handleCustomLatencyChange = (raw: string) => {
+    if (raw.trim() === '') { onChange(setOption(options, 'latency_samples', '')); return; }
+    const n = Number(raw);
+    if (!Number.isFinite(n) || n < 0) { onChange(setOption(options, 'latency_samples', '')); return; }
+    onChange(setOption(options, 'latency_samples', Math.round(n)));
+  };
+
+  const latency = typeof options.latency_samples === 'number' ? options.latency_samples : CF_DEFAULT_LATENCY;
 
   return (
     <div className="grid gap-3">
-      <FormField id="cf-download-sizes" label="Download sizes (bytes, comma separated)">
-        <input
-          id="cf-download-sizes"
-          className={inputClass}
-          value={sizes('download_sizes')}
-          placeholder="1000000,10000000,100000000"
-          onChange={(e) => {
-            const parsed = parseSizes(e.target.value);
-            onChange(setOption(options, 'download_sizes', parsed.length ? parsed : ''));
-          }}
-        />
-      </FormField>
-      <FormField id="cf-upload-sizes" label="Upload sizes (bytes, comma separated)">
-        <input
-          id="cf-upload-sizes"
-          className={inputClass}
-          value={sizes('upload_sizes')}
-          placeholder="1000000,10000000"
-          onChange={(e) => {
-            const parsed = parseSizes(e.target.value);
-            onChange(setOption(options, 'upload_sizes', parsed.length ? parsed : ''));
-          }}
-        />
-      </FormField>
-      <FormField id="cf-latency-samples" label="Latency samples">
-        <input
-          id="cf-latency-samples"
-          className={inputClass}
-          value={options.latency_samples === undefined ? '' : String(options.latency_samples)}
-          onChange={(e) => onChange(setOption(options, 'latency_samples', numberOr(e.target.value)))}
-        />
-      </FormField>
+      <SwitchField
+        id="cf-custom" label="Custom sizes" checked={custom} onCheckedChange={handleCustomChange}
+        hint="Enter any sizes with units"
+      />
+
+      {custom ? (
+        <>
+          <SizeRowsEditor
+            idPrefix="download" label="Download sizes" rows={downloadRows}
+            onRowsChange={setDownloadRows} onCommit={commitRows('download_sizes', CF_DEFAULT_DOWNLOAD)}
+            nextId={nextRowId}
+          />
+          <SizeRowsEditor
+            idPrefix="upload" label="Upload sizes" rows={uploadRows}
+            onRowsChange={setUploadRows} onCommit={commitRows('upload_sizes', CF_DEFAULT_UPLOAD)}
+            nextId={nextRowId}
+          />
+          <FormField id="cf-latency-samples" label="Latency samples">
+            <input
+              id="cf-latency-samples"
+              className={inputClass}
+              value={options.latency_samples === undefined ? '' : String(options.latency_samples)}
+              onChange={(e) => handleCustomLatencyChange(e.target.value)}
+            />
+          </FormField>
+        </>
+      ) : (
+        <>
+          <SizePresetChips
+            idPrefix="download" label="Download sizes" presets={CF_SIZE_PRESETS}
+            selected={sizeList(options, 'download_sizes', CF_DEFAULT_DOWNLOAD)}
+            emptied={downloadEmptied}
+            onToggle={toggleSize('download_sizes', CF_DEFAULT_DOWNLOAD, setDownloadEmptied)}
+          />
+          <SizePresetChips
+            idPrefix="upload" label="Upload sizes" presets={CF_SIZE_PRESETS}
+            selected={sizeList(options, 'upload_sizes', CF_DEFAULT_UPLOAD)}
+            emptied={uploadEmptied}
+            onToggle={toggleSize('upload_sizes', CF_DEFAULT_UPLOAD, setUploadEmptied)}
+          />
+          <FormField id="cf-latency-samples" label="Latency samples">
+            <select
+              id="cf-latency-samples"
+              className={inputClass}
+              value={String(latency)}
+              onChange={(e) => {
+                const n = Number(e.target.value);
+                onChange(setOption(options, 'latency_samples', n === CF_DEFAULT_LATENCY ? '' : n));
+              }}
+            >
+              {CF_LATENCY_PRESETS.map((n) => <option key={n} value={n}>{n}</option>)}
+            </select>
+          </FormField>
+        </>
+      )}
     </div>
   );
 }

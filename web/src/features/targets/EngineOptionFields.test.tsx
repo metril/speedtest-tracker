@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import {
-  act, fireEvent, render, screen, waitFor,
+  act, fireEvent, render, screen, waitFor, within,
 } from '@testing-library/react';
 import {
   createContext, useContext, useState, type ReactNode,
@@ -102,7 +102,7 @@ describe('EngineOptionFields: non-ookla engines unaffected', () => {
 
   it('still renders the cloudflare size fields', () => {
     wrap(<EngineOptionFields engine="cloudflare" options={{}} onChange={vi.fn()} />);
-    expect(screen.getByLabelText('Download sizes (bytes, comma separated)')).toBeInTheDocument();
+    expect(screen.getByText('Download sizes')).toBeInTheDocument();
   });
 
   it('renders the iperf3 host field once Custom is switched on', () => {
@@ -110,6 +110,174 @@ describe('EngineOptionFields: non-ookla engines unaffected', () => {
     expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
     fireEvent.click(screen.getByLabelText('Custom'));
     expect(screen.getByLabelText('Host')).toBeInTheDocument();
+  });
+});
+
+describe('CloudflareFields: presets', () => {
+  // "1 MB" (1e6) is a preset for both download and upload sizes, so the
+  // download chip is always the first of the two matches in DOM order.
+  function downloadChip(name: string) {
+    return screen.getAllByRole('checkbox', { name })[0];
+  }
+
+  it('checks the default sizes and latency with empty options', () => {
+    wrap(<EngineOptionFields engine="cloudflare" options={{}} onChange={vi.fn()} />);
+    expect(downloadChip('1 MB')).toBeChecked();
+    expect(downloadChip('10 MB')).toBeChecked();
+    expect(downloadChip('25 MB')).toBeChecked();
+    expect(downloadChip('100 MB')).toBeChecked();
+    expect(screen.getAllByRole('checkbox', { name: '100 KB' })[1]).toBeChecked(); // upload default
+    expect(screen.getByLabelText('Latency samples')).toHaveValue('10');
+  });
+
+  it('unchecking a default download size emits the remaining sizes', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="cloudflare" options={{}} onChange={onChange} />);
+    fireEvent.click(downloadChip('1 MB'));
+    expect(onChange).toHaveBeenCalledWith({ download_sizes: [1e7, 2.5e7, 1e8] });
+  });
+
+  it('restoring the default set omits the key entirely', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields
+        engine="cloudflare" options={{ download_sizes: [1e7, 2.5e7, 1e8] }} onChange={onChange}
+      />,
+    );
+    fireEvent.click(downloadChip('1 MB'));
+    expect(onChange).toHaveBeenCalledWith({});
+  });
+
+  it('selecting the default latency (10) omits the key', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="cloudflare" options={{ latency_samples: 20 }} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Latency samples'), { target: { value: '10' } });
+    expect(onChange).toHaveBeenCalledWith({});
+  });
+
+  it('selecting a non-default latency sets the key', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="cloudflare" options={{}} onChange={onChange} />);
+    fireEvent.change(screen.getByLabelText('Latency samples'), { target: { value: '20' } });
+    expect(onChange).toHaveBeenCalledWith({ latency_samples: 20 });
+  });
+});
+
+describe('CloudflareFields: Custom sizes toggle', () => {
+  it('starts off with default options and reveals rows once switched on', () => {
+    wrap(<EngineOptionFields engine="cloudflare" options={{}} onChange={vi.fn()} />);
+    const toggle = screen.getByLabelText('Custom sizes');
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    expect(screen.queryByLabelText('download size 1')).not.toBeInTheDocument();
+
+    fireEvent.click(toggle);
+    expect(toggle).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('download size 1')).toBeInTheDocument();
+  });
+
+  it('starts on when a stored size is not one of the presets', () => {
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={vi.fn()} />,
+    );
+    expect(screen.getByLabelText('Custom sizes')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByLabelText('download size 1')).toHaveValue('123456');
+  });
+
+  it('committing a custom row converts value+unit to bytes', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByLabelText('download size 1'), { target: { value: '1.5' } });
+    fireEvent.change(screen.getByLabelText('download size 1 unit'), { target: { value: 'MB' } });
+    expect(onChange).toHaveBeenLastCalledWith({ download_sizes: [1_500_000] });
+  });
+});
+
+describe('CloudflareFields: custom rows round to whole bytes', () => {
+  it('rounds a 1.5 B row up to 2 bytes', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    // The seeded row starts at unit B (123456 doesn't divide evenly into KB).
+    fireEvent.change(screen.getByLabelText('download size 1'), { target: { value: '1.5' } });
+    expect(onChange).toHaveBeenLastCalledWith({ download_sizes: [2] });
+  });
+
+  it('rounds 16.1 MB (a non-exact float via toBytes) to a whole number', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByLabelText('download size 1'), { target: { value: '16.1' } });
+    fireEvent.change(screen.getByLabelText('download size 1 unit'), { target: { value: 'MB' } });
+    expect(onChange).toHaveBeenLastCalledWith({ download_sizes: [16_100_000] });
+  });
+
+  it('drops a row that rounds to <= 0', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByLabelText('download size 1'), { target: { value: '0.0001' } });
+    expect(onChange).toHaveBeenLastCalledWith({});
+  });
+});
+
+describe('CloudflareFields: custom latency validation', () => {
+  it('rounds a fractional latency to a whole number', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByLabelText('Latency samples'), { target: { value: '2.5' } });
+    expect(onChange).toHaveBeenLastCalledWith({ download_sizes: [123456], latency_samples: 3 });
+  });
+
+  it('drops a negative latency instead of sending it', () => {
+    const onChange = vi.fn();
+    wrap(
+      <EngineOptionFields engine="cloudflare" options={{ download_sizes: [123456] }} onChange={onChange} />,
+    );
+    fireEvent.change(screen.getByLabelText('Latency samples'), { target: { value: '-3' } });
+    expect(onChange).toHaveBeenLastCalledWith({ download_sizes: [123456] });
+  });
+});
+
+describe('CloudflareFields: turning Custom sizes off', () => {
+  it('drops a non-preset latency value so the preset <select> has no stale value', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="cloudflare" options={{ latency_samples: 7 }} onChange={onChange} />);
+    // latency_samples: 7 isn't a preset, so Custom sizes starts on.
+    expect(screen.getByLabelText('Custom sizes')).toHaveAttribute('aria-checked', 'true');
+    fireEvent.click(screen.getByLabelText('Custom sizes'));
+    expect(onChange).toHaveBeenCalledWith({});
+  });
+});
+
+describe('CloudflareFields: emptying every preset chip', () => {
+  function ControlledCloudflareFields() {
+    const [options, setOptions] = useState<Record<string, unknown>>({});
+    return <EngineOptionFields engine="cloudflare" options={options} onChange={setOptions} />;
+  }
+
+  it('shows "Using engine defaults" after unchecking every upload chip, and re-checks the defaults', () => {
+    wrap(<ControlledCloudflareFields />);
+    const uploadChips = within(screen.getByTestId('cf-upload-chips'));
+
+    expect(screen.queryByText('Using engine defaults')).not.toBeInTheDocument();
+
+    fireEvent.click(uploadChips.getByRole('checkbox', { name: '100 KB' }));
+    fireEvent.click(uploadChips.getByRole('checkbox', { name: '1 MB' }));
+    fireEvent.click(uploadChips.getByRole('checkbox', { name: '10 MB' }));
+
+    expect(
+      within(screen.getByTestId('cf-upload-chips').parentElement as HTMLElement)
+        .getByText('Using engine defaults'),
+    ).toBeInTheDocument();
+    // The engine can't represent "no sizes", so the defaults come back checked.
+    expect(uploadChips.getByRole('checkbox', { name: '100 KB' })).toBeChecked();
   });
 });
 
