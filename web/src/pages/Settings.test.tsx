@@ -5,14 +5,16 @@ import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../lib/api';
 import { ApiError } from '../lib/api';
-import type { Settings as SettingsType } from '../lib/api';
+import type { NotifyChannel, Settings as SettingsType } from '../lib/api';
 import { Settings } from './Settings';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
 }
 
-function settingsFixture(integrationOverrides: Partial<SettingsType['integrations']> = {}): SettingsType {
+type FixtureOverrides = Partial<SettingsType['integrations']> & { channels?: NotifyChannel[] };
+
+function settingsFixture({ channels, ...integrationOverrides }: FixtureOverrides = {}): SettingsType {
   return {
     general: {
       base_url: 'http://localhost:8080',
@@ -47,7 +49,7 @@ function settingsFixture(integrationOverrides: Partial<SettingsType['integration
     },
     notifications: {
       enabled: false,
-      channels: [],
+      channels: channels ?? [],
       default_thresholds: {},
       cooldown_minutes: 30,
       quiet_hours_start: '',
@@ -71,6 +73,7 @@ afterEach(() => {
 function renderSettings(opts: {
   put?: ReturnType<typeof vi.fn>;
   test?: ReturnType<typeof vi.fn>;
+  testChannel?: ReturnType<typeof vi.fn>;
   settings?: SettingsType;
 } = {}) {
   const settings = opts.settings ?? settingsFixture();
@@ -81,6 +84,7 @@ function renderSettings(opts: {
   });
   if (opts.put) vi.spyOn(api, 'updateSettings').mockImplementation(opts.put);
   if (opts.test) vi.spyOn(api, 'testIntegration').mockImplementation(opts.test);
+  if (opts.testChannel) vi.spyOn(api, 'testNotifyChannel').mockImplementation(opts.testChannel);
 
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrap = (node: ReactNode) => <QueryClientProvider client={qc}>{node}</QueryClientProvider>;
@@ -133,5 +137,63 @@ describe('Settings page', () => {
     renderSettings({ test });
     await userEvent.click(await screen.findByRole('button', { name: 'Test VictoriaMetrics' }));
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
+  });
+
+  it('saves only the notifications section', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await screen.findByLabelText('Cooldown (minutes)');
+    await userEvent.clear(screen.getByLabelText('Cooldown (minutes)'));
+    await userEvent.type(screen.getByLabelText('Cooldown (minutes)'), '15');
+    await userEvent.click(within(screen.getByRole('region', { name: 'Notifications' }))
+      .getByRole('button', { name: 'Save Notifications' }));
+    expect(put).toHaveBeenCalledWith({ notifications: expect.objectContaining({ cooldown_minutes: 15 }) });
+    expect(put.mock.calls[0][0].general).toBeUndefined();
+  });
+
+  it('adds a channel and echoes an untouched token back masked', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({
+      put,
+      settings: settingsFixture({
+        channels: [{
+          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', token: '***',
+        }],
+      }),
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Add channel' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Save Notifications' }));
+    const sent = put.mock.calls[0][0].notifications.channels;
+    expect(sent).toHaveLength(2);
+    expect(sent[0].token).toBe('***');
+  });
+
+  it('reports a channel test result inline', async () => {
+    const testChannel = vi.fn().mockResolvedValue({ ok: false, error: 'connection refused' });
+    renderSettings({
+      testChannel,
+      settings: settingsFixture({
+        channels: [{
+          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+        }],
+      }),
+    });
+    await userEvent.click(await screen.findByRole('button', { name: 'Test phone' }));
+    expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
+  });
+
+  it('shows only the fields the selected channel type uses', async () => {
+    renderSettings({
+      settings: settingsFixture({
+        channels: [{
+          id: 'c1', type: 'webhook', name: 'hook', enabled: true, url: 'https://hook',
+        }],
+      }),
+    });
+    expect(await screen.findByLabelText('Headers')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Priority')).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'ntfy');
+    expect(screen.getByLabelText('Priority')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Headers')).not.toBeInTheDocument();
   });
 });

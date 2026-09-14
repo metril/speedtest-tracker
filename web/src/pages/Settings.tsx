@@ -1,16 +1,20 @@
 import type { ReactNode } from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { LabelsEditor } from '../components/LabelsEditor';
-import type { EngineSettings, GeneralSettings, IntegrationSettings } from '../lib/api';
+import { ChannelEditor } from '../features/settings/ChannelEditor';
+import {
+  buttonClass, fieldClass, inputClass, labelClass,
+} from '../features/settings/styles';
+import { ThresholdFields, validateThresholds } from '../features/targets/ThresholdFields';
+import type {
+  EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
+} from '../lib/api';
 import { ApiError } from '../lib/api';
-import { useSettings, useTestIntegration, useUpdateSettings } from '../lib/queries';
+import {
+  useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
+} from '../lib/queries';
 
-type SectionKey = 'general' | 'engines' | 'integrations';
-
-const inputClass = 'rounded border border-line bg-surface px-2 py-1 text-fg';
-const labelClass = 'text-sm text-muted';
-const fieldClass = 'grid gap-1';
-const buttonClass = 'rounded bg-accent px-3 py-1.5 text-accent-fg disabled:opacity-50';
+type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications';
 
 function Section({
   id, title, onSave, saving, error, saved, children,
@@ -41,7 +45,9 @@ function Section({
 /** useSavedFlash shows a "Saved" message for a few seconds after a
  * successful save, per section. */
 function useSavedFlash() {
-  const [saved, setSaved] = useState<Record<SectionKey, boolean>>({ general: false, engines: false, integrations: false });
+  const [saved, setSaved] = useState<Record<SectionKey, boolean>>({
+    general: false, engines: false, integrations: false, notifications: false,
+  });
   const timers = useRef<Partial<Record<SectionKey, ReturnType<typeof setTimeout>>>>({});
 
   useEffect(() => () => {
@@ -62,14 +68,17 @@ export function Settings() {
   const settings = useSettings();
   const update = useUpdateSettings();
   const test = useTestIntegration();
+  const testChannel = useTestNotifyChannel();
 
   const [general, setGeneral] = useState<GeneralSettings | null>(null);
   const [engines, setEngines] = useState<EngineSettings | null>(null);
   const [integrations, setIntegrations] = useState<IntegrationSettings | null>(null);
+  const [notifications, setNotifications] = useState<NotificationSettings | null>(null);
   const [errors, setErrors] = useState<Partial<Record<SectionKey, string>>>({});
   const { saved, flash } = useSavedFlash();
   const [vmResult, setVmResult] = useState<{ ok: boolean; message: string } | null>(null);
   const [vlResult, setVlResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const [channelResults, setChannelResults] = useState<Record<string, { ok: boolean; message: string }>>({});
 
   // Seed local edit state from the fetched settings exactly once. Refetches
   // (invalidation after save, background refresh, etc.) must never clobber
@@ -81,6 +90,7 @@ export function Settings() {
     setGeneral(settings.data.general);
     setEngines(settings.data.engines);
     setIntegrations(settings.data.integrations);
+    setNotifications(settings.data.notifications);
   }, [settings.data]);
 
   const message = (err: unknown) => (err instanceof ApiError ? err.message : err ? String(err) : 'Save failed.');
@@ -113,7 +123,53 @@ export function Settings() {
     );
   };
 
-  if (settings.isLoading || !general || !engines || !integrations) {
+  const addChannel = () => {
+    if (!notifications) return;
+    const channel: NotifyChannel = {
+      id: crypto.randomUUID().slice(0, 8), type: 'ntfy', name: 'New channel', enabled: true, url: '',
+    };
+    setNotifications({ ...notifications, channels: [...notifications.channels, channel] });
+  };
+
+  const updateChannel = (id: string, next: NotifyChannel) => {
+    if (!notifications) return;
+    setNotifications({
+      ...notifications,
+      channels: notifications.channels.map((c) => (c.id === id ? next : c)),
+    });
+  };
+
+  const removeChannel = (id: string) => {
+    if (!notifications) return;
+    setNotifications({ ...notifications, channels: notifications.channels.filter((c) => c.id !== id) });
+    setChannelResults((r) => Object.fromEntries(Object.entries(r).filter(([key]) => key !== id)));
+  };
+
+  const runChannelTest = (channel: NotifyChannel) => {
+    testChannel.mutate(channel.id, {
+      onSuccess: (result) => {
+        setChannelResults((r) => ({
+          ...r,
+          [channel.id]: result.ok
+            ? { ok: true, message: `Sent in ${result.latency_ms ?? 0} ms` }
+            : { ok: false, message: result.error ?? 'Test failed.' },
+        }));
+      },
+      onError: (err) => setChannelResults((r) => ({ ...r, [channel.id]: { ok: false, message: message(err) } })),
+    });
+  };
+
+  const saveNotifications = () => {
+    if (!notifications) return;
+    const thresholdError = validateThresholds(notifications.default_thresholds);
+    if (thresholdError) {
+      setErrors((e) => ({ ...e, notifications: thresholdError }));
+      return;
+    }
+    save('notifications', { notifications });
+  };
+
+  if (settings.isLoading || !general || !engines || !integrations || !notifications) {
     return <h1 className="text-xl font-semibold">Settings</h1>;
   }
 
@@ -280,6 +336,67 @@ export function Settings() {
             Enable /metrics endpoint
           </label>
           <p className="text-sm text-faint">/metrics answers 404 while disabled</p>
+        </Section>
+
+        <Section
+          id="notifications-heading" title="Notifications" saving={update.isPending}
+          error={errors.notifications} saved={saved.notifications}
+          onSave={saveNotifications}
+        >
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={notifications.enabled}
+              onChange={(e) => setNotifications({ ...notifications, enabled: e.target.checked })} />
+            Enabled
+          </label>
+          <p className="text-sm text-faint">Nothing is delivered while this is off.</p>
+
+          <div className="grid gap-3">
+            {notifications.channels.map((channel) => (
+              <ChannelEditor
+                key={channel.id}
+                value={channel}
+                onChange={(next) => updateChannel(channel.id, next)}
+                onRemove={() => removeChannel(channel.id)}
+                onTest={() => runChannelTest(channel)}
+                testResult={channelResults[channel.id]}
+                testPending={testChannel.isPending}
+              />
+            ))}
+            <button type="button" className={buttonClass} onClick={addChannel}>Add channel</button>
+          </div>
+
+          <div className={fieldClass}>
+            <label htmlFor="notifications-cooldown" className={labelClass}>Cooldown (minutes)</label>
+            <input id="notifications-cooldown" type="number" min={1} className={inputClass}
+              value={notifications.cooldown_minutes}
+              onChange={(e) => setNotifications({ ...notifications, cooldown_minutes: Number(e.target.value) })} />
+          </div>
+          <div className={fieldClass}>
+            <label htmlFor="notifications-quiet-start" className={labelClass}>Quiet hours start</label>
+            <input id="notifications-quiet-start" type="time" className={inputClass}
+              value={notifications.quiet_hours_start}
+              onChange={(e) => setNotifications({ ...notifications, quiet_hours_start: e.target.value })} />
+          </div>
+          <div className={fieldClass}>
+            <label htmlFor="notifications-quiet-end" className={labelClass}>Quiet hours end</label>
+            <input id="notifications-quiet-end" type="time" className={inputClass}
+              value={notifications.quiet_hours_end}
+              onChange={(e) => setNotifications({ ...notifications, quiet_hours_end: e.target.value })} />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-muted">
+            <input type="checkbox" checked={notifications.notify_recovery}
+              onChange={(e) => setNotifications({ ...notifications, notify_recovery: e.target.checked })} />
+            Send recovery notifications
+          </label>
+
+          <div className="grid gap-2">
+            <h3 className="text-sm font-semibold text-fg">Default thresholds</h3>
+            <p className="text-sm text-faint">Targets can override any of these in the target form.</p>
+            <ThresholdFields
+              value={notifications.default_thresholds}
+              onChange={(next) => setNotifications({ ...notifications, default_thresholds: next })}
+            />
+          </div>
         </Section>
       </div>
     </div>

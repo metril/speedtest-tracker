@@ -187,6 +187,42 @@ the shared chart palette.
   VictoriaLogs (`:9428`) and Grafana (`:3000`, VM pre-provisioned as the
   default datasource).
 
+## Notifications
+
+- **Turning it on** — Settings → Notifications → *Enabled*, then add at least
+  one channel. Nothing is delivered while the section is off.
+- **Thresholds** — global defaults live in Settings; a target overrides any
+  subset in the target form, and a blank field inherits. Limits: minimum
+  download and upload in Mbps, maximum ping and jitter in ms, maximum packet
+  loss in %, plus *Notify on failed test* for results that never completed.
+  A failed result fires only the failure alert — its metric values are zero
+  and would otherwise trip everything at once.
+- **Firing, cooldown and recovery** — state is tracked per (target, metric)
+  in `notification_state`. A breach fires once; while it stays breached it
+  re-fires no more often than the cooldown (default 60 minutes). When the
+  metric comes back the alert clears and a recovery notification is sent
+  unless *Send recovery notifications* is off.
+- **Quiet hours** — evaluated in the Settings → General timezone, wrapping
+  midnight (22:00-07:00 is a valid window). Deliveries inside the window are
+  suppressed and counted in `speedtest_notifications_suppressed_total`; the
+  firing state is still recorded, so the morning does not open with a flood
+  of overnight alerts.
+- **Channels** — `webhook` POSTs the message as JSON (fields: `kind, title,
+  body, target, target_id, metric, value, limit, unit, result_id, at`) with
+  any configured headers; `ntfy` POSTs the body as text to the full topic URL
+  with `Title`, `Priority` and `Tags` headers and an optional bearer token;
+  `apprise` POSTs `{title, body, type, tag, urls}` to an Apprise API
+  `/notify` endpoint. Each channel has a **Test** button, which uses the
+  *saved* channel — save before testing.
+- **Reliability** — evaluation and delivery run on the notifier's own
+  goroutine behind a 256-slot queue, so a slow or dead channel never delays a
+  test; overflow drops the oldest queued result and increments
+  `speedtest_notifications_dropped_total`. One failing channel does not stop
+  the others.
+- **Metrics** — `speedtest_notifications_sent_total`, `_failed_total`,
+  `_suppressed_total`, `_dropped_total`, `speedtest_notifications_queued` on
+  `/metrics`.
+
 ## Docker
 
 ```bash
