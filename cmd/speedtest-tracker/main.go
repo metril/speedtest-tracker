@@ -486,6 +486,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		if err := srv.Shutdown(httpCtx); err != nil {
 			logger.Error("http shutdown", "error", err)
 		}
+		authMW.Close()
 		stopWatch()
 		watchTimeout, cancelWatch := context.WithTimeout(context.Background(), 5*time.Second)
 		select {

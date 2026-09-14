@@ -167,9 +167,15 @@ behind the proxy or disable it (Settings → Integrations).
 
 ### Locked out?
 
-Restart the container with `ST_AUTH_MODE=open` (add `ST_LOCK_ENV=true` to
-keep it that way while you fix the configuration in the UI), then switch
-back once it's correct.
+Restart the container with `ST_AUTH_MODE=open` set. This env var is always
+applied on boot, even if `auth.mode` was already changed to something else
+in the UI, so `ST_AUTH_MODE=open` alone is enough to get back in — you do
+not need `ST_LOCK_ENV=true` for this one variable. Add `ST_LOCK_ENV=true`
+only if you also want the environment to keep overriding `auth.mode` (and
+every other `ST_<SECTION>_<KEY>` variable you've set) on every subsequent
+boot while you fix the configuration in the UI. Once the configuration is
+correct, remove `ST_AUTH_MODE=open` (and `ST_LOCK_ENV=true`, if set) and
+restart to switch back.
 
 ### Security notes
 
