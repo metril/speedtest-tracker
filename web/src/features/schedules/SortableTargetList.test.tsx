@@ -61,14 +61,25 @@ describe('SortableTargetList', () => {
     });
     afterEach(() => vi.restoreAllMocks());
 
-    it('virtualizes and disables drag, keeping the buttons working', async () => {
+    it('renders virtualized rows as li directly under ol', () => {
+      const many = Array.from({ length: 60 }, (_, i) => i + 1);
+      const manyByID = new Map(many.map((id) => [id, target(id, `t${id}`)]));
+      render(<SortableTargetList selected={many} byID={manyByID} onChange={vi.fn()} />);
+
+      const list = screen.getByRole('list');
+      expect(list.tagName).toBe('OL');
+      expect(list.children.length).toBeGreaterThan(0);
+      for (const child of Array.from(list.children)) {
+        expect(child.tagName).toBe('LI');
+      }
+    });
+
+    it('keeps the ↑/↓ buttons working past the threshold', async () => {
       const many = Array.from({ length: 60 }, (_, i) => i + 1);
       const manyByID = new Map(many.map((id) => [id, target(id, `t${id}`)]));
       const onChange = vi.fn();
       render(<SortableTargetList selected={many} byID={manyByID} onChange={onChange} />);
 
-      // No drag handles once virtualized.
-      expect(screen.queryByLabelText(/^Drag /)).not.toBeInTheDocument();
       // Keyboard buttons for at least the first visible row still work.
       await userEvent.click(screen.getByRole('button', { name: 'Move t2 up' }));
       expect(onChange).toHaveBeenCalledWith(expect.arrayContaining([2, 1]));

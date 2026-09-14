@@ -303,13 +303,14 @@ function Iperf3Fields({ options, onChange }: Omit<Props, 'engine'>) {
 
   // Unlike the Ookla text search (which needs 2+ typed characters before
   // it's worth hitting a remote API), this list is served from our own
-  // cache and meant to be browsed: it always fetches (debounced), even
-  // with an empty query, so opening the picker shows the default list
-  // right away. The query firing is deliberately independent of
-  // `focused` -- only the popover's visible open state depends on that --
-  // so tests can exercise the fetch wiring without ever mounting
-  // PopoverContent (see the jsdom note on OoklaFields above).
-  const publicServers = useIperf3Servers(debouncedSearch, true);
+  // cache and meant to be browsed: it fetches (debounced) as soon as the
+  // field is focused or has any text, even with an empty query, so
+  // opening the picker shows the default list right away. It stays gated
+  // on focus/search rather than always-on so the query doesn't fire (and
+  // refetch on every list refresh) for a target form the picker was never
+  // opened on.
+  const enabled = focused || search.length > 0;
+  const publicServers = useIperf3Servers(debouncedSearch, enabled);
   const open = focused;
 
   const handlePick = (s: Iperf3Server) => {

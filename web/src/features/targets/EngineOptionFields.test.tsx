@@ -219,10 +219,21 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
 // jsdom hang; the visible list rendering is covered separately by
 // "Iperf3ResultsList (tested directly, no Popover)".
 describe('Iperf3Fields: picker wiring', () => {
-  it('fetches the public server list (debounced) without needing a query', async () => {
+  it('does not query until the picker is focused or searched', async () => {
     fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
     wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
 
+    // Merely mounting the form (picker never opened) must not fire a
+    // request — see EngineOptionFields.tsx's `enabled` gate.
+    await new Promise((r) => { setTimeout(r, 50); });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('fetches the public server list (debounced) once focused, without needing a query', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ fetched_at: '', servers: [frankfurtIperf], total: 1 }));
+    wrap(<EngineOptionFields engine="iperf3" options={{}} onChange={vi.fn()} />);
+
+    fireEvent.focus(screen.getByLabelText('Pick from public list'));
     await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('/iperf3/servers');
@@ -234,9 +245,7 @@ describe('Iperf3Fields: picker wiring', () => {
     fetchMock.mockClear();
 
     fireEvent.change(screen.getByLabelText('Pick from public list'), { target: { value: 'denver' } });
-    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
-    const [url] = fetchMock.mock.calls[fetchMock.mock.calls.length - 1];
-    expect(String(url)).toContain('q=denver');
+    await waitFor(() => expect(String(fetchMock.mock.calls.at(-1)?.[0])).toContain('q=denver'), { timeout: 1000 });
   });
 
   // Same regression as OoklaFields' "reopens the results list..." test
