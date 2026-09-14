@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,6 +44,59 @@ func newTestRunner(t *testing.T) (*Runner, *store.Store, *sse.Hub) {
 		_ = r.Shutdown(ctx)
 	})
 	return r, db, hub
+}
+
+// newTestRunnerWith is like newTestRunner but lets the caller tweak the
+// Config before Start, e.g. to install a Sink.
+func newTestRunnerWith(t *testing.T, tweak func(*Config)) (*Runner, *store.Store) {
+	t.Helper()
+	db, err := store.Open(filepath.Join(t.TempDir(), "runner.db"))
+	if err != nil {
+		t.Fatalf("store.Open: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+
+	reg := engine.NewRegistry()
+	reg.Register(fake.New())
+	hub := sse.NewHub()
+
+	cfg := Config{
+		Store:    db,
+		Registry: reg,
+		Hub:      hub,
+		Logger:   slog.New(slog.NewTextHandler(io.Discard, nil)),
+		Grace:    2 * time.Second,
+	}
+	if tweak != nil {
+		tweak(&cfg)
+	}
+	r := New(cfg)
+	r.Start()
+	t.Cleanup(func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = r.Shutdown(ctx)
+	})
+	return r, db
+}
+
+// enqueueFakeTarget creates one enabled fake-engine target and enqueues a
+// manual run for it, returning the run id.
+func enqueueFakeTarget(t *testing.T, r *Runner, db *store.Store) int64 {
+	t.Helper()
+	ctx := context.Background()
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Options: json.RawMessage(`{"download_bps":42000000}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateTarget: %v", err)
+	}
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	return runID
 }
 
 // waitForRun polls until the run reaches a terminal status.
@@ -1033,5 +1087,49 @@ func TestRunEventsCarryTargetStepperCounts(t *testing.T) {
 		case <-deadline:
 			t.Fatalf("no terminal run event; saw %+v", seen)
 		}
+	}
+}
+
+func TestRunnerCallsSinkAfterPersist(t *testing.T) {
+	type seen struct {
+		id   int64
+		meta ResultMeta
+	}
+	got := make(chan seen, 4)
+	rn, db := newTestRunnerWith(t, func(c *Config) {
+		c.Sink = SinkFunc(func(_ context.Context, res *store.Result, m ResultMeta) {
+			got <- seen{res.ID, m}
+		})
+	})
+	runID := enqueueFakeTarget(t, rn, db)
+	select {
+	case s := <-got:
+		if s.id == 0 {
+			t.Fatal("sink got a result with no id: it must run after the row is persisted")
+		}
+		if s.meta.RunID != runID || s.meta.Trigger == "" || s.meta.Lane == "" {
+			t.Fatalf("meta = %+v", s.meta)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("sink never called")
+	}
+}
+
+func TestSinksFanOutAndSurviveAPanickingSink(t *testing.T) {
+	var a, b atomic.Int32
+	s := Sinks{
+		SinkFunc(func(context.Context, *store.Result, ResultMeta) { a.Add(1); panic("boom") }),
+		SinkFunc(func(context.Context, *store.Result, ResultMeta) { b.Add(1) }),
+	}
+	s.OnResult(context.Background(), &store.Result{}, ResultMeta{})
+	if a.Load() != 1 || b.Load() != 1 {
+		t.Fatalf("fan-out stopped at the panicking sink: a=%d b=%d", a.Load(), b.Load())
+	}
+}
+
+func TestQueueDepthsReportsPerLane(t *testing.T) {
+	rn, _, _ := newTestRunner(t)
+	if d := rn.QueueDepths(); d == nil {
+		t.Fatal("QueueDepths returned nil")
 	}
 }

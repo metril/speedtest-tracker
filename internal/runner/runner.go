@@ -35,11 +35,55 @@ type Config struct {
 	Store       *store.Store
 	Registry    *engine.Registry
 	Hub         Publisher
+	Sink        ResultSink // nil => no-op
 	Logger      *slog.Logger
 	QueueCap    int           // per-lane channel capacity, default 32
 	Grace       time.Duration // shutdown grace period, default 60s
 	TestTimeout time.Duration // per-target timeout, default 10m
 	Now         func() time.Time
+}
+
+// ResultMeta is the run context a sink needs but the result row does not
+// carry: which run and schedule produced it, and on which lane.
+type ResultMeta struct {
+	RunID        int64
+	Trigger      string
+	ScheduleID   *int64
+	ScheduleName string
+	Lane         string
+}
+
+// ResultSink is notified once per persisted result. Implementations MUST
+// return promptly and never block: they run on the lane worker goroutine,
+// so a slow sink delays the next test. Anything that talks to the network
+// hands the work to its own goroutine.
+type ResultSink interface {
+	OnResult(ctx context.Context, res *store.Result, meta ResultMeta)
+}
+
+// SinkFunc adapts a function to ResultSink.
+type SinkFunc func(context.Context, *store.Result, ResultMeta)
+
+// OnResult implements ResultSink.
+func (f SinkFunc) OnResult(ctx context.Context, res *store.Result, m ResultMeta) { f(ctx, res, m) }
+
+// Sinks fans one result out to every sink. A panicking or slow sink must
+// not take the runner down or skip its siblings, so each call is
+// recovered individually.
+type Sinks []ResultSink
+
+// OnResult implements ResultSink.
+func (s Sinks) OnResult(ctx context.Context, res *store.Result, m ResultMeta) {
+	for _, sink := range s {
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					slog.Default().Error("result sink panicked", "panic", p)
+				}
+			}()
+			sink.OnResult(ctx, res, m)
+		}()
+	}
 }
 
 // RunRequest asks for one run over the given targets. Snapshots optionally
@@ -71,20 +115,24 @@ const progressInterval = 100 * time.Millisecond
 // job is one lane's share of a run.
 type job struct {
 	runID     int64
+	lane      string
 	targets   []store.Target
 	snapshots map[int64]json.RawMessage
 }
 
 // runState tracks a run across its lane jobs.
 type runState struct {
-	ctx      context.Context
-	cancel   context.CancelFunc
-	pending  int // lane jobs not yet finished
-	total    int // targets in the whole run, for the UI stepper
-	done     int // targets that have produced a result
-	failed   bool
-	canceled bool
-	started  bool // true once any lane has begun executing (running written)
+	ctx          context.Context
+	cancel       context.CancelFunc
+	pending      int // lane jobs not yet finished
+	total        int // targets in the whole run, for the UI stepper
+	done         int // targets that have produced a result
+	failed       bool
+	canceled     bool
+	started      bool // true once any lane has begun executing (running written)
+	trigger      string
+	scheduleID   *int64
+	scheduleName string
 }
 
 // Runner owns the lane queues and their workers.
@@ -121,6 +169,9 @@ func New(cfg Config) *Runner {
 	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
+	}
+	if cfg.Sink == nil {
+		cfg.Sink = Sinks(nil)
 	}
 	return &Runner{
 		cfg:   cfg,
@@ -227,6 +278,13 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 
 	runCtx, cancel := context.WithCancel(context.Background())
 
+	scheduleName := ""
+	if req.ScheduleID != nil {
+		if sc, err := r.cfg.Store.GetSchedule(ctx, *req.ScheduleID); err == nil {
+			scheduleName = sc.Name
+		}
+	}
+
 	r.mu.Lock()
 	if r.closing || !r.started {
 		r.mu.Unlock()
@@ -242,7 +300,10 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		}
 		return 0, ErrShuttingDown
 	}
-	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: len(order), total: len(targets)}
+	r.runs[runID] = &runState{
+		ctx: runCtx, cancel: cancel, pending: len(order), total: len(targets),
+		trigger: req.Trigger, scheduleID: req.ScheduleID, scheduleName: scheduleName,
+	}
 
 	chans := make([]chan job, 0, len(order))
 	for _, lane := range order {
@@ -260,7 +321,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	queueFull := false
 	for i, lane := range order {
 		select {
-		case chans[i] <- job{runID: runID, targets: byLane[lane], snapshots: req.Snapshots}:
+		case chans[i] <- job{runID: runID, lane: lane, targets: byLane[lane], snapshots: req.Snapshots}:
 		default:
 			queueFull = true
 		}
@@ -353,7 +414,7 @@ func (r *Runner) execute(j job) {
 		if ctx.Err() != nil {
 			break
 		}
-		if failed := r.runTarget(ctx, j.runID, t, j.snapshots[t.ID]); failed {
+		if failed := r.runTarget(ctx, j.runID, j.lane, t, j.snapshots[t.ID]); failed {
 			laneFailed = true
 		}
 		// The result row for this target has landed: advance the stepper.
@@ -368,7 +429,7 @@ func (r *Runner) execute(j job) {
 // reports whether the result failed. When override is non-empty (a
 // re-execute replaying a stored result's options_snapshot), it is used as
 // the run's options instead of the target's current live options.
-func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target, override json.RawMessage) bool {
+func (r *Runner) runTarget(ctx context.Context, runID int64, lane string, t store.Target, override json.RawMessage) bool {
 	started := r.cfg.Now().UTC()
 	options := t.Options
 	if len(override) > 0 {
@@ -385,10 +446,19 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target, ove
 		StartedAt:       started.Format("2006-01-02T15:04:05.000Z"),
 	}
 
+	r.mu.Lock()
+	meta := ResultMeta{RunID: runID, Lane: lane}
+	if st, ok := r.runs[runID]; ok {
+		meta.Trigger = st.trigger
+		meta.ScheduleID = st.scheduleID
+		meta.ScheduleName = st.scheduleName
+	}
+	r.mu.Unlock()
+
 	eng, ok := r.cfg.Registry.Get(t.Engine)
 	if !ok {
 		res.Status, res.Error = "failed", fmt.Sprintf("unknown engine %q", t.Engine)
-		r.storeResult(res)
+		r.storeResult(res, meta)
 		return true
 	}
 
@@ -420,7 +490,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target, ove
 	res.DurationMs = r.cfg.Now().UTC().Sub(started).Milliseconds()
 	if err != nil {
 		res.Status, res.Error = "failed", err.Error()
-		r.storeResult(res)
+		r.storeResult(res, meta)
 		return true
 	}
 	res.Status = "ok"
@@ -433,12 +503,15 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, t store.Target, ove
 	// A failure to persist the result means the run must not end up "done"
 	// with no result row for this target, even though the test itself
 	// succeeded.
-	return !r.storeResult(res)
+	return !r.storeResult(res, meta)
 }
 
-// storeResult writes the row and publishes the result event. It reports
-// whether the row was written.
-func (r *Runner) storeResult(res *store.Result) bool {
+// storeResult writes the row, publishes the result event, and notifies the
+// configured sink. It reports whether the row was written. The sink is
+// called after InsertResult (so res.ID is set) and after the hub publish,
+// with context.Background() since the run's own ctx may already be
+// canceled by the time the result lands.
+func (r *Runner) storeResult(res *store.Result, meta ResultMeta) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := r.cfg.Store.InsertResult(ctx, res); err != nil {
@@ -446,6 +519,7 @@ func (r *Runner) storeResult(res *store.Result) bool {
 		return false
 	}
 	r.cfg.Hub.Publish(r.cfg.Hub.Marshal(sse.EventResult, res))
+	r.cfg.Sink.OnResult(context.Background(), res, meta)
 	return true
 }
 
@@ -542,6 +616,18 @@ func (r *Runner) claimForForceCancel(id int64) (total, done int, ok bool) {
 	}
 	delete(r.runs, id)
 	return st.total, st.done, true
+}
+
+// QueueDepths reports each lane's current queue depth (jobs buffered, not
+// yet dequeued by the lane worker), for metrics.
+func (r *Runner) QueueDepths() map[string]int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	depths := make(map[string]int, len(r.lanes))
+	for lane, ch := range r.lanes {
+		depths[lane] = len(ch)
+	}
+	return depths
 }
 
 // Shutdown stops accepting work, waits up to Grace for in-flight lanes,
