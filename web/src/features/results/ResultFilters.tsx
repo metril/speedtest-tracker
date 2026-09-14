@@ -1,4 +1,5 @@
 import type { ResultFilters, Target } from '../../lib/api';
+import { useTags } from '../../lib/queries';
 
 interface Props {
   value: ResultFilters;
@@ -8,9 +9,32 @@ interface Props {
 
 const control = 'rounded border border-slate-700 bg-slate-900 px-2 py-1 text-sm text-slate-100 focus:border-sky-500 focus:outline-none';
 
+const pad = (n: number) => String(n).padStart(2, '0');
+
+/** localInputToISO converts a <input type="datetime-local"> value (which
+ * carries no timezone and is interpreted as local time by `new Date`) to a
+ * UTC ISO-8601 string for the API. */
+function localInputToISO(v: string): string | undefined {
+  if (!v) return undefined;
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+
+/** isoToLocalInput converts a UTC ISO-8601 string back to the
+ * minute-precision local-time value a <input type="datetime-local"> needs,
+ * so the field displays and round-trips in the viewer's own timezone. */
+function isoToLocalInput(iso: string | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 /** ResultFiltersBar narrows the results listing. */
 export function ResultFiltersBar({ value, onChange, targets }: Props) {
   const set = (patch: Partial<ResultFilters>) => onChange({ ...value, ...patch });
+  const tags = useTags();
   return (
     <div className="flex flex-wrap items-end gap-2">
       <select
@@ -32,12 +56,17 @@ export function ResultFiltersBar({ value, onChange, targets }: Props) {
         <option value="">Any status</option>
         {['ok', 'failed', 'degraded'].map((s) => <option key={s} value={s}>{s}</option>)}
       </select>
+      <select className={control} aria-label="Tag" value={value.tag ?? ''}
+        onChange={(e) => set({ tag: e.target.value || undefined })}>
+        <option value="">All tags</option>
+        {(tags.data ?? []).map((t) => <option key={t.id} value={t.name}>{t.name}</option>)}
+      </select>
       <input className={control} type="datetime-local" aria-label="From"
-        value={value.from?.slice(0, 16) ?? ''}
-        onChange={(e) => set({ from: e.target.value ? `${e.target.value}:00.000Z` : undefined })} />
+        value={isoToLocalInput(value.from)}
+        onChange={(e) => set({ from: localInputToISO(e.target.value) })} />
       <input className={control} type="datetime-local" aria-label="To"
-        value={value.to?.slice(0, 16) ?? ''}
-        onChange={(e) => set({ to: e.target.value ? `${e.target.value}:00.000Z` : undefined })} />
+        value={isoToLocalInput(value.to)}
+        onChange={(e) => set({ to: localInputToISO(e.target.value) })} />
       <button className="rounded border border-slate-700 px-2 py-1 text-sm text-slate-300 hover:bg-slate-800"
         onClick={() => onChange({})}>
         Clear

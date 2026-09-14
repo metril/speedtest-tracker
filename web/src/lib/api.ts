@@ -62,6 +62,7 @@ export interface ResultFilters {
   status?: string;
   from?: string;
   to?: string;
+  tag?: string;
   limit?: number;
 }
 
