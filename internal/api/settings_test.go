@@ -10,7 +10,9 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -548,6 +550,25 @@ func TestPutAuthValidation(t *testing.T) {
 	}
 }
 
+// TestPutAuthRejectsWeakHeaderNames is a regression test for review item 9:
+// header-name validation must use the RFC 7230 tchar set, not the weaker
+// CanonicalHeaderKey + blacklist check that let a comma-separated name like
+// "Remote,User" through.
+func TestPutAuthRejectsWeakHeaderNames(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	for _, bad := range []string{"Remote,User", "Remote User", "Remote:User", "Remote\tUser"} {
+		rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+			map[string]any{"auth": map[string]any{"user_header": bad}}, nil)
+		if rec.Code != http.StatusBadRequest {
+			t.Errorf("user_header=%q = %d %s, want 400", bad, rec.Code, rec.Body)
+		}
+	}
+	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"user_header": "X-Remote-User"}}, nil); rec.Code != http.StatusOK {
+		t.Errorf("valid header name = %d %s, want 200", rec.Code, rec.Body)
+	}
+}
+
 func TestSwitchToForwardAuthLockoutGuard(t *testing.T) {
 	h, _ := newSettingsAPI(t)
 	body := map[string]any{"auth": map[string]any{"mode": settings.AuthModeForward,
@@ -580,10 +601,109 @@ func TestSwitchToTokenModeRequiresAToken(t *testing.T) {
 	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "token") {
 		t.Fatalf("= %d %s, want 400 — switching to token mode with no token issued locks everyone out", rec.Code, rec.Body)
 	}
-	doJSON(t, h, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "a"}, nil)
-	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
-		map[string]any{"auth": map[string]any{"mode": settings.AuthModeToken}}, nil); rec.Code != http.StatusOK {
-		t.Fatalf("with a token issued = %d %s", rec.Code, rec.Body)
+
+	var created struct {
+		Token string `json:"token"`
+	}
+	doJSON(t, h, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "a"}, &created)
+
+	// A token now exists, but this switching request carries none itself.
+	rec = doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": settings.AuthModeToken}}, nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "bearer token") {
+		t.Fatalf("no bearer token on the switching request = %d %s, want 400 naming a bearer token", rec.Code, rec.Body)
+	}
+
+	req := jsonRequest(t, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"mode": settings.AuthModeToken}})
+	req.Header.Set("Authorization", "Bearer "+created.Token)
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	if out.Code != http.StatusOK {
+		t.Fatalf("with a valid bearer token on the request = %d %s", out.Code, out.Body)
+	}
+}
+
+// TestTokenIdentityCannotChangeAuthSection is a regression test for review
+// item 3's RULING: a bearer/query API token is full-access for the normal
+// API, but must not be usable to write the Auth section itself — only a
+// forward-auth or open-mode session may.
+func TestTokenIdentityCannotChangeAuthSection(t *testing.T) {
+	var mw *auth.Middleware
+	var plain string
+	h, _, _ := newTestAPIWith(t, func(d *Deps) {
+		s, err := settings.New(context.Background(), d.Store)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d.Settings = s
+		mw = auth.New(nil, storeTokenLookup{db: d.Store}, time.Now)
+		if err := mw.Configure(settings.Auth{Mode: settings.AuthModeToken}); err != nil {
+			t.Fatal(err)
+		}
+		d.Auth = authAdapter{mw: mw, mode: settings.AuthModeToken}
+
+		p, hash, prefix, err := auth.GenerateToken()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := d.Store.CreateAPIToken(context.Background(), "test", hash, prefix); err != nil {
+			t.Fatal(err)
+		}
+		plain = p
+	})
+	t.Cleanup(mw.Close)
+
+	req := jsonRequest(t, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"admin_group": "admins"}})
+	req.Header.Set("Authorization", "Bearer "+plain)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "forward-auth or open-mode") {
+		t.Fatalf("= %d %s, want 403 naming forward-auth/open-mode", rec.Code, rec.Body)
+	}
+
+	// A non-auth section write with the same token identity is unaffected.
+	req2 := jsonRequest(t, http.MethodPut, "/api/v1/settings",
+		map[string]any{"general": map[string]any{"units": "MB/s"}})
+	req2.Header.Set("Authorization", "Bearer "+plain)
+	rec2 := httptest.NewRecorder()
+	h.ServeHTTP(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("non-auth section with a token = %d %s, want 200", rec2.Code, rec2.Body)
+	}
+}
+
+// TestForwardAuthNarrowingTrustedProxiesIsGuarded is a regression test for
+// review item 4: changing trusted_proxies or user_header while already in
+// forward_auth must be guarded even though the mode itself doesn't change
+// — otherwise an operator could narrow the config to exclude their own
+// request and lock themselves out.
+func TestForwardAuthNarrowingTrustedProxiesIsGuarded(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyAuthMode, settings.AuthModeForward)
+	st.Set(ctx, settings.KeyAuthUserHeader, "Remote-User")
+	st.Set(ctx, settings.KeyAuthTrustedProxies, []string{"10.0.0.0/8"})
+
+	// Narrowing trusted_proxies from a request outside the new range must
+	// be rejected, even though mode is unchanged.
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"trusted_proxies": []string{"192.0.2.0/24"}}}, nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("narrowing trusted_proxies from an untrusted request = %d %s, want 400", rec.Code, rec.Body)
+	}
+
+	// The same change, from a request that does satisfy the new config, is
+	// allowed.
+	req := jsonRequest(t, http.MethodPut, "/api/v1/settings",
+		map[string]any{"auth": map[string]any{"trusted_proxies": []string{"192.0.2.0/24"}}})
+	req.RemoteAddr = "192.0.2.5:1"
+	req.Header.Set("Remote-User", "alice")
+	out := httptest.NewRecorder()
+	h.ServeHTTP(out, req)
+	if out.Code != http.StatusOK {
+		t.Fatalf("narrowing from a satisfying request = %d %s, want 200", out.Code, out.Body)
 	}
 }
 

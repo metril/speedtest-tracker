@@ -7,7 +7,6 @@ import (
 	"io"
 	"net/http"
 	"net/netip"
-	"net/textproto"
 	"net/url"
 	"regexp"
 	"slices"
@@ -219,6 +218,16 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// RULING (final review #3): a token is full-access for normal API use,
+	// but must not be usable to change the Auth section itself — otherwise
+	// a leaked or over-broad token could flip auth to open and remove the
+	// need for a token at all. Only a forward-auth or open-mode session
+	// (a human, or no auth configured) may write here.
+	if body.Auth != nil && requestAuthIsToken(r) {
+		errForbidden(w, "auth settings require a forward-auth or open-mode session")
+		return
+	}
+
 	current, err := d.Settings.Integrations(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "load integrations settings", err)
@@ -402,6 +411,16 @@ func requestIsAdmin(r *http.Request) bool {
 	return id.Mode == "" || id.IsAdmin
 }
 
+// requestAuthIsToken reports whether the caller authenticated via a
+// bearer/query API token (auth.SourceToken), as opposed to a forward-auth
+// header or an open-mode session. A zero-value identity (no auth
+// middleware mounted) is not a token, matching requestIsAdmin's convention
+// that an absent Deps.Auth means open access.
+func requestAuthIsToken(r *http.Request) bool {
+	id := auth.FromContext(r.Context())
+	return id.Source == auth.SourceToken
+}
+
 // lockedKeysIn returns the settings keys body would write that are
 // currently locked by ST_LOCK_ENV, across every section — not just Auth —
 // so a future section is covered by this check for free.
@@ -576,12 +595,36 @@ func mergeAuth(current settings.Auth, body *authBody) settings.Auth {
 }
 
 // isValidHTTPHeaderName reports whether s is a syntactically valid HTTP
-// header field name (mirrors notify.isValidHTTPToken).
+// header field name: a non-empty run of RFC 7230 "tchar"s only (a stricter
+// check than mirroring notify.isValidHTTPToken's old CanonicalHeaderKey +
+// blacklist approach, which let a comma-separated name like "Remote,User"
+// through since comma was never in the blacklist).
 func isValidHTTPHeaderName(s string) bool {
 	if s == "" {
 		return false
 	}
-	return textproto.TrimString(s) == s && http.CanonicalHeaderKey(s) != "" && !strings.ContainsAny(s, " \t\r\n:")
+	for i := 0; i < len(s); i++ {
+		if !isHTTPTChar(s[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+// isHTTPTChar reports whether c is an RFC 7230 "tchar":
+// tchar = "!" / "#" / "$" / "%" / "&" / "'" / "*" / "+" / "-" / "." /
+//
+//	"^" / "_" / "`" / "|" / "~" / DIGIT / ALPHA
+func isHTTPTChar(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	}
+	switch c {
+	case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+		return true
+	}
+	return false
 }
 
 // validateAuthBody checks the Auth partial document's own fields, with no
@@ -635,12 +678,17 @@ func (d Deps) checkAuthLockout(r *http.Request, current, resulting settings.Auth
 		if len(resulting.TrustedProxies) == 0 {
 			return fmt.Errorf("trusted_proxies must not be empty")
 		}
-		if resulting.Mode == current.Mode {
+		switching := resulting.Mode != current.Mode
+		narrowed := !slices.Equal(resulting.TrustedProxies, current.TrustedProxies) ||
+			resulting.UserHeader != current.UserHeader
+		if !switching && !narrowed {
 			return nil
 		}
-		// An actual switch into forward_auth: the request performing it
-		// must itself satisfy the resulting config, or the operator locks
-		// themselves out immediately.
+		// An actual switch into forward_auth, or an already-forward_auth
+		// request narrowing trusted_proxies/user_header (which could
+		// otherwise exclude the operator's own request): the request
+		// performing it must itself satisfy the resulting config, or the
+		// operator locks themselves out immediately.
 		addrPort, err := netip.ParseAddrPort(r.RemoteAddr)
 		if err != nil {
 			return fmt.Errorf("cannot verify this request satisfies trusted_proxies")
@@ -677,11 +725,39 @@ func (d Deps) checkAuthLockout(r *http.Request, current, resulting settings.Auth
 		if n == 0 {
 			return fmt.Errorf("create an API token before switching to token mode")
 		}
+		if resulting.Mode == current.Mode {
+			return nil
+		}
+		// An actual switch into token mode: require the switching request
+		// itself to carry a valid bearer token, proving the operator
+		// already has one in hand. Without this, a PUT with no
+		// Authorization header succeeds and then immediately 401s every
+		// subsequent request, including the SPA's own next call.
+		plain, ok := bearerTokenFromRequest(r)
+		if !ok {
+			return fmt.Errorf("include a valid bearer token on this request to switch to token mode")
+		}
+		if _, found, err := d.Store.APITokenByHash(r.Context(), auth.HashToken(plain)); err != nil {
+			return fmt.Errorf("verify bearer token: %w", err)
+		} else if !found {
+			return fmt.Errorf("include a valid bearer token on this request to switch to token mode")
+		}
 		return nil
 
 	default:
 		return nil
 	}
+}
+
+// bearerTokenFromRequest extracts a token from the Authorization header,
+// mirroring auth.Middleware's own bearer extraction (unexported there).
+func bearerTokenFromRequest(r *http.Request) (string, bool) {
+	h := r.Header.Get("Authorization")
+	const prefix = "Bearer "
+	if len(h) <= len(prefix) || !strings.EqualFold(h[:len(prefix)], prefix) {
+		return "", false
+	}
+	return h[len(prefix):], true
 }
 
 // setPtr writes *v under key when v is non-nil; a nil v is a no-op.
