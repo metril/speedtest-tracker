@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Target } from '../../lib/api';
@@ -27,7 +27,7 @@ const targets = [target(1, 'home'), target(2, 'nas')];
 
 describe('ScheduleForm', () => {
   it('applies a preset to the cron field and previews the next runs', async () => {
-    wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} warnings={[]} />);
+    wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     await userEvent.click(screen.getByRole('button', { name: 'Daily 03:00' }));
     expect(screen.getByLabelText('Cron expression')).toHaveValue('0 3 * * *');
     await waitFor(() => expect(screen.getByTestId('cron-preview').textContent).toMatch(/2026/));
@@ -35,7 +35,7 @@ describe('ScheduleForm', () => {
 
   it('submits name, cron, timezone and the ordered target ids', async () => {
     const onSubmit = vi.fn();
-    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} warnings={[]} />);
+    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 'nightly');
     await userEvent.click(screen.getByRole('button', { name: 'Daily 03:00' }));
     await userEvent.click(screen.getByRole('button', { name: 'Add home' }));
@@ -48,7 +48,7 @@ describe('ScheduleForm', () => {
 
   it('reorders selected targets', async () => {
     const onSubmit = vi.fn();
-    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} warnings={[]} />);
+    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 's');
     await userEvent.click(screen.getByRole('button', { name: 'Add home' }));
     await userEvent.click(screen.getByRole('button', { name: 'Add nas' }));
@@ -59,16 +59,39 @@ describe('ScheduleForm', () => {
 
   it('refuses to submit without a target', async () => {
     const onSubmit = vi.fn();
-    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} warnings={[]} />);
+    wrap(<ScheduleForm targets={targets} onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
     await userEvent.type(screen.getByLabelText('Name'), 's');
     await userEvent.click(screen.getByRole('button', { name: 'Save schedule' }));
     expect(onSubmit).not.toHaveBeenCalled();
     expect(screen.getByText(/at least one target/i)).toBeInTheDocument();
   });
 
-  it('shows server-supplied overlap warnings', () => {
-    wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false}
-      warnings={['overlaps with schedule "first" on lane "wan"']} />);
-    expect(screen.getByRole('status').textContent).toMatch(/overlaps with schedule "first"/);
+  it('debounces cron and timezone edits before querying the preview', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async () => jsonResponse({ ok: true, next: ['2026-09-13T03:00:00Z'] }));
+    vi.stubGlobal('fetch', fetchMock);
+    try {
+      wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
+      const initialCalls = fetchMock.mock.calls.length;
+
+      fireEvent.change(screen.getByLabelText('Cron expression'), { target: { value: '0 5 * * *' } });
+      fireEvent.change(screen.getByLabelText('Custom timezone'), { target: { value: 'Pacific/Fiji' } });
+      // Not yet debounced: no new preview request.
+      expect(fetchMock.mock.calls.length).toBe(initialCalls);
+
+      await act(async () => { await vi.advanceTimersByTimeAsync(300); });
+      expect(fetchMock.mock.calls.length).toBeGreaterThan(initialCalls);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows a Custom… option instead of injecting the free-text zone into the select', async () => {
+    wrap(<ScheduleForm targets={targets} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Custom timezone'), 'Pacific/Fiji');
+    const select = screen.getByLabelText('Timezone') as HTMLSelectElement;
+    expect(select.value).toBe('__custom__');
+    expect(screen.getByRole('option', { name: 'Custom…' })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: 'Pacific/Fiji' })).not.toBeInTheDocument();
   });
 });

@@ -20,13 +20,6 @@ const CURATED_TIMEZONES = [
   'Asia/Tokyo', 'Australia/Sydney',
 ];
 
-/** timezones lists the curated shortlist plus whatever zone the schedule
- * already uses (so editing an unusual schedule doesn't silently drop it). */
-function timezones(current: string): string[] {
-  if (!current || CURATED_TIMEZONES.includes(current)) return CURATED_TIMEZONES;
-  return [current, ...CURATED_TIMEZONES];
-}
-
 /** How long to wait after the last keystroke before asking the server to
  * validate the cron expression. */
 const PREVIEW_DEBOUNCE_MS = 300;
@@ -38,10 +31,9 @@ interface Props {
   onCancel: () => void;
   submitting: boolean;
   error?: string;
-  warnings: string[];
 }
 
-export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting, error, warnings }: Props) {
+export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting, error }: Props) {
   const [name, setName] = useState(initial?.name ?? '');
   const [cron, setCron] = useState(initial?.cron ?? '0 * * * *');
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
@@ -58,8 +50,17 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
     return () => clearTimeout(t);
   }, [cron]);
 
-  const preview = useCronPreview(debouncedCron, timezone);
+  // Same debounce for the timezone, since the custom free-text field fires
+  // a state update per keystroke too.
+  const [debouncedTimezone, setDebouncedTimezone] = useState(timezone);
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedTimezone(timezone), PREVIEW_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [timezone]);
+
+  const preview = useCronPreview(debouncedCron, debouncedTimezone);
   const byID = useMemo(() => new Map(targets.map((t) => [t.id, t])), [targets]);
+  const isCustomTimezone = timezone !== '' && !CURATED_TIMEZONES.includes(timezone);
   const available = targets.filter((t) => !selected.includes(t.id));
 
   const move = (index: number, delta: number) => {
@@ -124,15 +125,17 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
       <div className="grid gap-1">
         <label htmlFor="schedule-tz" className="text-xs uppercase tracking-wide text-slate-500">Timezone</label>
         <select
-          id="schedule-tz" value={timezone} onChange={(e) => setTimezone(e.target.value)}
+          id="schedule-tz" value={isCustomTimezone ? '__custom__' : timezone}
+          onChange={(e) => setTimezone(e.target.value)}
           className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-sm text-slate-100"
         >
-          {timezones(timezone).map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+          {CURATED_TIMEZONES.map((tz) => <option key={tz} value={tz}>{tz}</option>)}
+          {isCustomTimezone && <option value="__custom__" disabled>Custom…</option>}
         </select>
         <input
           aria-label="Custom timezone"
           placeholder="Or type an IANA zone, e.g. Europe/Zurich"
-          value={CURATED_TIMEZONES.includes(timezone) ? '' : timezone}
+          value={isCustomTimezone ? timezone : ''}
           onChange={(e) => setTimezone(e.target.value)}
           className="rounded border border-slate-800 bg-slate-950 px-2 py-1.5 text-xs text-slate-300"
         />
@@ -173,11 +176,6 @@ export function ScheduleForm({ initial, targets, onSubmit, onCancel, submitting,
         Enabled
       </label>
 
-      {warnings.length > 0 && (
-        <div role="status" className="rounded border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
-          {warnings.map((wmsg) => <p key={wmsg}>{wmsg}</p>)}
-        </div>
-      )}
       {(localError || error) && <p className="text-sm text-rose-400">{localError || error}</p>}
 
       <div className="flex gap-2">

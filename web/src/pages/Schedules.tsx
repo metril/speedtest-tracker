@@ -43,7 +43,7 @@ export function Schedules() {
   const submit = (input: ScheduleInput) => {
     const onSuccess = (saved: ScheduleSaved) => {
       setWarnings(saved.warnings);
-      if (saved.warnings.length === 0) setEditing({ mode: 'none' });
+      setEditing({ mode: 'none' });
     };
     if (editing.mode === 'edit') {
       update.mutate({ id: editing.schedule.id, schedule: input }, { onSuccess });
@@ -64,15 +64,25 @@ export function Schedules() {
         )}
       </header>
 
+      {warnings.length > 0 && (
+        <div role="status" className="flex items-start justify-between gap-3 rounded border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-300">
+          <div>{warnings.map((wmsg) => <p key={wmsg}>{wmsg}</p>)}</div>
+          <button type="button" aria-label="Dismiss warnings" className="text-amber-400 hover:text-amber-200"
+            onClick={() => setWarnings([])}>
+            ×
+          </button>
+        </div>
+      )}
+
       {editing.mode !== 'none' && (
         <ScheduleForm
+          key={editing.mode === 'edit' ? `edit-${editing.schedule.id}` : 'new'}
           initial={editing.mode === 'edit' ? editing.schedule : undefined}
           targets={targets.data ?? []}
           onSubmit={submit}
           onCancel={() => { setWarnings([]); setEditing({ mode: 'none' }); }}
           submitting={create.isPending || update.isPending}
           error={message(create.error ?? update.error)}
-          warnings={warnings}
         />
       )}
 
