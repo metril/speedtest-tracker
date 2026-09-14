@@ -119,7 +119,18 @@ func (n *Notifier) Start() {
 				case res := <-n.queue:
 					n.process(context.Background(), res)
 				case <-n.stop:
-					return
+					// Drain whatever is already queued rather than
+					// dropping it: Close documents "waits to drain", and
+					// OnResult may have queued a result concurrently with
+					// Close being called.
+					for {
+						select {
+						case res := <-n.queue:
+							n.process(context.Background(), res)
+						default:
+							return
+						}
+					}
 				}
 			}
 		}()
@@ -226,19 +237,23 @@ func (n *Notifier) handleEval(ctx context.Context, conf settings.Notifications, 
 			return
 		}
 		msg := BuildMessage("alert", tgt.Name, tgt.ID, res.ID, e, now, res.Error)
-		n.fire(ctx, conf, tgt.ID, metric, now, quiet, msg, true)
+		n.fire(ctx, conf, tgt.ID, metric, now, quiet, msg, ok)
 		return
 	}
 
-	// Not breached.
+	// Not breached. A stored state with an empty LastFiredAt means the
+	// alert was only ever recorded during quiet hours and never actually
+	// delivered (see fire), so there is nothing to report as "recovered".
 	if !ok || !st.Firing {
 		return
 	}
+	delivered := st.LastFiredAt != ""
+	send := conf.NotifyRecovery && delivered
 	var msg Message
-	if conf.NotifyRecovery {
+	if send {
 		msg = BuildMessage("recovery", tgt.Name, tgt.ID, res.ID, e, now, "")
 	}
-	n.recover(ctx, conf, tgt.ID, metric, quiet, msg, conf.NotifyRecovery)
+	n.recover(ctx, conf, tgt.ID, metric, quiet, msg, send)
 }
 
 // cooldownElapsed reports whether enough time has passed since
@@ -254,20 +269,33 @@ func cooldownElapsed(lastFiredAt string, now time.Time, cooldown time.Duration) 
 }
 
 // fire records the breach and, unless quiet hours suppress delivery,
-// sends the alert. "Sending" during quiet hours means: do the state
-// write, count it as suppressed, deliver nothing. Recording the state is
-// what stops a night of breaches turning into a 7am flood, at the cost
-// of losing the alert that would have fired in the night.
-func (n *Notifier) fire(ctx context.Context, conf settings.Notifications, targetID int64, metric string, now time.Time, quiet bool, msg Message, _ bool) {
+// sends the alert. During quiet hours nothing is delivered and
+// LastFiredAt is left unset (or, if a row already exists, left exactly as
+// it was): setting it to "now" would both start the cooldown clock for an
+// alert nobody received (delaying the first real alert by a full
+// cooldown) and make a later recovery think something was actually sent.
+// alreadyFiring is whether a state row already existed for this
+// (target,metric) pair; when quiet and it did, the row (and whatever
+// LastFiredAt it carries — set or still empty) is left untouched, so a
+// burst of suppressed re-fires does not keep rewriting it.
+func (n *Notifier) fire(ctx context.Context, conf settings.Notifications, targetID int64, metric string, now time.Time, quiet bool, msg Message, alreadyFiring bool) {
+	if quiet {
+		n.suppressed.Add(1)
+		if alreadyFiring {
+			return
+		}
+		if err := n.cfg.Store.SetNotifyState(ctx, store.NotifyState{
+			TargetID: targetID, Metric: metric, Firing: true, LastFiredAt: "",
+		}); err != nil {
+			n.cfg.Logger.Warn("notify: set state", "target_id", targetID, "metric", metric, "err", err)
+		}
+		return
+	}
 	if err := n.cfg.Store.SetNotifyState(ctx, store.NotifyState{
 		TargetID: targetID, Metric: metric, Firing: true,
 		LastFiredAt: now.UTC().Format(lastFiredLayout),
 	}); err != nil {
 		n.cfg.Logger.Warn("notify: set state", "target_id", targetID, "metric", metric, "err", err)
-		return
-	}
-	if quiet {
-		n.suppressed.Add(1)
 		return
 	}
 	n.deliver(ctx, conf, msg)

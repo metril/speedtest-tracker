@@ -314,3 +314,75 @@ func TestOneFailingChannelDoesNotStopTheOthers(t *testing.T) {
 		t.Fatalf("stats = %+v, want Sent=1 Failed=1", n.Stats())
 	}
 }
+
+// TestCloseDrainsQueuedNotifications is the regression case for finding 2:
+// Start's select used to return on <-n.stop without draining the queue, so
+// notifications queued right before shutdown were silently dropped despite
+// Close's doc comment promising to "wait to drain". Each result targets a
+// distinct target so cooldown cannot mask a dropped one as "suppressed".
+func TestCloseDrainsQueuedNotifications(t *testing.T) {
+	n, db, got, _ := newHarness(t, notifications(t, 60))
+	const nTargets = 5
+	for i := 0; i < nTargets; i++ {
+		id := seedTarget(t, db, `{"download_mbps_min":100}`)
+		n.OnResult(context.Background(), result(id, 50e6), Meta{})
+	}
+	n.Start()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := n.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if len(*got) != nTargets {
+		t.Fatalf("Close dropped queued notifications: got %d messages, want %d", len(*got), nTargets)
+	}
+}
+
+// TestSuppressedAlertSkipsRecoveryNotice and
+// TestSuppressedAlertDoesNotDelayFirstRealAlert are the regression cases
+// for finding 3: firing during quiet hours writes alert state without
+// delivering anything, so (a) a later recovery must not claim something
+// was "recovered" that nobody was ever told about, and (b) the state
+// write must not start the cooldown clock, or the first real (delivered)
+// alert would be delayed by a full cooldown after quiet hours end.
+
+func TestSuppressedAlertSkipsRecoveryNotice(t *testing.T) {
+	cfg := notifications(t, 60)
+	cfg.QuietHoursStart, cfg.QuietHoursEnd = "22:00", "07:00"
+	n, db, got, clock := newHarness(t, cfg)
+	id := seedTarget(t, db, `{"download_mbps_min":100}`)
+	*clock = time.Date(2026, 9, 14, 23, 30, 0, 0, time.UTC) // inside quiet hours
+
+	n.process(context.Background(), result(id, 50e6)) // breach, suppressed
+	if len(*got) != 0 {
+		t.Fatalf("delivered during quiet hours: %+v", *got)
+	}
+
+	*clock = time.Date(2026, 9, 15, 8, 0, 0, 0, time.UTC) // now outside quiet hours
+	n.process(context.Background(), result(id, 150e6))    // recovers
+	if len(*got) != 0 {
+		t.Fatalf("sent a recovery notice for an alert that was never delivered: %+v", *got)
+	}
+	if _, ok, _ := db.GetNotifyState(context.Background(), id, "download"); ok {
+		t.Fatal("recovered state must still be cleared even when no notice is sent")
+	}
+}
+
+func TestSuppressedAlertDoesNotDelayFirstRealAlert(t *testing.T) {
+	cfg := notifications(t, 60) // 60 minute cooldown
+	cfg.QuietHoursStart, cfg.QuietHoursEnd = "22:00", "23:00"
+	n, db, got, clock := newHarness(t, cfg)
+	id := seedTarget(t, db, `{"download_mbps_min":100}`)
+	*clock = time.Date(2026, 9, 14, 22, 30, 0, 0, time.UTC) // inside quiet hours
+
+	n.process(context.Background(), result(id, 50e6)) // suppressed
+	if len(*got) != 0 {
+		t.Fatalf("delivered during quiet hours: %+v", *got)
+	}
+
+	*clock = clock.Add(35 * time.Minute) // 23:05: quiet hours over, only 35m since the suppressed attempt
+	n.process(context.Background(), result(id, 50e6))
+	if len(*got) != 1 {
+		t.Fatalf("first real alert was delayed by the suppressed attempt's cooldown: %+v", *got)
+	}
+}
