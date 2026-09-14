@@ -1,6 +1,7 @@
 /// <reference types="vitest/config" />
 import { writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
@@ -21,6 +22,11 @@ function restoreGitkeep(): Plugin {
 
 export default defineConfig({
   plugins: [react(), tailwindcss(), restoreGitkeep()],
+  resolve: {
+    alias: {
+      '@': fileURLToPath(new URL('./src', import.meta.url)),
+    },
+  },
   build: {
     // The Go binary embeds internal/web/dist via go:embed.
     outDir: '../internal/web/dist',
