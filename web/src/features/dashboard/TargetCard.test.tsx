@@ -40,3 +40,20 @@ it('renders a never-run card without a latest result', () => {
   render(<TargetCard summary={{ ...summary, latest: null }} spark={[]} onRun={() => {}} running={false} />);
   expect(screen.getByText(/never run/i)).toBeInTheDocument();
 });
+
+it('shows a neutral badge when no thresholds are configured', () => {
+  render(<TargetCard summary={summary} spark={[]} onRun={() => {}} running={false} />);
+  expect(screen.getByText('Within thresholds')).toBeInTheDocument();
+});
+
+it('shows "No data" for a target with no latest result', () => {
+  render(<TargetCard summary={{ ...summary, latest: null }} spark={[]} onRun={() => {}} running={false}
+    thresholds={{ ping_ms_max: 20 }} />);
+  expect(screen.getByText('No data')).toBeInTheDocument();
+});
+
+it('flags a breached threshold', () => {
+  render(<TargetCard summary={summary} spark={[]} onRun={() => {}} running={false}
+    thresholds={{ ping_ms_max: 5 }} />);
+  expect(screen.getByText('Threshold breached')).toBeInTheDocument();
+});

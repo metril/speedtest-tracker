@@ -1,20 +1,37 @@
 import type { SummaryStats } from '../../lib/api';
 import { formatBps, formatMs, formatPercent } from '../../lib/format';
+import { SERIES } from '../../lib/chart';
+import { KpiTile } from './KpiTile';
 
-/** Tile renders one label + big value stat. */
-function Tile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded border border-line bg-surface px-4 py-3">
-      <p className="text-xs uppercase tracking-wide text-muted">{label}</p>
-      <p className="mt-1 text-2xl font-semibold tabular-nums text-fg">{value}</p>
-    </div>
-  );
+/** weightedAvg returns the count-weighted average of a per-target metric,
+ * 0 when nothing has run. */
+function weightedAvg(stats: SummaryStats, pick: (t: SummaryStats['targets'][number]) => number): number {
+  const totalCount = stats.targets.reduce((sum, t) => sum + t.count, 0);
+  if (totalCount === 0) return 0;
+  return stats.targets.reduce((sum, t) => sum + pick(t) * t.count, 0) / totalCount;
 }
 
-/** SummaryTiles shows the four headline numbers for the selected range:
- * total tests run, overall success rate, the count-weighted average
- * download across targets, and the single worst ping observed. */
-export function SummaryTiles({ stats }: { stats: SummaryStats }) {
+/** delta returns the signed fractional change from previous to current,
+ * or undefined when there is nothing to compare against. */
+function delta(current: number, previous: number): number | undefined {
+  if (!Number.isFinite(previous) || previous <= 0) return undefined;
+  return (current - previous) / previous;
+}
+
+export interface DashboardSpark {
+  download: number[];
+  upload: number[];
+  ping: number[];
+}
+
+/** SummaryTiles shows the four headline numbers for the selected range —
+ * success rate, average download, average upload and average ping — each
+ * with an optional previous-period delta and range sparkline. */
+export function SummaryTiles({ stats, previousStats, spark }: {
+  stats: SummaryStats;
+  previousStats?: SummaryStats;
+  spark?: DashboardSpark;
+}) {
   if (stats.total_results === 0) {
     return (
       <div className="rounded border border-line bg-surface px-4 py-6 text-center text-sm text-muted">
@@ -23,21 +40,51 @@ export function SummaryTiles({ stats }: { stats: SummaryStats }) {
     );
   }
 
-  const totalCount = stats.targets.reduce((sum, t) => sum + t.count, 0);
-  const avgDownload = totalCount === 0 ? 0
-    : stats.targets.reduce((sum, t) => sum + t.avg_download_bps * t.count, 0) / totalCount;
-  // formatMs renders a dash for a non-positive value, so a target with no
-  // ok reading in range (max_ping_ms left at 0) reads as "no data" rather
-  // than a suspiciously fast "0 ms".
-  const worstPing = stats.targets.length === 0 ? 0
-    : Math.max(...stats.targets.map((t) => t.max_ping_ms));
+  const avgDownload = weightedAvg(stats, (t) => t.avg_download_bps);
+  const avgUpload = weightedAvg(stats, (t) => t.avg_upload_bps);
+  const avgPing = weightedAvg(stats, (t) => t.avg_ping_ms);
+
+  const prevAvgDownload = previousStats && previousStats.total_results > 0
+    ? weightedAvg(previousStats, (t) => t.avg_download_bps) : undefined;
+  const prevAvgUpload = previousStats && previousStats.total_results > 0
+    ? weightedAvg(previousStats, (t) => t.avg_upload_bps) : undefined;
+  const prevAvgPing = previousStats && previousStats.total_results > 0
+    ? weightedAvg(previousStats, (t) => t.avg_ping_ms) : undefined;
+  const prevSuccessRate = previousStats && previousStats.total_results > 0
+    ? previousStats.success_rate : undefined;
 
   return (
     <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-      <Tile label="Tests" value={String(stats.total_results)} />
-      <Tile label="Success rate" value={formatPercent(stats.success_rate)} />
-      <Tile label="Avg download" value={formatBps(avgDownload)} />
-      <Tile label="Worst ping" value={formatMs(worstPing)} />
+      <KpiTile
+        label="Success rate"
+        value={formatPercent(stats.success_rate)}
+        delta={prevSuccessRate !== undefined ? delta(stats.success_rate, prevSuccessRate) : undefined}
+        favorable
+      />
+      <KpiTile
+        label="Avg download"
+        value={formatBps(avgDownload)}
+        spark={spark?.download}
+        sparkColor={SERIES.download}
+        delta={prevAvgDownload !== undefined ? delta(avgDownload, prevAvgDownload) : undefined}
+        favorable
+      />
+      <KpiTile
+        label="Avg upload"
+        value={formatBps(avgUpload)}
+        spark={spark?.upload}
+        sparkColor={SERIES.upload}
+        delta={prevAvgUpload !== undefined ? delta(avgUpload, prevAvgUpload) : undefined}
+        favorable
+      />
+      <KpiTile
+        label="Avg ping"
+        value={formatMs(avgPing)}
+        spark={spark?.ping}
+        sparkColor={SERIES.ping}
+        delta={prevAvgPing !== undefined ? delta(avgPing, prevAvgPing) : undefined}
+        favorable={false}
+      />
     </div>
   );
 }

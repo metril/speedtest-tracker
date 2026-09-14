@@ -24,7 +24,7 @@ export function HistoryChart<R extends Row>({ title, points, series, height = 24
 }) {
   if (points.length === 0) {
     return (
-      <figure className="rounded border border-line bg-surface p-4">
+      <figure>
         <figcaption className="text-sm font-medium text-fg">{title}</figcaption>
         <p className="py-8 text-center text-sm text-muted">No data in this range.</p>
       </figure>
@@ -41,7 +41,7 @@ export function HistoryChart<R extends Row>({ title, points, series, height = 24
     new Date(iso).toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
   return (
-    <figure className="rounded border border-line bg-surface p-4">
+    <figure>
       <figcaption className="mb-2 text-sm font-medium text-fg">{title}</figcaption>
       <div role="img" aria-label={label} style={{ height }}>
         <ResponsiveContainer width="100%" height="100%">

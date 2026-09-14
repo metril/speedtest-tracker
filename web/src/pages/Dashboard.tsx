@@ -1,18 +1,22 @@
 import { useQueries } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { HistoryChart, type Series } from '../features/dashboard/HistoryChart';
 import { OutageStrip } from '../features/dashboard/OutageStrip';
 import { RangePicker } from '../features/dashboard/RangePicker';
-import { SummaryTiles } from '../features/dashboard/SummaryTiles';
+import { SummaryTiles, type DashboardSpark } from '../features/dashboard/SummaryTiles';
 import { TargetCard } from '../features/dashboard/TargetCard';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import * as api from '../lib/api';
-import type { HistoryPoint, Range, TargetSummary } from '../lib/api';
+import type { HistoryPoint, Range, TargetSummary, ThresholdSet } from '../lib/api';
 import { SERIES } from '../lib/chart';
 import { formatBps, formatMs } from '../lib/format';
 import {
-  queryKeys, useOutages, useRunTarget, useSummary, useTargetHistory,
+  queryKeys, useOutages, usePreviousSummary, useRunTarget, useSummary, useTargetHistory, useTargets,
 } from '../lib/queries';
 
 const COLOR_CYCLE = [SERIES.download, SERIES.upload, SERIES.ping, SERIES.jitter];
@@ -37,35 +41,54 @@ function mergeByBucket(
     String(a.bucket_start).localeCompare(String(b.bucket_start)));
 }
 
-/** DashboardCard fetches its own 24h download history for the sparkline,
- * keyed to the dashboard's selected range so it shares the cache entry
- * with the merged charts below for the same target. */
-function DashboardCard({
-  summary, range, onRun, running,
-}: {
-  summary: TargetSummary; range: Range; onRun: (id: number) => void; running: boolean;
-}) {
-  const history = useTargetHistory(summary.target_id, range);
-  const spark = (history.data?.points ?? []).map((p) => p.avg_download_bps);
-  return <TargetCard summary={summary} spark={spark} onRun={onRun} running={running} />;
-}
-
-/** HistorySection renders the per-target series toggle, the merged
- * throughput and latency charts, and the outage strip for the selected
- * range. Split out so its history queries only run once targets exist. */
-function HistorySection({ targets, range }: { targets: TargetSummary[]; range: Range }) {
-  const [visible, setVisible] = useState<Set<number>>(
-    () => new Set(targets.map((t) => t.target_id)),
-  );
-  const outages = useOutages(range);
-
-  const historyQueries = useQueries({
+/** useAllTargetHistories fetches every target's history for `range` and
+ * shares its cache entries (by query key) with whoever else asks for the
+ * same target+range -- the per-card sparkline query and HistorySection's
+ * merged charts both read through the same underlying fetches. */
+function useAllTargetHistories(targets: TargetSummary[], range: Range) {
+  return useQueries({
     queries: targets.map((t) => ({
       queryKey: queryKeys.history(t.target_id, range),
       queryFn: () => api.targetHistory(t.target_id, range),
       staleTime: 60_000,
     })),
   });
+}
+
+/** aggregateSpark averages each bucket's metric across every target with
+ * data in it, for the KPI row's range sparklines. It is intentionally
+ * simple (an unweighted per-bucket mean): a headline trend line, not a
+ * precise recomputation of the weighted stat above it. */
+function aggregateSpark(targets: TargetSummary[], queries: ReturnType<typeof useAllTargetHistories>): DashboardSpark {
+  const byBucket = new Map<string, { download: number[]; upload: number[]; ping: number[] }>();
+  targets.forEach((_t, i) => {
+    for (const p of queries[i].data?.points ?? []) {
+      const row = byBucket.get(p.bucket_start) ?? { download: [], upload: [], ping: [] };
+      row.download.push(p.avg_download_bps);
+      row.upload.push(p.avg_upload_bps);
+      row.ping.push(p.avg_ping_ms);
+      byBucket.set(p.bucket_start, row);
+    }
+  });
+  const buckets = [...byBucket.keys()].sort();
+  const avg = (xs: number[]) => (xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0);
+  return {
+    download: buckets.map((b) => avg(byBucket.get(b)!.download)),
+    upload: buckets.map((b) => avg(byBucket.get(b)!.upload)),
+    ping: buckets.map((b) => avg(byBucket.get(b)!.ping)),
+  };
+}
+
+/** HistorySection renders the per-target series toggle, the merged
+ * throughput and latency charts (as Tabs in one Card), and the outage
+ * timeline in its own Card. Split out so its history queries only run
+ * once targets exist. */
+function HistorySection({ targets, range }: { targets: TargetSummary[]; range: Range }) {
+  const [visible, setVisible] = useState<Set<number>>(
+    () => new Set(targets.map((t) => t.target_id)),
+  );
+  const outages = useOutages(range);
+  const historyQueries = useAllTargetHistories(targets, range);
 
   const histories = new Map<number, HistoryPoint[]>();
   targets.forEach((t, i) => histories.set(t.target_id, historyQueries[i].data?.points ?? []));
@@ -116,41 +139,95 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
 
   return (
     <div className="grid gap-4">
-      {targets.length > 1 && (
-        <fieldset className="flex flex-wrap items-center gap-3 rounded border border-line bg-surface p-3">
-          <legend className="px-1 text-xs font-medium text-muted">Targets</legend>
-          {targets.map((t) => (
-            <label key={t.target_id} className="flex items-center gap-1.5 text-sm text-fg">
-              <input
-                type="checkbox"
-                checked={visible.has(t.target_id)}
-                onChange={() => toggle(t.target_id)}
-              />
-              {t.target_name}
-            </label>
-          ))}
-        </fieldset>
-      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CardTitle className="text-base">History</CardTitle>
+            {targets.length > 1 && (
+              <div className="flex flex-wrap items-center gap-1.5">
+                {targets.map((t) => (
+                  <button
+                    key={t.target_id}
+                    type="button"
+                    aria-pressed={visible.has(t.target_id)}
+                    onClick={() => toggle(t.target_id)}
+                    className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
+                      visible.has(t.target_id)
+                        ? 'border-accent bg-accent/10 text-accent'
+                        : 'border-line text-faint hover:text-muted'
+                    }`}
+                  >
+                    {t.target_name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent>
+          <Tabs defaultValue="throughput">
+            <TabsList>
+              <TabsTrigger value="throughput">Throughput</TabsTrigger>
+              <TabsTrigger value="latency">Latency</TabsTrigger>
+            </TabsList>
+            <TabsContent value="throughput">
+              <HistoryChart title="Download & upload" points={throughputPoints} series={throughputSeries} />
+            </TabsContent>
+            <TabsContent value="latency">
+              <HistoryChart title="Ping & jitter" points={latencyPoints} series={latencySeries} />
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
 
-      <HistoryChart title="Download & upload" points={throughputPoints} series={throughputSeries} />
-      <HistoryChart title="Ping & jitter" points={latencyPoints} series={latencySeries} />
-
-      {outages.data && (
-        <OutageStrip incidents={outages.data.incidents} from={outages.data.from} to={outages.data.to} />
-      )}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-base">Outages</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {outages.data
+            ? <OutageStrip incidents={outages.data.incidents} from={outages.data.from} to={outages.data.to} />
+            : <Skeleton className="h-8 w-full" />}
+        </CardContent>
+      </Card>
     </div>
   );
 }
 
-/** Dashboard is the app's home page: a range selector, headline stats, a
- * latest-per-target card grid, merged history charts and the outage
- * timeline strip. */
+function DashboardSkeleton() {
+  return (
+    <div className="grid gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        {[0, 1, 2, 3].map((i) => (
+          <Card key={i}><CardContent className="p-4"><Skeleton className="h-4 w-20" /><Skeleton className="mt-2 h-7 w-24" /></CardContent></Card>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {[0, 1, 2].map((i) => <Card key={i}><CardContent className="p-4"><Skeleton className="h-24 w-full" /></CardContent></Card>)}
+      </div>
+      <Card><CardContent className="p-4"><Skeleton className="h-60 w-full" /></CardContent></Card>
+    </div>
+  );
+}
+
+/** Dashboard is the app's home page: a range selector, headline KPI tiles
+ * with previous-period deltas, a latest-per-target card grid with
+ * threshold badges, tabbed throughput/latency history, and the outage
+ * timeline. */
 export function Dashboard() {
   const [range, setRange] = useState<Range>('24h');
   const summary = useSummary(range);
+  const previousSummary = usePreviousSummary(range);
+  const targetsQuery = useTargets();
   const run = useRunTarget();
   const { open } = useLivePanel();
   const runningTargetID = run.isPending ? run.variables : undefined;
+
+  const targets = summary.data?.targets ?? [];
+  const spark = aggregateSpark(targets, useAllTargetHistories(targets, range));
+  const thresholdsByTarget = new Map(
+    (targetsQuery.data ?? []).map((t) => [t.id, t.thresholds as ThresholdSet]),
+  );
 
   const handleRun = (id: number) => {
     run.mutate(id, { onSuccess: () => open() });
@@ -163,31 +240,32 @@ export function Dashboard() {
         <RangePicker value={range} onChange={setRange} />
       </header>
 
-      {summary.isLoading && <p className="text-sm text-muted">Loading…</p>}
+      {summary.isLoading && <DashboardSkeleton />}
 
       {summary.isError && (
         <div className="rounded border border-line bg-surface px-4 py-3 text-sm text-bad">
           <p>Failed to load dashboard data.</p>
-          <button
-            type="button"
-            onClick={() => summary.refetch()}
-            className="mt-2 rounded border border-line px-2 py-1 text-xs text-fg hover:bg-raised"
-          >
+          <Button type="button" variant="outline" size="sm" className="mt-2" onClick={() => summary.refetch()}>
             Retry
-          </button>
+          </Button>
         </div>
       )}
 
       {summary.data && (
         <>
-          <SummaryTiles stats={summary.data} />
+          <SummaryTiles stats={summary.data} previousStats={previousSummary.data} spark={spark} />
 
           {summary.data.targets.length === 0 ? (
-            <div className="rounded border border-line bg-surface px-4 py-6 text-center text-sm text-muted">
-              No targets configured yet.{' '}
-              <Link to="/targets" className="text-accent hover:underline">Add a target</Link>
-              {' '}to start collecting results.
-            </div>
+            <Card>
+              <CardContent className="flex flex-col items-center gap-3 p-10 text-center">
+                <p className="text-sm text-muted">
+                  No targets configured yet. Add one to start collecting results.
+                </p>
+                <Button asChild>
+                  <Link to="/targets">Add a target</Link>
+                </Button>
+              </CardContent>
+            </Card>
           ) : (
             <>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -198,6 +276,7 @@ export function Dashboard() {
                     range={range}
                     onRun={handleRun}
                     running={runningTargetID === t.target_id}
+                    thresholds={thresholdsByTarget.get(t.target_id)}
                   />
                 ))}
               </div>
@@ -209,4 +288,18 @@ export function Dashboard() {
       )}
     </section>
   );
+}
+
+/** DashboardCard fetches its own history for the sparkline, keyed to the
+ * dashboard's selected range so it shares the cache entry with the merged
+ * charts below for the same target. */
+function DashboardCard({
+  summary, range, onRun, running, thresholds,
+}: {
+  summary: TargetSummary; range: Range; onRun: (id: number) => void; running: boolean;
+  thresholds?: ThresholdSet;
+}) {
+  const history = useTargetHistory(summary.target_id, range);
+  const spark = (history.data?.points ?? []).map((p) => p.avg_download_bps);
+  return <TargetCard summary={summary} spark={spark} onRun={onRun} running={running} thresholds={thresholds} />;
 }

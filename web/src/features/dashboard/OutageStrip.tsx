@@ -23,15 +23,11 @@ export function OutageStrip({ incidents, from, to }: { incidents: Incident[]; fr
   const span = toMs - fromMs;
 
   if (incidents.length === 0) {
-    return (
-      <div className="rounded border border-line bg-surface p-4">
-        <p className="text-sm text-muted">No outages in this range.</p>
-      </div>
-    );
+    return <p className="text-sm text-muted">No outages in this range.</p>;
   }
 
   return (
-    <div className="rounded border border-line bg-surface p-4">
+    <div>
       <div className="relative h-8 w-full rounded bg-raised">
         {incidents.map((incident, i) => {
           const left = pct(incident.started_at, fromMs, span);
