@@ -69,6 +69,14 @@ export interface Iperf3Server {
   provider?: string;
 }
 
+/** OoklaSearchResult is the /ookla/servers response shape: the matching
+ * servers (already sorted by distance server-side) plus, when the query
+ * resolved through geocoding, the resolved place's display name. */
+export interface OoklaSearchResult {
+  servers: OoklaServer[];
+  near: string;
+}
+
 export interface Iperf3ServersPage {
   fetched_at: string;
   servers: Iperf3Server[];
@@ -214,8 +222,8 @@ export const testTargetOptions = (engine: string, options: Record<string, unknow
     method: 'POST',
     body: JSON.stringify({ name: 'validation', engine, enabled: true, lane: 'wan', options }),
   });
-export const listOoklaServers = (q: string) =>
-  request<OoklaServer[]>(`/ookla/servers${query({ q })}`);
+export const listOoklaServers = (q: string, country?: string) =>
+  request<OoklaSearchResult>(`/ookla/servers${query({ q, country })}`);
 
 export type RevisionAction = 'create' | 'update' | 'delete' | 'revert' | 'restore';
 

@@ -131,7 +131,7 @@ describe('OoklaFields: manual server ID input', () => {
 // correctly (and, below, that closing/reopening the picker works).
 describe('OoklaFields: search wiring', () => {
   it('fetches with the typed query once the debounce settles', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse([denver, boulder]));
+    fetchMock.mockImplementation(async () => jsonResponse({ servers: [denver, boulder], near: '' }));
     wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver' } });
@@ -139,6 +139,43 @@ describe('OoklaFields: search wiring', () => {
     await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
     const [url] = fetchMock.mock.calls[0];
     expect(String(url)).toContain('q=denver');
+  });
+
+  it('defaults the country hint from the browser locale and includes it in the query', async () => {
+    const original = Object.getOwnPropertyDescriptor(window.navigator, 'language');
+    Object.defineProperty(window.navigator, 'language', { value: 'en-GB', configurable: true });
+    try {
+      fetchMock.mockImplementation(async () => jsonResponse({ servers: [], near: '' }));
+      wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
+
+      expect(screen.getByLabelText('Country')).toHaveValue('GB');
+      fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver' } });
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+      expect(String(fetchMock.mock.calls[0][0])).toContain('country=GB');
+    } finally {
+      if (original) Object.defineProperty(window.navigator, 'language', original);
+    }
+  });
+
+  it('drops country from the query once "Any" is selected', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ servers: [], near: '' }));
+    wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+    expect(String(fetchMock.mock.calls[0][0])).not.toContain('country=');
+  });
+
+  it('reveals a free-text 2-letter input when "Other…" is selected', async () => {
+    fetchMock.mockImplementation(async () => jsonResponse({ servers: [], near: '' }));
+    wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
+
+    fireEvent.change(screen.getByLabelText('Country'), { target: { value: 'other' } });
+    fireEvent.change(screen.getByLabelText('Country code'), { target: { value: 'ie' } });
+    fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'dublin' } });
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled(), { timeout: 1000 });
+    expect(String(fetchMock.mock.calls[0][0])).toContain('country=IE');
   });
 
   it('keeps the manual ID input usable when the remote search errors', async () => {
@@ -163,7 +200,7 @@ describe('OoklaFields: search wiring', () => {
   // note), so "closing" is simulated via the mock's force-close button,
   // which calls the same onOpenChange(false) a real dismiss would.
   it('reopens the results list once typing resumes after the popover was closed', async () => {
-    fetchMock.mockImplementation(async () => jsonResponse([denver]));
+    fetchMock.mockImplementation(async () => jsonResponse({ servers: [denver], near: '' }));
     wrap(<EngineOptionFields engine="ookla" options={{}} onChange={vi.fn()} />);
 
     fireEvent.change(screen.getByLabelText('Search servers'), { target: { value: 'denver' } });
@@ -214,6 +251,18 @@ describe('OoklaResultsList (tested directly, no Popover)', () => {
   it('shows an error state', () => {
     render(<OoklaResultsList servers={[]} isFetching={false} isError onSelect={vi.fn()} />);
     expect(screen.getByText(/Server list unavailable/)).toBeInTheDocument();
+  });
+
+  it('shows a "Near: <near>" header row when the query resolved through geocoding', () => {
+    render(
+      <OoklaResultsList servers={[denver]} isFetching={false} isError={false} onSelect={vi.fn()} near="Denver, Colorado" />,
+    );
+    expect(screen.getByText('Near: Denver, Colorado')).toBeInTheDocument();
+  });
+
+  it('omits the near header row when there is nothing to show', () => {
+    render(<OoklaResultsList servers={[denver]} isFetching={false} isError={false} onSelect={vi.fn()} />);
+    expect(screen.queryByText(/^Near:/)).not.toBeInTheDocument();
   });
 });
 

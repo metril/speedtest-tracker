@@ -2,9 +2,11 @@ import { useEffect, useRef, useState } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { useIperf3Servers, useOoklaServers } from '../../lib/queries';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
+import { regionFromLocale } from '../../lib/locale';
 import { Popover, PopoverAnchor, PopoverContent } from '@/components/ui/popover';
 import { Command, CommandEmpty, CommandGroup, CommandItem, CommandList } from '@/components/ui/command';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Badge } from '@/components/ui/badge';
 
 export type Options = Record<string, unknown>;
 
@@ -57,9 +59,23 @@ const DEBOUNCE_MS = 300;
 /** iperf3 option keys tucked behind the "Advanced options" disclosure —
  * everything but host and the public-list picker. */
 const IPERF3_ADVANCED_KEYS = [
-  'port', 'protocol', 'parallel', 'duration_s', 'udp_bitrate', 'bind',
+  'port', 'port_range_end', 'protocol', 'parallel', 'duration_s', 'udp_bitrate', 'bind',
   'username', 'rsa_public_key_path', 'password', 'reverse', 'bidir',
 ] as const;
+
+/** COMMON_COUNTRIES is a short list of ISO 3166-1 alpha-2 codes covering
+ * the countries most speedtest targets are likely to be in, shown as the
+ * Ookla search's country hint <select>. "Other…" reveals a free 2-letter
+ * input for anything not listed. */
+const COMMON_COUNTRIES: readonly [string, string][] = [
+  ['US', 'United States'], ['GB', 'United Kingdom'], ['CA', 'Canada'], ['AU', 'Australia'],
+  ['DE', 'Germany'], ['FR', 'France'], ['ES', 'Spain'], ['IT', 'Italy'], ['NL', 'Netherlands'],
+  ['SE', 'Sweden'], ['NO', 'Norway'], ['DK', 'Denmark'], ['FI', 'Finland'], ['PL', 'Poland'],
+  ['PT', 'Portugal'], ['IE', 'Ireland'], ['CH', 'Switzerland'], ['AT', 'Austria'], ['BE', 'Belgium'],
+  ['CZ', 'Czechia'], ['GR', 'Greece'], ['JP', 'Japan'], ['KR', 'South Korea'], ['CN', 'China'],
+  ['IN', 'India'], ['BR', 'Brazil'], ['MX', 'Mexico'], ['ZA', 'South Africa'], ['NZ', 'New Zealand'],
+  ['SG', 'Singapore'],
+];
 
 function hasAdvancedIperf3Options(options: Options): boolean {
   return IPERF3_ADVANCED_KEYS.some((k) => {
@@ -104,14 +120,21 @@ export function EngineOptionFields({ engine, options, onChange, forceOpenAdvance
 /** OoklaResultsList renders the server search hits as a Command list; kept
  * separate from OoklaFields so it can be tested (or reused) without going
  * through the Popover that wraps it. */
-export function OoklaResultsList({ servers, isFetching, isError, onSelect }: {
+export function OoklaResultsList({ servers, isFetching, isError, onSelect, near }: {
   servers: OoklaServer[];
   isFetching: boolean;
   isError: boolean;
   onSelect: (s: OoklaServer) => void;
+  /** near is the resolved place's display name when the query geocoded
+   * through a postcode/name lookup, shown as a small header row above the
+   * results so the user can confirm the search landed in the right place. */
+  near?: string;
 }) {
   return (
     <Command shouldFilter={false}>
+      {!isFetching && !isError && near && (
+        <p className="border-b border-line px-3 py-1.5 text-xs text-faint">Near: {near}</p>
+      )}
       <CommandList>
         {isFetching && (
           <div className="px-2 py-3 text-xs text-faint">Searching…</div>
@@ -144,6 +167,17 @@ export function OoklaResultsList({ servers, isFetching, isError, onSelect }: {
   );
 }
 
+/** initialCountry resolves the country hint <select>'s starting value from
+ * the browser locale: a code already in COMMON_COUNTRIES selects it
+ * directly, any other 2-letter region falls into "Other…" pre-filled,
+ * and no resolvable region leaves the hint empty (any country). */
+function initialCountry(): { select: string; other: string } {
+  const region = typeof navigator !== 'undefined' ? regionFromLocale(navigator.language) : undefined;
+  if (!region) return { select: '', other: '' };
+  if (COMMON_COUNTRIES.some(([code]) => code === region)) return { select: region, other: '' };
+  return { select: 'other', other: region };
+}
+
 function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -158,13 +192,17 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   // outside interaction — see the onInteractOutside comment below.
   const anchorRef = useRef<HTMLInputElement>(null);
 
+  const [countrySelect, setCountrySelect] = useState(() => initialCountry().select);
+  const [countryOther, setCountryOther] = useState(() => initialCountry().other);
+  const country = countrySelect === 'other' ? countryOther.trim().toUpperCase() : countrySelect;
+
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [search]);
 
   const enabled = debouncedSearch.trim().length >= 2;
-  const servers = useOoklaServers(debouncedSearch, enabled);
+  const servers = useOoklaServers(debouncedSearch, country || undefined, enabled);
   const serverId = options.server_id === undefined ? '' : String(options.server_id);
   const open = focused && enabled;
 
@@ -186,43 +224,70 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
           onChange={(e) => onChange(setOption(options, 'server_id', numberOr(e.target.value)))}
         />
       </div>
-      <div>
-        <label className={label} htmlFor="ookla-server-search">Search servers</label>
-        <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
-          <PopoverAnchor asChild>
-            <input
-              ref={anchorRef}
-              id="ookla-server-search"
-              className={field}
-              value={search}
-              autoComplete="off"
-              placeholder="city, postcode, sponsor or host"
-              onFocus={() => setFocused(true)}
-              onChange={(e) => { setSearch(e.target.value); setFocused(true); }}
-            />
-          </PopoverAnchor>
-          <PopoverContent
-            align="start"
-            onOpenAutoFocus={(e) => e.preventDefault()}
-            // Radix treats any pointer-down outside PopoverContent as a
-            // dismiss, including a second click/fill() on the already-
-            // focused anchor input (jsdom aside, this reproduces in real
-            // browsers and Playwright): focus never changes, so the popover
-            // never reopens on its own. Interacting with the anchor itself
-            // must never count as "outside".
-            onInteractOutside={(e) => {
-              if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
-            }}
-            className="w-(--radix-popover-trigger-width) p-0"
+      <div className="flex gap-2">
+        <div className="flex-1">
+          <label className={label} htmlFor="ookla-server-search">Search servers</label>
+          <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
+            <PopoverAnchor asChild>
+              <input
+                ref={anchorRef}
+                id="ookla-server-search"
+                className={field}
+                value={search}
+                autoComplete="off"
+                placeholder="city, postcode, sponsor or host"
+                onFocus={() => setFocused(true)}
+                onChange={(e) => { setSearch(e.target.value); setFocused(true); }}
+              />
+            </PopoverAnchor>
+            <PopoverContent
+              align="start"
+              onOpenAutoFocus={(e) => e.preventDefault()}
+              // Radix treats any pointer-down outside PopoverContent as a
+              // dismiss, including a second click/fill() on the already-
+              // focused anchor input (jsdom aside, this reproduces in real
+              // browsers and Playwright): focus never changes, so the popover
+              // never reopens on its own. Interacting with the anchor itself
+              // must never count as "outside".
+              onInteractOutside={(e) => {
+                if (anchorRef.current?.contains(e.target as Node)) e.preventDefault();
+              }}
+              className="w-(--radix-popover-trigger-width) p-0"
+            >
+              <OoklaResultsList
+                servers={servers.data?.servers ?? []}
+                isFetching={servers.isFetching}
+                isError={servers.isError}
+                onSelect={handleSelect}
+                near={servers.data?.near}
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+        <div className="w-28 shrink-0">
+          <label className={label} htmlFor="ookla-country">Country</label>
+          <select
+            id="ookla-country"
+            className={field}
+            value={countrySelect}
+            onChange={(e) => setCountrySelect(e.target.value)}
           >
-            <OoklaResultsList
-              servers={servers.data ?? []}
-              isFetching={servers.isFetching}
-              isError={servers.isError}
-              onSelect={handleSelect}
+            <option value="">Any</option>
+            {COMMON_COUNTRIES.map(([code, name]) => <option key={code} value={code}>{name}</option>)}
+            <option value="other">Other…</option>
+          </select>
+          {countrySelect === 'other' && (
+            <input
+              id="ookla-country-other"
+              aria-label="Country code"
+              className={`${field} mt-1`}
+              value={countryOther}
+              maxLength={2}
+              placeholder="e.g. IE"
+              onChange={(e) => setCountryOther(e.target.value)}
             />
-          </PopoverContent>
-        </Popover>
+          )}
+        </div>
       </div>
     </div>
   );

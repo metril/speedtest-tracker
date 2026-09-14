@@ -9,13 +9,13 @@ import type {
 export const queryKeys = {
   targets: ['targets'] as const,
   results: (filters: ResultFilters) => ['results', filters] as const,
-  ooklaServers: (q: string) => ['ookla-servers', q] as const,
+  ooklaServers: (q: string, country?: string) => ['ookla-servers', q, country ?? ''] as const,
   iperf3Servers: (q: string) => ['iperf3-servers', q] as const,
   tags: ['tags'] as const,
   runs: ['runs'] as const,
   schedules: ['schedules'] as const,
   cronPreview: (cron: string, timezone: string) => ['cron-preview', cron, timezone] as const,
-  history: (id: number, range: Range) => ['history', id, range] as const,
+  history: (id: number, range: Range, offset?: 0 | 1) => ['history', id, range, offset ?? 0] as const,
   targetRevisions: (id: number) => ['target-revisions', id] as const,
   deletedTargets: ['deleted-targets'] as const,
   summary: (range: Range, offset?: 0 | 1) => ['summary', range, offset ?? 0] as const,
@@ -100,10 +100,10 @@ export function useRestoreTarget() {
   });
 }
 
-export function useOoklaServers(q: string, enabled: boolean) {
+export function useOoklaServers(q: string, country: string | undefined, enabled: boolean) {
   return useQuery({
-    queryKey: queryKeys.ooklaServers(q),
-    queryFn: () => api.listOoklaServers(q),
+    queryKey: queryKeys.ooklaServers(q, country),
+    queryFn: () => api.listOoklaServers(q, country),
     enabled,
     staleTime: 60 * 60 * 1000,
   });
