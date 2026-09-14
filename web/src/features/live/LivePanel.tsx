@@ -1,13 +1,12 @@
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 import { formatBps, formatLoss, formatMs } from '../../lib/format';
 import { useCancelRun } from '../../lib/queries';
 import type { LiveRun } from '../../lib/useLiveRun';
 import { Gauge, type GaugePhase } from './Gauge';
 import { Sparkline } from './Sparkline';
 import { useLivePanel } from './LiveRunProvider';
-
-/** How long the compact bar lingers after a run settles. */
-const HIDE_DELAY_MS = 4000;
+import { HIDE_DELAY_MS } from './constants';
 
 /** Tile is one small readout beside the gauge. */
 function Tile({ label, value }: { label: string; value: string }) {
@@ -65,14 +64,29 @@ export function LivePanel() {
 function ExpandedPanel({ live, onClose, onCancel, canceling }: {
   live: LiveRun; onClose: () => void; onCancel: () => void; canceling: boolean;
 }) {
+  // Escape closes the dialog, and focus returns to whatever had it before
+  // the dialog opened (the "Expand live test" / "Run now" button).
+  useEffect(() => {
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('keydown', onKeyDown);
+      previouslyFocused?.focus?.();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/70" onClick={onClose}>
+    <div className="fixed inset-0 z-40 flex justify-end bg-slate-950/70">
+      <button type="button" aria-label="Close" className="absolute inset-0 cursor-default" onClick={onClose} />
       <aside
         role="dialog"
         aria-modal="true"
         aria-label="Live test"
-        className="flex h-full w-full max-w-md flex-col gap-5 overflow-y-auto border-l border-slate-800 bg-slate-950 p-6"
-        onClick={(e) => e.stopPropagation()}
+        className="relative flex h-full w-full max-w-md flex-col gap-5 overflow-y-auto border-l border-slate-800 bg-slate-950 p-6"
       >
         <header className="flex items-start justify-between">
           <div>
@@ -111,12 +125,12 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
             <>
               <span className="text-sm capitalize text-slate-300">{live.status}</span>
               {live.resultId > 0 && (
-                <a
+                <Link
                   className="rounded border border-sky-700 px-3 py-1.5 text-sm text-sky-300 hover:bg-sky-900/40"
-                  href={`/results?result_id=${live.resultId}`}
+                  to={`/results?result_id=${live.resultId}`}
                 >
                   View result
-                </a>
+                </Link>
               )}
             </>
           ) : (

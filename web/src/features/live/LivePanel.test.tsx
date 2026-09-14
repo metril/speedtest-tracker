@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import type { LiveRun } from '../../lib/useLiveRun';
 import { LivePanel } from './LivePanel';
@@ -19,11 +20,13 @@ function live(overrides: Partial<LiveRun> = {}): LiveRun {
 function renderPanel(value: Parameters<typeof LivePanelContext.Provider>[0]['value']) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <QueryClientProvider client={qc}>
-      <LivePanelContext.Provider value={value}>
-        <LivePanel />
-      </LivePanelContext.Provider>
-    </QueryClientProvider>,
+    <MemoryRouter>
+      <QueryClientProvider client={qc}>
+        <LivePanelContext.Provider value={value}>
+          <LivePanel />
+        </LivePanelContext.Provider>
+      </QueryClientProvider>
+    </MemoryRouter>,
   );
 }
 
@@ -72,5 +75,36 @@ describe('LivePanel', () => {
       expanded: true, open: vi.fn(), close: vi.fn(),
     });
     expect(screen.getByRole('link', { name: /view result/i })).toHaveAttribute('href', '/results?result_id=42');
+  });
+
+  it('closes on Escape', async () => {
+    const close = vi.fn();
+    renderPanel({ live: live(), expanded: true, open: vi.fn(), close });
+    await userEvent.keyboard('{Escape}');
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('has a Close button as the backdrop', async () => {
+    const close = vi.fn();
+    renderPanel({ live: live(), expanded: true, open: vi.fn(), close });
+    // Both the header button and the backdrop are named "Close"; the
+    // backdrop is the first, full-screen one rendered before the dialog.
+    const [backdrop] = screen.getAllByRole('button', { name: 'Close' });
+    expect(backdrop).toHaveClass('inset-0');
+    await userEvent.click(backdrop);
+    expect(close).toHaveBeenCalled();
+  });
+
+  it('restores focus to the previously focused element on close', () => {
+    const trigger = document.createElement('button');
+    document.body.appendChild(trigger);
+    trigger.focus();
+    expect(document.activeElement).toBe(trigger);
+
+    const { unmount } = renderPanel({ live: live(), expanded: true, open: vi.fn(), close: vi.fn() });
+    unmount();
+
+    expect(document.activeElement).toBe(trigger);
+    trigger.remove();
   });
 });

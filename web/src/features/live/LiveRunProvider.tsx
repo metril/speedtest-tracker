@@ -1,7 +1,8 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { queryKeys } from '../../lib/queries';
 import { useLiveRun, type LiveRun, type LiveRunEvent } from '../../lib/useLiveRun';
+import { HIDE_DELAY_MS } from './constants';
 
 export interface LivePanelValue {
   live: LiveRun | null;
@@ -47,6 +48,18 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
   }, [qc]);
 
   const live = useLiveRun({ onEvent });
+
+  // Collapse back to nothing once a run settles, same delay as the compact
+  // bar's own fade so the panel and bar drop together. Without this, a run
+  // the user expanded (or a stale one from a prior session) would stay
+  // expanded forever, and the *next* run — however it starts — would
+  // inherit that expanded state despite the user never opening it.
+  useEffect(() => {
+    if (!live?.finished) return undefined;
+    const timer = setTimeout(() => setExpanded(false), HIDE_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [live?.finished, live?.runId]);
+
   const value = useMemo<LivePanelValue>(() => ({
     live,
     expanded,
