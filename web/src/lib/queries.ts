@@ -18,7 +18,7 @@ export const queryKeys = {
   history: (id: number, range: Range) => ['history', id, range] as const,
   targetRevisions: (id: number) => ['target-revisions', id] as const,
   deletedTargets: ['deleted-targets'] as const,
-  summary: (range: Range) => ['summary', range] as const,
+  summary: (range: Range, offset?: 0 | 1) => ['summary', range, offset ?? 0] as const,
   outages: (range: Range) => ['outages', range] as const,
   settings: ['settings'] as const,
   me: ['me'] as const,
@@ -220,13 +220,21 @@ export function useCronPreview(cron: string, timezone: string) {
   });
 }
 
-export function useSummary(range: Range) {
+export function useSummary(range: Range, opts?: { offset?: 0 | 1 }) {
+  const offset = opts?.offset;
   return useQuery({
-    queryKey: queryKeys.summary(range),
-    queryFn: () => api.statsSummary(range),
+    queryKey: queryKeys.summary(range, offset),
+    queryFn: () => api.statsSummary(range, offset),
     staleTime: 30_000,
     refetchInterval: 60_000,
   });
+}
+
+/** usePreviousSummary fetches the window immediately before `range`, for
+ * computing a previous-period delta on the KPI tiles. Its own hook keeps
+ * offset:1 an explicit intent at call sites rather than a magic option. */
+export function usePreviousSummary(range: Range) {
+  return useSummary(range, { offset: 1 });
 }
 
 export function useTargetHistory(id: number, range: Range, enabled = true) {

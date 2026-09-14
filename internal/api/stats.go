@@ -59,18 +59,38 @@ func (c *summaryCache) set(key string, body []byte) {
 	}
 }
 
-// statsSummary answers GET /stats/summary?range=, serving a cached body
-// for up to summaryTTL.
+// statsSummary answers GET /stats/summary?range=[&offset=], serving a
+// cached body for up to summaryTTL. offset=1 shifts the resolved window
+// back by its own span, giving the caller the immediately preceding
+// period of equal length for a previous-period comparison.
 func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Query().Get("from") != "" || r.URL.Query().Get("to") != "" {
 		errBadRequest(w, "stats/summary only accepts range=24h|7d|30d, not an explicit from/to pair")
+		return
+	}
+	offset, ok := intQuery(w, r, "offset", 0)
+	if !ok {
+		return
+	}
+	if offset > 1 {
+		errBadRequest(w, "offset must be 0 or 1")
 		return
 	}
 	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
 	if !ok {
 		return
 	}
-	key := from + "|" + to
+	if offset == 1 {
+		span := windowSpan(from, to)
+		f, err := time.Parse(dbTimeFormat, from)
+		if err != nil {
+			errBadRequest(w, "invalid window")
+			return
+		}
+		to = from
+		from = f.Add(-span).Format(dbTimeFormat)
+	}
+	key := from + "|" + to + "|" + r.URL.Query().Get("offset")
 	w.Header().Set("Cache-Control", "max-age=30")
 	if body, hit := d.summary.get(key); hit {
 		if d.Metrics != nil {

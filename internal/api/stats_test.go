@@ -80,6 +80,45 @@ func TestStatsSummaryRejectsExplicitFromTo(t *testing.T) {
 	}
 }
 
+func TestStatsSummaryRejectsBadOffset(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h&offset=2", nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
+	}
+}
+
+// TestStatsSummaryOffsetShiftsWindowBack verifies offset=1 returns the
+// immediately preceding window of equal span: a result placed just before
+// the current 24h window is invisible at offset=0 but visible at offset=1,
+// and the two bodies differ (different cache key).
+func TestStatsSummaryOffsetShiftsWindowBack(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	tid, _ := seedResults(t, db, 1)
+	if _, err := db.InsertResult(context.Background(), &store.Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt:       time.Now().UTC().Add(-30 * time.Hour).Format("2006-01-02T15:04:05.000Z"),
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     5e7,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cur := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h&offset=0", nil)
+	prev := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h&offset=1", nil)
+	if cur.Code != http.StatusOK || prev.Code != http.StatusOK {
+		t.Fatalf("status cur=%d prev=%d", cur.Code, prev.Code)
+	}
+	if cur.Body.String() == prev.Body.String() {
+		t.Fatal("offset=1 returned the same body as offset=0")
+	}
+	var prevBody store.SummaryStats
+	json.NewDecoder(prev.Body).Decode(&prevBody)
+	if len(prevBody.Targets) == 0 || prevBody.Targets[0].Count == 0 {
+		t.Fatalf("previous window summary = %+v, want the -30h result", prevBody)
+	}
+}
+
 func TestSummaryCacheEvictsOldestBeyondCap(t *testing.T) {
 	c := newSummaryCache(time.Minute)
 	for i := 0; i < 100; i++ {

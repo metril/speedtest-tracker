@@ -324,8 +324,8 @@ export const listRuns = (scheduleId?: number) =>
 
 export const targetHistory = (id: number, range: Range) =>
   request<History>(`/targets/${id}/history${query({ range })}`);
-export const statsSummary = (range: Range) =>
-  request<SummaryStats>(`/stats/summary${query({ range })}`);
+export const statsSummary = (range: Range, offset?: 0 | 1) =>
+  request<SummaryStats>(`/stats/summary${query({ range, offset })}`);
 export const listOutages = (range: Range) =>
   request<{ from: string; to: string; incidents: Incident[] }>(`/outages${query({ range })}`);
 
