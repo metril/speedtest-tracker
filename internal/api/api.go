@@ -71,8 +71,20 @@ type Deps struct {
 	// that route answers 503.
 	Notifier ChannelTester
 
+	// Auth resolves the identity behind each /api/v1 request. Optional:
+	// nil leaves every route open, which is what the existing handler
+	// tests and the `run --engine` CLI path rely on.
+	Auth Authenticator
+
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
+}
+
+// Authenticator gates the /api/v1 tree. Mode reports the configured mode
+// so GET /api/v1/me can answer without a second settings read.
+type Authenticator interface {
+	Handler(next http.Handler) http.Handler
+	Mode() string
 }
 
 // ChannelTester probes one notification channel for
@@ -117,20 +129,35 @@ func New(deps Deps) http.Handler {
 		})
 	}
 
+	// authMW gates the /api/v1 tree and every route mounted alongside it
+	// (SSE, the CSV export). Deps.Auth nil leaves every route open, which
+	// is what the existing handler tests and the `run --engine` CLI path
+	// rely on. Forgetting to apply authMW to a route mounted outside the
+	// v1.Use call below is how a data endpoint silently stays public.
+	authMW := func(next http.Handler) http.Handler { return next }
+	if deps.Auth != nil {
+		authMW = deps.Auth.Handler
+	}
+
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
-		r.Get("/api/v1/events", sse.Handler(deps.Hub))
+		r.With(authMW).Get("/api/v1/events", sse.Handler(deps.Hub))
 	}
 
 	// The CSV export can run long on a large dataset, so it gets its own,
 	// much longer timeout instead of sharing the 30s v1 group (which would
 	// silently truncate the file mid-stream).
 	if deps.Store != nil {
-		r.With(middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
+		r.With(authMW, middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
 	}
 
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Use(middleware.Timeout(requestTimeout))
+		v1.Use(authMW)
+		// /me must work even on a store-less router (e.g. the `run
+		// --engine` CLI path), since the SPA always calls it first to
+		// decide what to render.
+		v1.Get("/me", deps.me)
 		if deps.Store == nil {
 			return
 		}
@@ -187,6 +214,8 @@ func New(deps Deps) http.Handler {
 		}
 	})
 
+	// The SPA is not gated: it is a static shell that fetches
+	// /api/v1/me itself and renders a sign-in hint on 401.
 	if deps.UI != nil {
 		r.NotFound(deps.UI.ServeHTTP)
 	}

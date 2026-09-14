@@ -14,9 +14,17 @@ import (
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
-// doJSON is an alias for do, used by tests that send/inspect JSON bodies.
-func doJSON(t *testing.T, h http.Handler, method, path string, body any) *httptest.ResponseRecorder {
-	return do(t, h, method, path, body)
+// doJSON is do, plus an optional dest to decode the JSON response body
+// into (dest[0], when given and non-nil).
+func doJSON(t *testing.T, h http.Handler, method, path string, body any, dest ...any) *httptest.ResponseRecorder {
+	t.Helper()
+	rec := do(t, h, method, path, body)
+	if len(dest) > 0 && dest[0] != nil {
+		if err := json.Unmarshal(rec.Body.Bytes(), dest[0]); err != nil {
+			t.Fatalf("decode response: %v (%s)", err, rec.Body.String())
+		}
+	}
+	return rec
 }
 
 // reloadHook lets tests count scheduler reloads triggered by handlers. The
