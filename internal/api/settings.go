@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -279,20 +280,24 @@ func validateSettings(body settingsBody, current settings.Integrations) error {
 		if i.VMEnabled != nil {
 			vmEnabled = *i.VMEnabled
 		}
+		vmURL := current.VMURL
 		if i.VMURL != nil {
-			if err := validateEndpointURL(*i.VMURL, vmEnabled); err != nil {
-				return fmt.Errorf("vm_url: %w", err)
-			}
+			vmURL = *i.VMURL
+		}
+		if err := validateEndpointURL(vmURL, vmEnabled); err != nil {
+			return fmt.Errorf("vm_url: %w", err)
 		}
 
 		vlEnabled := current.VLEnabled
 		if i.VLEnabled != nil {
 			vlEnabled = *i.VLEnabled
 		}
+		vlURL := current.VLURL
 		if i.VLURL != nil {
-			if err := validateEndpointURL(*i.VLURL, vlEnabled); err != nil {
-				return fmt.Errorf("vl_url: %w", err)
-			}
+			vlURL = *i.VLURL
+		}
+		if err := validateEndpointURL(vlURL, vlEnabled); err != nil {
+			return fmt.Errorf("vl_url: %w", err)
 		}
 
 		if i.VMExtraLabels != nil {
@@ -328,6 +333,20 @@ func validateEndpointURL(raw string, enabled bool) error {
 		return fmt.Errorf("must be an absolute http(s) URL")
 	}
 	return nil
+}
+
+// sameOrigin reports whether a and b parse as URLs sharing the same scheme
+// and host. A parse failure on either side is treated as not matching.
+func sameOrigin(a, b string) bool {
+	ua, err := url.Parse(a)
+	if err != nil {
+		return false
+	}
+	ub, err := url.Parse(b)
+	if err != nil {
+		return false
+	}
+	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
 }
 
 // validateKeys checks every key against settingsKeyPattern and rejects
@@ -366,19 +385,30 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		internalError(w, d.Logger, "load integrations", err)
 		return
 	}
-	rawURL, auth := cur.VMURL, cur.VMAuthHeader
+	storedURL, storedAuth := cur.VMURL, cur.VMAuthHeader
 	if target == "vl" {
-		rawURL, auth = cur.VLURL, cur.VLAuthHeader
+		storedURL, storedAuth = cur.VLURL, cur.VLAuthHeader
 	}
+	rawURL := storedURL
 	if body.URL != nil {
 		rawURL = *body.URL
-	}
-	if body.AuthHeader != nil && *body.AuthHeader != settings.MaskedSecret {
-		auth = *body.AuthHeader
 	}
 	if err := validateEndpointURL(rawURL, true); err != nil {
 		errBadRequest(w, err.Error())
 		return
+	}
+
+	// The stored credential is only reused when the effective URL is the
+	// same origin as the stored one; otherwise an unauthenticated caller
+	// could redirect it to an arbitrary host (SSRF + credential exfil).
+	// An explicit, non-masked auth_header is always honored since it is
+	// the caller's own input, not the stored secret.
+	var auth string
+	switch {
+	case body.AuthHeader != nil && *body.AuthHeader != settings.MaskedSecret:
+		auth = *body.AuthHeader
+	case sameOrigin(rawURL, storedURL):
+		auth = storedAuth
 	}
 
 	client := d.TestClient
@@ -387,7 +417,7 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL+"/health", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(rawURL, "/")+"/health", nil)
 	if err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return

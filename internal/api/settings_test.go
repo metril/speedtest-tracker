@@ -109,6 +109,20 @@ func TestPutSettingsValidation(t *testing.T) {
 	}
 }
 
+// TestPutSettingsRejectsEnablingWithoutEffectiveURL is the regression case
+// for the finding that enabling an integration while leaving its stored URL
+// empty (and not supplying a new one in the same request) used to pass
+// validation, since only a body-supplied URL was checked.
+func TestPutSettingsRejectsEnablingWithoutEffectiveURL(t *testing.T) {
+	h, _, _ := newTestAPIWithSettings(t)
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"integrations": map[string]any{"vm_enabled": true},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400 (%s)", rec.Code, rec.Body)
+	}
+}
+
 func TestPutSettingsOnlyTouchesProvidedSections(t *testing.T) {
 	h, _, st := newTestAPIWithSettings(t)
 	ctx := context.Background()
@@ -160,6 +174,26 @@ func TestSettingsTestVMProbesHealth(t *testing.T) {
 	}
 }
 
+// TestSettingsTestTrimsTrailingSlash is the regression case for the finding
+// that a stored/body URL with a trailing slash produced a "//health" probe
+// path.
+func TestSettingsTestTrimsTrailingSlash(t *testing.T) {
+	var path string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, _ := newTestAPIWithSettings(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{"url": srv.URL + "/"})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if path != "/health" {
+		t.Fatalf("path = %q, want /health", path)
+	}
+}
+
 func TestSettingsTestUsesBodyURLAndKeepsStoredSecret(t *testing.T) {
 	var auth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +202,11 @@ func TestSettingsTestUsesBodyURLAndKeepsStoredSecret(t *testing.T) {
 	}))
 	defer srv.Close()
 	h, _, st := newTestAPIWithSettings(t)
-	st.Set(context.Background(), settings.KeyVLAuthHeader, "Bearer stored")
+	ctx := context.Background()
+	// The stored secret is only reused when the body's URL is the same
+	// origin as the stored one.
+	st.Set(ctx, settings.KeyVLURL, srv.URL)
+	st.Set(ctx, settings.KeyVLAuthHeader, "Bearer stored")
 	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vl", map[string]any{
 		"url": srv.URL, "auth_header": settings.MaskedSecret,
 	})
@@ -177,6 +215,38 @@ func TestSettingsTestUsesBodyURLAndKeepsStoredSecret(t *testing.T) {
 	}
 	if auth != "Bearer stored" {
 		t.Fatalf("auth = %q, want the stored secret", auth)
+	}
+}
+
+// TestSettingsTestDoesNotLeakStoredSecretToOtherHost is the regression case
+// for the SSRF/credential-exfil finding: a caller-supplied URL pointing at a
+// different origin than the stored one must never receive the stored
+// Authorization header, whether auth_header is omitted or echoes the mask.
+func TestSettingsTestDoesNotLeakStoredSecretToOtherHost(t *testing.T) {
+	var auth string
+	var sawAuth bool
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		auth, sawAuth = r.Header.Get("Authorization"), r.Header.Get("Authorization") != ""
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer attacker.Close()
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVLURL, "http://vl.internal:9428")
+	st.Set(ctx, settings.KeyVLAuthHeader, "Bearer supersecret")
+
+	for name, body := range map[string]map[string]any{
+		"auth_header omitted": {"url": attacker.URL},
+		"auth_header masked":  {"url": attacker.URL, "auth_header": settings.MaskedSecret},
+	} {
+		sawAuth = false
+		rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vl", body)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status %d", name, rec.Code)
+		}
+		if sawAuth {
+			t.Fatalf("%s: stored secret leaked to a different origin: %q", name, auth)
+		}
 	}
 }
 
