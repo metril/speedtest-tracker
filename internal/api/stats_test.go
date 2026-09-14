@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -33,7 +34,17 @@ func TestSummaryCacheCountedInMetrics(t *testing.T) {
 
 func TestStatsSummaryReturnsTargetsAndCacheHeader(t *testing.T) {
 	h, db, _ := newTestAPI(t)
-	seedResults(t, db, 2)
+	tid, _ := seedResults(t, db, 2)
+	// seedResults uses fixed historical timestamps; the 24h window needs a
+	// result relative to the real clock.
+	if _, err := db.InsertResult(context.Background(), &store.Result{
+		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt:       time.Now().UTC().Add(-time.Minute).Format("2006-01-02T15:04:05.000Z"),
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     1e8,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
 	if rec.Code != http.StatusOK {
