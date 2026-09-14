@@ -54,6 +54,11 @@ type Deps struct {
 // requestTimeout bounds every /api/v1 request except the SSE stream.
 const requestTimeout = 30 * time.Second
 
+// csvExportTimeout bounds /api/v1/results.csv, which runs outside the
+// normal v1 timeout group because a large export can legitimately take
+// longer than requestTimeout.
+const csvExportTimeout = 5 * time.Minute
+
 // New builds the root HTTP handler.
 func New(deps Deps) http.Handler {
 	r := chi.NewRouter()
@@ -69,6 +74,13 @@ func New(deps Deps) http.Handler {
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
 		r.Get("/api/v1/events", sse.Handler(deps.Hub))
+	}
+
+	// The CSV export can run long on a large dataset, so it gets its own,
+	// much longer timeout instead of sharing the 30s v1 group (which would
+	// silently truncate the file mid-stream).
+	if deps.Store != nil {
+		r.With(middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
 	}
 
 	r.Route("/api/v1", func(v1 chi.Router) {
@@ -114,7 +126,6 @@ func New(deps Deps) http.Handler {
 			rs.Post("/{id}/reexecute", deps.reexecuteResult)
 			rs.Put("/{id}/tags", deps.setResultTags)
 		})
-		v1.Get("/results.csv", deps.resultsCSV)
 		v1.Route("/tags", func(tg chi.Router) {
 			tg.Get("/", deps.listTags)
 			tg.Put("/{id}", deps.renameTag)

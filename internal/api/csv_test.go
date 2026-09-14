@@ -1,10 +1,14 @@
 package api
 
 import (
+	"context"
 	"encoding/csv"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 func TestResultsCSVStreamsFilteredRows(t *testing.T) {
@@ -42,5 +46,42 @@ func TestResultsCSVRejectsBadFilter(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/api/v1/results.csv?from=yesterday", nil)
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
+// TestResultsCSVEscapesFormulaInjection guards against a malicious target
+// (or tag/ISP/etc.) name turning into a live formula when the export is
+// opened in a spreadsheet: cells starting with =, +, -, @, tab or CR must
+// be quote-prefixed.
+func TestResultsCSVEscapesFormulaInjection(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	ctx := context.Background()
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "=cmd|' /C calc'!A0", Engine: "fake", Enabled: true, Lane: "wan",
+		Options: json.RawMessage(`{"download_bps":7}`)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.InsertResult(ctx, &store.Result{
+		TargetID: &tid, TargetName: "=cmd|' /C calc'!A0", Engine: "fake", Status: "ok",
+		StartedAt:       "2026-09-13T10:00:00.000Z",
+		OptionsSnapshot: json.RawMessage(`{}`),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	rec := do(t, h, http.MethodGet, "/api/v1/results.csv", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	rows, err := csv.NewReader(rec.Body).ReadAll()
+	if err != nil {
+		t.Fatalf("parse csv: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows = %d: %v", len(rows), rows)
+	}
+	if got := rows[1][3]; !strings.HasPrefix(got, "'=") {
+		t.Errorf("target_name cell = %q, want a leading '=", got)
 	}
 }

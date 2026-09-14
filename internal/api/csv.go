@@ -19,6 +19,21 @@ var csvHeader = []string{
 	"isp", "external_ip", "result_url", "tags",
 }
 
+// csvSafe prefixes s with a single quote when it starts with a character
+// spreadsheet software (Excel, Sheets, LibreOffice) treats as a formula
+// trigger, guarding against CSV formula injection from user- or
+// provider-supplied strings (target names, tags, ISP names, ...).
+func csvSafe(s string) string {
+	if s == "" {
+		return s
+	}
+	switch s[0] {
+	case '=', '+', '-', '@', '\t', '\r':
+		return "'" + s
+	}
+	return s
+}
+
 func csvRow(r *store.Result) []string {
 	num := func(f float64) string { return strconv.FormatFloat(f, 'f', -1, 64) }
 	targetID := ""
@@ -26,12 +41,12 @@ func csvRow(r *store.Result) []string {
 		targetID = strconv.FormatInt(*r.TargetID, 10)
 	}
 	return []string{
-		strconv.FormatInt(r.ID, 10), r.StartedAt, targetID, r.TargetName, r.Engine,
-		r.Status, r.Error, strconv.FormatInt(r.DurationMs, 10),
+		strconv.FormatInt(r.ID, 10), r.StartedAt, targetID, csvSafe(r.TargetName), r.Engine,
+		r.Status, csvSafe(r.Error), strconv.FormatInt(r.DurationMs, 10),
 		num(r.DownloadBps), num(r.UploadBps), num(r.PingMs), num(r.JitterMs),
 		num(r.PacketLossPct), strconv.FormatInt(r.BytesDown, 10), strconv.FormatInt(r.BytesUp, 10),
-		r.ServerID, r.ServerName, r.ISP, r.ExternalIP, r.ResultURL,
-		strings.Join(r.Tags, " "),
+		r.ServerID, csvSafe(r.ServerName), csvSafe(r.ISP), csvSafe(r.ExternalIP), csvSafe(r.ResultURL),
+		csvSafe(strings.Join(r.Tags, " ")),
 	}
 }
 

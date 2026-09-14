@@ -161,6 +161,28 @@ func TestEventsStreamIsNeverGzipCompressed(t *testing.T) {
 	}
 }
 
+// TestResultsCSVRouteDoesNotShadowResultByID verifies that pulling
+// /api/v1/results.csv out of the v1 timeout group (so it can use its own,
+// longer timeout) into a root-level route still leaves it served, and that
+// it does not collide with /api/v1/results/{id} in the process.
+func TestResultsCSVRouteDoesNotShadowResultByID(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	_, ids := seedResults(t, db, 1)
+
+	rec := do(t, h, http.MethodGet, "/api/v1/results.csv", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("results.csv status = %d body=%s", rec.Code, rec.Body)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/csv") {
+		t.Errorf("results.csv Content-Type = %q", ct)
+	}
+
+	rec = do(t, h, http.MethodGet, "/api/v1/results/"+itoa(ids[0]), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("results/{id} status = %d body=%s", rec.Code, rec.Body)
+	}
+}
+
 func TestWriteErrorEnvelope(t *testing.T) {
 	rec := httptest.NewRecorder()
 	writeError(rec, http.StatusBadRequest, "invalid_request", "name is required")
