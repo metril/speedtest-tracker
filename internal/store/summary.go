@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
 )
 
@@ -22,6 +23,14 @@ type TargetSummary struct {
 	AvgUploadBps   float64 `json:"avg_upload_bps"`
 	AvgPingMs      float64 `json:"avg_ping_ms"`
 	MaxPingMs      float64 `json:"max_ping_ms"`
+
+	// SLACompliance is the fraction (0..1) of successful (status='ok')
+	// results in the window whose download and upload speeds both met
+	// this target's effective SLA plan (its own Thresholds override,
+	// falling back to the SLAPlan passed to Summary). nil when neither
+	// the target nor the general plan set a download or upload speed, or
+	// when there were no successful results in the window to judge.
+	SLACompliance *float64 `json:"sla_compliance"`
 }
 
 // SummaryStats is the /stats/summary payload.
@@ -32,14 +41,57 @@ type SummaryStats struct {
 	TotalResults  int             `json:"total_results"`
 	TotalFailures int             `json:"total_failures"`
 	SuccessRate   float64         `json:"success_rate"`
+
+	// SLACompliance is the overall fraction (0..1), weighted by each
+	// target's own successful-result count, across every target with a
+	// resolved SLA plan. nil when no target has one.
+	SLACompliance *float64 `json:"sla_compliance"`
+}
+
+// SLAPlan is the general (fallback) SLA plan speeds, in Mbps, used to
+// resolve a target's effective plan when its own Thresholds don't set
+// sla_download_mbps/sla_upload_mbps. Either field may be nil.
+type SLAPlan struct {
+	DownloadMbps *float64
+	UploadMbps   *float64
+}
+
+// targetSLAOverride mirrors the two SLA fields of settings.Thresholds
+// (sla_download_mbps/sla_upload_mbps). Duplicated here, rather than
+// imported, because internal/settings imports this package.
+type targetSLAOverride struct {
+	SLADownloadMbps *float64 `json:"sla_download_mbps"`
+	SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
+}
+
+// resolvePlan resolves a target's effective SLA plan: its own override
+// (parsed from its thresholds JSON) takes precedence per-field over the
+// general plan. Both returned pointers are nil when neither the target
+// nor the general plan set that field.
+func resolvePlan(thresholdsJSON string, general SLAPlan) (downloadMbps, uploadMbps *float64) {
+	var t targetSLAOverride
+	if thresholdsJSON != "" {
+		_ = json.Unmarshal([]byte(thresholdsJSON), &t) // malformed thresholds: treat as no override
+	}
+	downloadMbps = t.SLADownloadMbps
+	if downloadMbps == nil {
+		downloadMbps = general.DownloadMbps
+	}
+	uploadMbps = t.SLAUploadMbps
+	if uploadMbps == nil {
+		uploadMbps = general.UploadMbps
+	}
+	return downloadMbps, uploadMbps
 }
 
 // Summary returns per-target aggregates over [from,to] plus each target's
 // latest result (which may predate the window, so a quiet target still
-// shows its last known state). Two queries, never one per target.
-func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, error) {
+// shows its last known state). sla is the general SLA plan, resolved per
+// target against its own Thresholds override (see resolvePlan). Three
+// queries total, never one per target.
+func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*SummaryStats, error) {
 	rows, err := s.Read.QueryContext(ctx, `
-		SELECT t.id, t.name, t.engine,
+		SELECT t.id, t.name, t.engine, t.thresholds,
 		       COUNT(r.id),
 		       SUM(CASE WHEN r.status IS NOT NULL AND r.status <> 'ok' THEN 1 ELSE 0 END),
 		       AVG(CASE WHEN r.status='ok' THEN r.download_bps END),
@@ -59,14 +111,20 @@ func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, er
 	defer rows.Close()
 
 	out := &SummaryStats{From: from, To: to, Targets: []TargetSummary{}}
+	// planDL/planUL per target, keyed by target id, resolved once here so
+	// the SLA pass below (over individual results) doesn't need to
+	// re-parse thresholds JSON per row.
+	planDL := map[int64]*float64{}
+	planUL := map[int64]*float64{}
 	for rows.Next() {
 		var (
 			ts               TargetSummary
+			thresholdsJSON   string
 			fails            sql.NullInt64
 			avgD, minD, maxD sql.NullFloat64
 			avgU, avgP, maxP sql.NullFloat64
 		)
-		if err := rows.Scan(&ts.TargetID, &ts.TargetName, &ts.Engine, &ts.Count, &fails,
+		if err := rows.Scan(&ts.TargetID, &ts.TargetName, &ts.Engine, &thresholdsJSON, &ts.Count, &fails,
 			&avgD, &minD, &maxD, &avgU, &avgP, &maxP); err != nil {
 			return nil, fmt.Errorf("scan summary row: %w", err)
 		}
@@ -76,6 +134,7 @@ func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, er
 		if ts.Count > 0 {
 			ts.SuccessRate = float64(ts.Count-ts.FailCount) / float64(ts.Count)
 		}
+		planDL[ts.TargetID], planUL[ts.TargetID] = resolvePlan(thresholdsJSON, sla)
 		out.Targets = append(out.Targets, ts)
 		out.TotalResults += ts.Count
 		out.TotalFailures += ts.FailCount
@@ -85,6 +144,54 @@ func (s *Store) Summary(ctx context.Context, from, to string) (*SummaryStats, er
 	}
 	if out.TotalResults > 0 {
 		out.SuccessRate = float64(out.TotalResults-out.TotalFailures) / float64(out.TotalResults)
+	}
+
+	// SLA compliance pass: one query over every successful result in the
+	// window (across all targets), tallied per target against its
+	// already-resolved plan.
+	slaDenom := map[int64]int{}
+	slaCompliant := map[int64]int{}
+	slaRows, err := s.Read.QueryContext(ctx, `
+		SELECT target_id, download_bps, upload_bps FROM results
+		WHERE status='ok' AND target_id IS NOT NULL AND started_at >= ? AND started_at <= ?`, from, to)
+	if err != nil {
+		return nil, fmt.Errorf("summary sla results: %w", err)
+	}
+	for slaRows.Next() {
+		var targetID int64
+		var downloadBps, uploadBps float64
+		if err := slaRows.Scan(&targetID, &downloadBps, &uploadBps); err != nil {
+			slaRows.Close()
+			return nil, fmt.Errorf("scan summary sla row: %w", err)
+		}
+		dl, ul := planDL[targetID], planUL[targetID]
+		if dl == nil && ul == nil {
+			continue // no plan resolves for this target: not counted
+		}
+		slaDenom[targetID]++
+		if (dl == nil || downloadBps >= *dl*1e6) && (ul == nil || uploadBps >= *ul*1e6) {
+			slaCompliant[targetID]++
+		}
+	}
+	if err := slaRows.Err(); err != nil {
+		slaRows.Close()
+		return nil, fmt.Errorf("summary sla results: %w", err)
+	}
+	slaRows.Close()
+
+	var totalDenom, totalCompliant int
+	for i := range out.Targets {
+		id := out.Targets[i].TargetID
+		if denom := slaDenom[id]; denom > 0 {
+			frac := float64(slaCompliant[id]) / float64(denom)
+			out.Targets[i].SLACompliance = &frac
+			totalDenom += denom
+			totalCompliant += slaCompliant[id]
+		}
+	}
+	if totalDenom > 0 {
+		frac := float64(totalCompliant) / float64(totalDenom)
+		out.SLACompliance = &frac
 	}
 
 	latest, err := s.LatestResults(ctx)

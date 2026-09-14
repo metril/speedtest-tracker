@@ -229,6 +229,8 @@ func TestCreateTargetValidation(t *testing.T) {
 			"thresholds": map[string]any{"download_mbps_min": "not-a-number"}}},
 		{"out of range thresholds", map[string]any{"name": "x", "engine": "fake",
 			"thresholds": map[string]any{"loss_pct_max": -5}}},
+		{"negative sla threshold", map[string]any{"name": "x", "engine": "fake",
+			"thresholds": map[string]any{"sla_download_mbps": -1}}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

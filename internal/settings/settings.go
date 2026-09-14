@@ -23,6 +23,13 @@ type General struct {
 	RetentionDaysResults          int    `json:"retention_days_results"`
 	RetentionDaysRuns             int    `json:"retention_days_runs"`
 	RetentionPruneIntervalMinutes int    `json:"retention_prune_interval_minutes"`
+
+	// SLADownloadMbps/SLAUploadMbps are the general SLA plan speeds used
+	// by the /stats/summary sla_compliance computation, for any target
+	// that doesn't set its own override via Thresholds. nil means no
+	// general plan.
+	SLADownloadMbps *float64 `json:"sla_download_mbps,omitempty"`
+	SLAUploadMbps   *float64 `json:"sla_upload_mbps,omitempty"`
 }
 
 // Keys of the General section.
@@ -34,6 +41,8 @@ const (
 	KeyRetentionDaysResults          = "general.retention_days_results"
 	KeyRetentionDaysRuns             = "general.retention_days_runs"
 	KeyRetentionPruneIntervalMinutes = "general.retention_prune_interval_minutes"
+	KeySLADownloadMbps               = "general.sla_download_mbps"
+	KeySLAUploadMbps                 = "general.sla_upload_mbps"
 )
 
 // MaskedSecret is what the API sends instead of a stored secret, and the
@@ -52,6 +61,8 @@ var defaults = map[string]any{
 	KeyRetentionDaysResults:          90,
 	KeyRetentionDaysRuns:             90,
 	KeyRetentionPruneIntervalMinutes: 60,
+	KeySLADownloadMbps:               (*float64)(nil),
+	KeySLAUploadMbps:                 (*float64)(nil),
 
 	KeySpeedtestBin:             "speedtest",
 	KeyIperf3Bin:                "iperf3",
@@ -163,6 +174,13 @@ type Thresholds struct {
 	JitterMsMax     *float64 `json:"jitter_ms_max,omitempty"`
 	LossPctMax      *float64 `json:"loss_pct_max,omitempty"`
 	NotifyOnFailure *bool    `json:"notify_on_failure,omitempty"`
+
+	// SLADownloadMbps/SLAUploadMbps override the general SLA plan
+	// (General.SLADownloadMbps/SLAUploadMbps) for this target only, per
+	// field independently. nil means "inherit the general plan for this
+	// field", not "no SLA".
+	SLADownloadMbps *float64 `json:"sla_download_mbps,omitempty"`
+	SLAUploadMbps   *float64 `json:"sla_upload_mbps,omitempty"`
 }
 
 // Channel is one notification destination. Which fields matter depends on
@@ -308,6 +326,8 @@ func (s *Store) General(ctx context.Context) (General, error) {
 		KeyRetentionDaysResults:          &g.RetentionDaysResults,
 		KeyRetentionDaysRuns:             &g.RetentionDaysRuns,
 		KeyRetentionPruneIntervalMinutes: &g.RetentionPruneIntervalMinutes,
+		KeySLADownloadMbps:               &g.SLADownloadMbps,
+		KeySLAUploadMbps:                 &g.SLAUploadMbps,
 	}
 	for key, dest := range targets {
 		raw, ok, err := s.Get(ctx, key)

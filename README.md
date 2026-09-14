@@ -305,6 +305,19 @@ avg/min/max download, upload and ping plus the test and failure counts for that
 bucket. `GET /api/v1/stats/summary?range=` is cached in-memory for 30 seconds
 and sent with `Cache-Control: max-age=30`.
 
+### SLA compliance
+
+Setting a plan speed — General settings `sla_download_mbps`/`sla_upload_mbps`,
+or a per-target override via that target's `thresholds.sla_download_mbps`/
+`sla_upload_mbps` (either field independently; an unset field falls back to
+the general plan) — adds `sla_compliance` to `GET /api/v1/stats/summary`: a
+0..1 fraction, per target and overall (the overall figure weighted by each
+target's own successful-result count, not a plain average across targets).
+It is the share of successful (`status=ok`) results in the window whose
+download **and** upload speed both met the resolved plan; `null` when
+neither the target nor the general settings set a plan, or per-target when
+there were no successful results in the window to judge.
+
 ## Outages
 
 `GET /api/v1/outages?from&to&gap_seconds` returns the trouble timeline:

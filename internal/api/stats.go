@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"sync"
 	"time"
+
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 // summaryTTL is how long a computed summary is reused. The dashboard
@@ -110,7 +112,16 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	if d.Metrics != nil {
 		d.Metrics.SummaryCacheMiss()
 	}
-	stats, err := d.Store.Summary(r.Context(), from, to)
+	sla := store.SLAPlan{}
+	if d.Settings != nil {
+		g, err := d.Settings.General(r.Context())
+		if err != nil {
+			internalError(w, d.Logger, "load general settings", err)
+			return
+		}
+		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps}
+	}
+	stats, err := d.Store.Summary(r.Context(), from, to, sla)
 	if err != nil {
 		internalError(w, d.Logger, "summary failed", err)
 		return
