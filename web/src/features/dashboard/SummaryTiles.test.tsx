@@ -19,7 +19,16 @@ it('shows tests, success rate, average download and worst ping', () => {
   expect(screen.getByText('10')).toBeInTheDocument();
   expect(screen.getByText('90%')).toBeInTheDocument();
   expect(screen.getByText('100.0 Mbps')).toBeInTheDocument();
-  expect(screen.getByText('30 ms')).toBeInTheDocument();
+  expect(screen.getByText('30.0 ms')).toBeInTheDocument();
+});
+
+it('shows a dash for worst ping when no target has an ok reading in range', () => {
+  const noOkReadings: SummaryStats = {
+    ...stats,
+    targets: [{ ...stats.targets[0], max_ping_ms: 0 }],
+  };
+  render(<SummaryTiles stats={noOkReadings} />);
+  expect(screen.getByText('—')).toBeInTheDocument();
 });
 
 it('renders an empty state when nothing ran in the window', () => {

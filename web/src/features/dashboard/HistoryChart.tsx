@@ -1,11 +1,16 @@
 import {
   CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts';
-import type { HistoryPoint } from '../../lib/api';
-import { chartSummary } from '../../lib/chart';
+import { chartSummary, formatAxisTick } from '../../lib/chart';
 
-interface Series {
-  key: keyof HistoryPoint;
+/** Row is what HistoryChart plots: a bucket_start plus arbitrary numeric
+ * series columns. Generic over the exact row shape so both single-target
+ * HistoryPoint rows and Dashboard's merged `<key>_<targetId>` rows work
+ * without a cast. */
+export type Row = Record<string, number | string>;
+
+export interface Series<R extends Row = Row> {
+  key: Extract<keyof R, string>;
   label: string;
   color: string;
   unit: (n: number) => string;
@@ -14,8 +19,8 @@ interface Series {
 /** HistoryChart plots pre-downsampled buckets. The server already limited
  * the point count, so this draws exactly what it is given: no client-side
  * aggregation, no dots per point, one gridline axis. */
-export function HistoryChart({ title, points, series, height = 240 }: {
-  title: string; points: HistoryPoint[]; series: Series[]; height?: number;
+export function HistoryChart<R extends Row>({ title, points, series, height = 240 }: {
+  title: string; points: R[]; series: Series<R>[]; height?: number;
 }) {
   if (points.length === 0) {
     return (
@@ -28,7 +33,11 @@ export function HistoryChart({ title, points, series, height = 240 }: {
   const label = `${title}. ${series
     .map((s) => chartSummary(s.label, points.map((p) => Number(p[s.key])), s.unit))
     .join('. ')}.`;
-  const tickTime = (iso: string) =>
+  const first = Date.parse(String(points[0].bucket_start));
+  const last = Date.parse(String(points[points.length - 1].bucket_start));
+  const spanMs = Number.isNaN(first) || Number.isNaN(last) ? 0 : Math.abs(last - first);
+  const tickTime = (iso: string) => formatAxisTick(iso, spanMs);
+  const tooltipTime = (iso: string) =>
     new Date(iso).toLocaleString(undefined, { month: 'short', day: '2-digit', hour: '2-digit', minute: '2-digit' });
 
   return (
@@ -45,7 +54,7 @@ export function HistoryChart({ title, points, series, height = 240 }: {
             <Tooltip
               contentStyle={{ background: 'var(--color-surface)', border: '1px solid var(--color-line)',
                 color: 'var(--color-fg)', fontSize: 12 }}
-              labelFormatter={tickTime}
+              labelFormatter={tooltipTime}
               formatter={(value, name) => {
                 const s = series.find((x) => x.label === name);
                 return [s ? s.unit(Number(value)) : String(value), name];

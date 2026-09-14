@@ -1,7 +1,7 @@
 import { useQueries } from '@tanstack/react-query';
 import { useState } from 'react';
 import { Link } from 'react-router';
-import { HistoryChart } from '../features/dashboard/HistoryChart';
+import { HistoryChart, type Series } from '../features/dashboard/HistoryChart';
 import { OutageStrip } from '../features/dashboard/OutageStrip';
 import { RangePicker } from '../features/dashboard/RangePicker';
 import { SummaryTiles } from '../features/dashboard/SummaryTiles';
@@ -84,30 +84,30 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
   const throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
   const latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
 
-  const throughputSeries = visibleTargets.flatMap((t, i) => [
+  const throughputSeries: Series[] = visibleTargets.flatMap((t, i) => [
     {
-      key: `avg_download_bps_${t.target_id}` as keyof HistoryPoint,
+      key: `avg_download_bps_${t.target_id}`,
       label: `${t.target_name} download`,
       color: COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length],
       unit: formatBps,
     },
     {
-      key: `avg_upload_bps_${t.target_id}` as keyof HistoryPoint,
+      key: `avg_upload_bps_${t.target_id}`,
       label: `${t.target_name} upload`,
       color: COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length],
       unit: formatBps,
     },
   ]);
 
-  const latencySeries = visibleTargets.flatMap((t, i) => [
+  const latencySeries: Series[] = visibleTargets.flatMap((t, i) => [
     {
-      key: `avg_ping_ms_${t.target_id}` as keyof HistoryPoint,
+      key: `avg_ping_ms_${t.target_id}`,
       label: `${t.target_name} ping`,
       color: COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length],
       unit: formatMs,
     },
     {
-      key: `avg_jitter_ms_${t.target_id}` as keyof HistoryPoint,
+      key: `avg_jitter_ms_${t.target_id}`,
       label: `${t.target_name} jitter`,
       color: COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length],
       unit: formatMs,
@@ -132,8 +132,8 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
         </fieldset>
       )}
 
-      <HistoryChart title="Download & upload" points={throughputPoints as unknown as HistoryPoint[]} series={throughputSeries} />
-      <HistoryChart title="Ping & jitter" points={latencyPoints as unknown as HistoryPoint[]} series={latencySeries} />
+      <HistoryChart title="Download & upload" points={throughputPoints} series={throughputSeries} />
+      <HistoryChart title="Ping & jitter" points={latencyPoints} series={latencySeries} />
 
       {outages.data && (
         <OutageStrip incidents={outages.data.incidents} from={outages.data.from} to={outages.data.to} />

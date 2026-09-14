@@ -47,11 +47,12 @@ function Probe() {
 
 function wrap() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const rendered = render(
     <QueryClientProvider client={qc}>
       <LiveRunProvider><Probe /></LiveRunProvider>
     </QueryClientProvider>,
   );
+  return { qc, ...rendered };
 }
 
 describe('LiveRunProvider', () => {
@@ -83,5 +84,29 @@ describe('LiveRunProvider', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('invalidates summary, history and outages on a result event', () => {
+    const { qc } = wrap();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    act(() => emit('result', { id: 1, target_id: 1 }));
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
+    expect(keys).toEqual(expect.arrayContaining(['summary', 'history', 'outages']));
+  });
+
+  it('invalidates summary, history and outages on a terminal run event', () => {
+    const { qc } = wrap();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    act(() => emit('run', { run_id: 1, status: 'done', targets_total: 1, targets_done: 1 }));
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
+    expect(keys).toEqual(expect.arrayContaining(['summary', 'history', 'outages']));
+  });
+
+  it('does not invalidate summary/history/outages on a non-terminal run event', () => {
+    const { qc } = wrap();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
+    expect(keys).not.toEqual(expect.arrayContaining(['summary']));
   });
 });

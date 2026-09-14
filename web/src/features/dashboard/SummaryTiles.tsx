@@ -1,5 +1,5 @@
 import type { SummaryStats } from '../../lib/api';
-import { formatBps, formatPercent } from '../../lib/format';
+import { formatBps, formatMs, formatPercent } from '../../lib/format';
 
 /** Tile renders one label + big value stat. */
 function Tile({ label, value }: { label: string; value: string }) {
@@ -26,10 +26,9 @@ export function SummaryTiles({ stats }: { stats: SummaryStats }) {
   const totalCount = stats.targets.reduce((sum, t) => sum + t.count, 0);
   const avgDownload = totalCount === 0 ? 0
     : stats.targets.reduce((sum, t) => sum + t.avg_download_bps * t.count, 0) / totalCount;
-  // Rendered as a bare "0 ms" (not formatMs's dash-for-zero) when every
-  // target's max_ping_ms is 0 — indistinguishable here from "no data",
-  // but total_results === 0 already routes to the empty state above, so
-  // a literal 0ms reading only occurs with real, if suspiciously low, results.
+  // formatMs renders a dash for a non-positive value, so a target with no
+  // ok reading in range (max_ping_ms left at 0) reads as "no data" rather
+  // than a suspiciously fast "0 ms".
   const worstPing = stats.targets.length === 0 ? 0
     : Math.max(...stats.targets.map((t) => t.max_ping_ms));
 
@@ -38,7 +37,7 @@ export function SummaryTiles({ stats }: { stats: SummaryStats }) {
       <Tile label="Tests" value={String(stats.total_results)} />
       <Tile label="Success rate" value={formatPercent(stats.success_rate)} />
       <Tile label="Avg download" value={formatBps(avgDownload)} />
-      <Tile label="Worst ping" value={`${Math.round(worstPing)} ms`} />
+      <Tile label="Worst ping" value={formatMs(worstPing)} />
     </div>
   );
 }

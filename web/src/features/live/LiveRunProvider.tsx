@@ -33,10 +33,10 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
 
   const onEvent = useCallback((event: LiveRunEvent) => {
     if (event.type === 'result') {
-      if (event.result?.target_id) {
-        qc.setQueryData(queryKeys.targetLatest(event.result.target_id), event.result);
-      }
       qc.invalidateQueries({ queryKey: ['results'] });
+      qc.invalidateQueries({ queryKey: ['summary'] });
+      qc.invalidateQueries({ queryKey: ['history'] });
+      qc.invalidateQueries({ queryKey: ['outages'] });
       return;
     }
     if (event.type === 'run' && event.status) {
@@ -44,6 +44,9 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
       qc.invalidateQueries({ queryKey: queryKeys.runs });
       qc.invalidateQueries({ queryKey: queryKeys.targets });
       qc.invalidateQueries({ queryKey: queryKeys.schedules });
+      qc.invalidateQueries({ queryKey: ['summary'] });
+      qc.invalidateQueries({ queryKey: ['history'] });
+      qc.invalidateQueries({ queryKey: ['outages'] });
     }
   }, [qc]);
 
