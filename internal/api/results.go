@@ -2,10 +2,12 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -120,7 +122,11 @@ func (d Deps) reexecuteResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if _, err := d.Store.GetTarget(r.Context(), *res.TargetID); err != nil {
-		errBadRequest(w, "target of this result no longer exists")
+		if errors.Is(err, store.ErrNotFound) {
+			errBadRequest(w, "target of this result no longer exists")
+		} else {
+			internalError(w, d.Logger, "get target failed", err)
+		}
 		return
 	}
 	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
@@ -158,14 +164,16 @@ func (d Deps) setResultTags(w http.ResponseWriter, r *http.Request) {
 }
 
 // validTagList enforces at most 20 distinct tags, each 1-40 characters
-// after normalisation (trim + lowercase, matching the store's own
+// (runes, not bytes, so multi-byte tags aren't unfairly truncated) after
+// normalisation (trim + lowercase, matching the store's own
 // normalisation). It answers 400 and reports false on a violation.
 func validTagList(w http.ResponseWriter, tags []string) bool {
 	seen := map[string]bool{}
 	distinct := 0
 	for _, t := range tags {
 		norm := strings.ToLower(strings.TrimSpace(t))
-		if len(norm) < 1 || len(norm) > 40 {
+		n := utf8.RuneCountInString(norm)
+		if n < 1 || n > 40 {
 			errBadRequest(w, "each tag must be 1-40 characters after trimming")
 			return false
 		}

@@ -140,6 +140,47 @@ func TestTargetsCRUDRoutes(t *testing.T) {
 	}
 }
 
+// TestCreateTargetExplicitNullOptionsDefaultsToEmptyObject covers decoding
+// an explicit "options": null / "thresholds": null: json.RawMessage stores
+// the literal 4-byte "null" for those, which must not be forwarded to the
+// engine or persisted as-is; it should behave exactly like the field being
+// omitted.
+func TestCreateTargetExplicitNullOptionsDefaultsToEmptyObject(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"options": nil, "thresholds": nil,
+	})
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("POST with null options/thresholds = %d body=%s", rec.Code, rec.Body)
+	}
+	var created store.Target
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if string(created.Options) != "{}" {
+		t.Errorf("options = %s, want {}", created.Options)
+	}
+	if string(created.Thresholds) != "{}" {
+		t.Errorf("thresholds = %s, want {}", created.Thresholds)
+	}
+
+	path := "/api/v1/targets/" + itoa(created.ID)
+	rec = do(t, h, http.MethodPut, path, map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"options": nil, "thresholds": nil,
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("PUT with null options/thresholds = %d body=%s", rec.Code, rec.Body)
+	}
+	var updated store.Target
+	json.NewDecoder(rec.Body).Decode(&updated)
+	if string(updated.Options) != "{}" || string(updated.Thresholds) != "{}" {
+		t.Errorf("after PUT: options=%s thresholds=%s", updated.Options, updated.Thresholds)
+	}
+}
+
 func TestCreateTargetValidation(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 

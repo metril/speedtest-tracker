@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -211,6 +212,24 @@ func TestSetResultTagsValidation(t *testing.T) {
 	ok := many[:20]
 	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": ok}); rec.Code != http.StatusOK {
 		t.Errorf("20 tags = %d, want 200", rec.Code)
+	}
+}
+
+// TestSetResultTagsCountsRunesNotBytes: a 40-rune non-ASCII tag is exactly
+// at the limit and must be accepted (byte length would have rejected it).
+func TestSetResultTagsCountsRunesNotBytes(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	_, ids := seedResults(t, db, 1)
+	path := "/api/v1/results/" + itoa(ids[0]) + "/tags"
+
+	tag := strings.Repeat("é", 40) // 2 bytes/rune in UTF-8, 80 bytes total
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": []string{tag}}); rec.Code != http.StatusOK {
+		t.Errorf("40-rune tag = %d, want 200 body=%s", rec.Code, rec.Body)
+	}
+
+	tooLong := strings.Repeat("é", 41)
+	if rec := do(t, h, http.MethodPut, path, map[string]any{"tags": []string{tooLong}}); rec.Code != http.StatusBadRequest {
+		t.Errorf("41-rune tag = %d, want 400", rec.Code)
 	}
 }
 

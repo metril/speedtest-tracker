@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,6 +14,15 @@ import (
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
+
+// isJSONNull reports whether m is exactly the JSON literal null: decoding a
+// request body's "options": null (or "thresholds": null) into a
+// json.RawMessage field yields the 4-byte literal "null", not an empty/nil
+// slice, so callers must check for it explicitly to fall back to the
+// default document instead of forwarding the literal bytes to the engine.
+func isJSONNull(m json.RawMessage) bool {
+	return bytes.Equal(bytes.TrimSpace(m), []byte("null"))
+}
 
 // Runner is the subset of *runner.Runner the API needs.
 type Runner interface {
@@ -52,10 +62,10 @@ func (d Deps) validateTarget(w http.ResponseWriter, b *targetBody) bool {
 	if b.Lane == "" {
 		b.Lane = "wan"
 	}
-	if len(b.Options) == 0 {
+	if len(b.Options) == 0 || isJSONNull(b.Options) {
 		b.Options = json.RawMessage(`{}`)
 	}
-	if len(b.Thresholds) == 0 {
+	if len(b.Thresholds) == 0 || isJSONNull(b.Thresholds) {
 		b.Thresholds = json.RawMessage(`{}`)
 	}
 	eng, ok := d.Registry.Get(b.Engine)
