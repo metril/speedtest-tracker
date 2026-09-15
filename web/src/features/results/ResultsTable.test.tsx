@@ -72,7 +72,7 @@ describe('ResultsTable delete confirmation', () => {
 });
 
 describe('ResultsTable errors', () => {
-  it('reveals the full error text when a failed row is expanded', async () => {
+  it('shows a View error button for a failed row and opens the error in a dialog', async () => {
     render(
       <ResultsTable
         rows={[makeResult({ id: 3, target_name: 'wan-2', status: 'failed', error: 'dial tcp: i/o timeout' })]}
@@ -83,12 +83,12 @@ describe('ResultsTable errors', () => {
     );
 
     expect(screen.queryByText('dial tcp: i/o timeout')).not.toBeInTheDocument();
-    fireEvent.click(screen.getByText('wan-2'));
+    fireEvent.click(screen.getByRole('button', { name: /view error/i }));
     expect(await screen.findByText('dial tcp: i/o timeout')).toBeInTheDocument();
   });
 
-  it('does not expand a successful row', () => {
-    const { container } = render(
+  it('does not show a View error button for a successful row', () => {
+    render(
       <ResultsTable
         rows={[makeResult({ id: 4, target_name: 'wan-3', status: 'ok' })]}
         onDelete={vi.fn()}
@@ -96,8 +96,7 @@ describe('ResultsTable errors', () => {
         onTag={vi.fn()}
       />,
     );
-    fireEvent.click(screen.getByText('wan-3'));
-    expect(container.querySelector('.text-bad.whitespace-pre-wrap')).toBeNull();
+    expect(screen.queryByRole('button', { name: /view error/i })).not.toBeInTheDocument();
   });
 });
 

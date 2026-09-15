@@ -1,6 +1,8 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useRef, useState } from 'react';
+import { Button } from '../../components/ui/button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
+import { ErrorDialog } from '../../components/ErrorDialog';
 import type { Result } from '../../lib/api';
 import { formatBps, formatDateTime, formatMs, formatRelative } from '../../lib/format';
 
@@ -19,7 +21,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
   const [tagging, setTagging] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Result | null>(null);
-  const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [errorResult, setErrorResult] = useState<Result | null>(null);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -45,84 +47,78 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
           {virtualizer.getVirtualItems().map((item) => {
             const r = rows[item.index];
             const failed = r.status !== 'ok';
-            const isExpanded = failed && expandedId === r.id;
             return (
               <div
                 key={r.id}
-                ref={virtualizer.measureElement}
                 data-index={item.index}
                 role="row"
-                className="absolute left-0 flex w-full flex-col justify-center gap-1 border-b border-line px-3 py-2 text-sm hover:bg-raised"
-                style={{ transform: `translateY(${item.start}px)` }}
+                className="absolute left-0 grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2 border-b border-line px-3 py-2 text-sm hover:bg-raised"
+                style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT }}
               >
-                <div className="grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2">
-                  {failed ? (
-                    <button
-                      type="button"
-                      role="cell"
-                      className="truncate text-left text-fg"
-                      title={r.error || r.server_name}
-                      aria-expanded={isExpanded}
-                      onClick={() => setExpandedId(isExpanded ? null : r.id)}
-                    >
-                      <span className="mr-1 text-bad">●</span>
-                      {r.target_name}
-                    </button>
-                  ) : (
-                    <span role="cell" className="truncate text-fg" title={r.server_name}>
-                      {r.target_name}
-                    </span>
-                  )}
-                  <span role="cell" className="font-mono text-xs uppercase text-muted">{r.engine}</span>
-                  <span role="cell" className="font-mono tabular-nums text-fg">{formatBps(r.download_bps)}</span>
-                  <span role="cell" className="font-mono tabular-nums text-muted">{formatBps(r.upload_bps)}</span>
-                  <span role="cell" className="font-mono tabular-nums text-muted">{formatMs(r.ping_ms)}</span>
-                  <span role="cell" className="flex flex-wrap gap-1">
-                    {r.tags.map((t) => (
-                      <span key={t} className="rounded bg-raised px-1.5 text-xs text-muted">{t}</span>
-                    ))}
-                    {tagging === r.id ? (
-                      <input
-                        autoFocus
-                        aria-label="Tags"
-                        className="w-32 rounded border border-line bg-surface px-1 text-xs text-fg"
-                        value={draft}
-                        onChange={(e) => setDraft(e.target.value)}
-                        onBlur={() => setTagging(null)}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter') return;
-                          onTag(r.id, draft.split(',').map((s) => s.trim()).filter(Boolean));
-                          setTagging(null);
-                        }}
-                      />
-                    ) : (
-                      <button className="text-xs text-faint hover:text-accent"
-                        onClick={() => { setTagging(r.id); setDraft(r.tags.join(', ')); }}>
-                        + tag
-                      </button>
+                {failed ? (
+                  <span role="cell" className="flex min-w-0 items-center gap-1 text-fg" title={r.server_name}>
+                    <span className="text-bad">●</span>
+                    <span className="truncate">{r.target_name}</span>
+                    {r.error && (
+                      <Button
+                        type="button" variant="ghost" size="sm" className="h-6 shrink-0 px-1.5 text-xs"
+                        onClick={() => setErrorResult(r)}
+                      >
+                        View error
+                      </Button>
                     )}
                   </span>
-                  <span role="cell" className="flex items-center justify-end gap-2 text-xs text-muted">
-                    <span title={formatDateTime(r.started_at)}>{formatRelative(r.started_at)}</span>
-                    <button
-                      className="text-accent hover:opacity-80"
-                      aria-label={`Replay result for ${r.target_name}`}
-                      onClick={() => onReexecute(r.id)}
-                    >
-                      replay
-                    </button>
-                    <button
-                      className="text-bad hover:opacity-80"
-                      aria-label={`Delete result for ${r.target_name}`}
-                      onClick={() => setConfirmDelete(r)}
-                    >
-                      del
-                    </button>
+                ) : (
+                  <span role="cell" className="truncate text-fg" title={r.server_name}>
+                    {r.target_name}
                   </span>
-                </div>
-                {isExpanded && r.error && (
-                  <p className="text-bad whitespace-pre-wrap max-h-32 overflow-auto text-xs">{r.error}</p>
                 )}
+                <span role="cell" className="font-mono text-xs uppercase text-muted">{r.engine}</span>
+                <span role="cell" className="font-mono tabular-nums text-fg">{formatBps(r.download_bps)}</span>
+                <span role="cell" className="font-mono tabular-nums text-muted">{formatBps(r.upload_bps)}</span>
+                <span role="cell" className="font-mono tabular-nums text-muted">{formatMs(r.ping_ms)}</span>
+                <span role="cell" className="flex flex-wrap gap-1">
+                  {r.tags.map((t) => (
+                    <span key={t} className="rounded bg-raised px-1.5 text-xs text-muted">{t}</span>
+                  ))}
+                  {tagging === r.id ? (
+                    <input
+                      autoFocus
+                      aria-label="Tags"
+                      className="w-32 rounded border border-line bg-surface px-1 text-xs text-fg"
+                      value={draft}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onBlur={() => setTagging(null)}
+                      onKeyDown={(e) => {
+                        if (e.key !== 'Enter') return;
+                        onTag(r.id, draft.split(',').map((s) => s.trim()).filter(Boolean));
+                        setTagging(null);
+                      }}
+                    />
+                  ) : (
+                    <button className="text-xs text-faint hover:text-accent"
+                      onClick={() => { setTagging(r.id); setDraft(r.tags.join(', ')); }}>
+                      + tag
+                    </button>
+                  )}
+                </span>
+                <span role="cell" className="flex items-center justify-end gap-2 text-xs text-muted">
+                  <span title={formatDateTime(r.started_at)}>{formatRelative(r.started_at)}</span>
+                  <button
+                    className="text-accent hover:opacity-80"
+                    aria-label={`Replay result for ${r.target_name}`}
+                    onClick={() => onReexecute(r.id)}
+                  >
+                    replay
+                  </button>
+                  <button
+                    className="text-bad hover:opacity-80"
+                    aria-label={`Delete result for ${r.target_name}`}
+                    onClick={() => setConfirmDelete(r)}
+                  >
+                    del
+                  </button>
+                </span>
               </div>
             );
           })}
@@ -136,6 +132,13 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
         title={confirmDelete ? `Delete this result for ${confirmDelete.target_name}?` : ''}
         confirmLabel="Delete"
         onConfirm={() => { if (confirmDelete) onDelete(confirmDelete.id); }}
+      />
+
+      <ErrorDialog
+        open={errorResult !== null}
+        onOpenChange={(v) => { if (!v) setErrorResult(null); }}
+        title={errorResult ? errorResult.target_name : ''}
+        error={errorResult?.error ?? ''}
       />
     </div>
   );

@@ -37,17 +37,18 @@ it('marks a failing target and still offers Run now', async () => {
   expect(onRun).toHaveBeenCalledWith(1);
 });
 
-it('shows the latest error, truncated with the full text in a title, when the latest result failed', () => {
+it('opens a dialog with the full error text when View error is clicked', async () => {
   render(<TargetCard
     summary={{ ...summary, latest: { ...summary.latest!, status: 'failed', error: 'dial tcp: connection refused' } }}
     spark={[]} onRun={() => {}} running={false} />);
-  const error = screen.getByText('dial tcp: connection refused');
-  expect(error).toHaveAttribute('title', 'dial tcp: connection refused');
+  expect(screen.queryByText('dial tcp: connection refused')).not.toBeInTheDocument();
+  await userEvent.click(screen.getByRole('button', { name: /view error/i }));
+  expect(await screen.findByText('dial tcp: connection refused')).toBeInTheDocument();
 });
 
-it('does not show an error line for a successful result', () => {
+it('does not show a View error button for a successful result', () => {
   render(<TargetCard summary={summary} spark={[]} onRun={() => {}} running={false} />);
-  expect(screen.queryByTitle(/./)).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /view error/i })).not.toBeInTheDocument();
 });
 
 it('renders a never-run card without a latest result', () => {

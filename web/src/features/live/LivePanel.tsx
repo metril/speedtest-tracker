@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
+import { Button } from '@/components/ui/button';
+import { ErrorDialog } from '@/components/ErrorDialog';
 import { formatBps, formatLoss, formatMs } from '../../lib/format';
 import { useCancelRun } from '../../lib/queries';
 import type { LiveRun } from '../../lib/useLiveRun';
@@ -64,6 +66,7 @@ export function LivePanel() {
 function ExpandedPanel({ live, onClose, onCancel, canceling }: {
   live: LiveRun; onClose: () => void; onCancel: () => void; canceling: boolean;
 }) {
+  const [errorOpen, setErrorOpen] = useState(false);
   // Escape closes the dialog, and focus returns to whatever had it before
   // the dialog opened (the "Expand live test" / "Run now" button).
   useEffect(() => {
@@ -121,7 +124,9 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
         <Stepper total={live.targetsTotal} done={live.targetsDone} />
 
         {live.finished && live.status !== 'done' && live.error && (
-          <p className="text-bad whitespace-pre-wrap max-h-32 overflow-auto text-sm">{live.error}</p>
+          <Button type="button" variant="outline" size="sm" className="w-fit" onClick={() => setErrorOpen(true)}>
+            View error
+          </Button>
         )}
 
         <footer className="mt-auto flex items-center gap-3">
@@ -148,6 +153,9 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
           )}
         </footer>
       </aside>
+      {live.finished && live.status !== 'done' && live.error && (
+        <ErrorDialog open={errorOpen} onOpenChange={setErrorOpen} title="Live test failed" error={live.error} />
+      )}
     </div>
   );
 }

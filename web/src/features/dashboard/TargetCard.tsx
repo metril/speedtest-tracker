@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
+import { ErrorDialog } from '@/components/ErrorDialog';
 import type { Result, ThresholdSet, TargetSummary } from '../../lib/api';
 import { formatBps, formatMs, formatRelative } from '../../lib/format';
 import { MiniSparkline } from './MiniSparkline';
@@ -53,6 +55,7 @@ export function TargetCard({
   const { latest } = summary;
   const status = thresholdStatus(latest, thresholds);
   const badge = THRESHOLD_BADGE[status];
+  const [errorOpen, setErrorOpen] = useState(false);
 
   return (
     <Card>
@@ -100,7 +103,12 @@ export function TargetCard({
             </div>
             <p className="mt-1 text-xs text-muted">{formatRelative(latest.started_at)}</p>
             {latest.status !== 'ok' && latest.error && (
-              <p className="mt-1 truncate text-xs text-bad" title={latest.error}>{latest.error}</p>
+              <Button
+                type="button" variant="outline" size="sm" className="mt-1 h-6 px-2 text-xs"
+                onClick={() => setErrorOpen(true)}
+              >
+                View error
+              </Button>
             )}
             <div className="mt-2">
               <MiniSparkline samples={spark} />
@@ -108,6 +116,12 @@ export function TargetCard({
           </>
         )}
       </CardContent>
+      {latest && latest.status !== 'ok' && latest.error && (
+        <ErrorDialog
+          open={errorOpen} onOpenChange={setErrorOpen}
+          title={summary.target_name} error={latest.error}
+        />
+      )}
     </Card>
   );
 }

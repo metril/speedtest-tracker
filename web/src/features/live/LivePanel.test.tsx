@@ -93,20 +93,22 @@ describe('LivePanel', () => {
     expect(screen.getByRole('link', { name: /view result/i })).toHaveAttribute('href', '/results?result_id=42');
   });
 
-  it('shows the error when the run finished with a non-done status', () => {
+  it('opens a dialog with the error when View error is clicked for a non-done finished run', async () => {
     renderPanel({
       live: live({ finished: true, status: 'failed', error: 'dial tcp: connection refused' }),
       expanded: true, open: vi.fn(), close: vi.fn(),
     });
-    expect(screen.getByText('dial tcp: connection refused')).toBeInTheDocument();
+    expect(screen.queryByText('dial tcp: connection refused')).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: /view error/i }));
+    expect(await screen.findByText('dial tcp: connection refused')).toBeInTheDocument();
   });
 
-  it('does not show an error block for a successfully finished run', () => {
+  it('does not show a View error button for a successfully finished run', () => {
     renderPanel({
       live: live({ finished: true, status: 'done', error: '' }),
       expanded: true, open: vi.fn(), close: vi.fn(),
     });
-    expect(screen.queryByText('dial tcp: connection refused')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /view error/i })).not.toBeInTheDocument();
   });
 
   it('closes on Escape', async () => {
