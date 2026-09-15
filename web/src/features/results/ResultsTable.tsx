@@ -19,6 +19,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
   const [tagging, setTagging] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Result | null>(null);
+  const [expandedId, setExpandedId] = useState<number | null>(null);
 
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -43,18 +44,35 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
         <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
           {virtualizer.getVirtualItems().map((item) => {
             const r = rows[item.index];
+            const failed = r.status !== 'ok';
+            const isExpanded = failed && expandedId === r.id;
             return (
               <div
                 key={r.id}
+                ref={virtualizer.measureElement}
+                data-index={item.index}
                 role="row"
-                className="absolute left-0 flex w-full items-center border-b border-line px-3 text-sm hover:bg-raised"
-                style={{ height: item.size, transform: `translateY(${item.start}px)` }}
+                className="absolute left-0 flex w-full flex-col justify-center gap-1 border-b border-line px-3 py-2 text-sm hover:bg-raised"
+                style={{ transform: `translateY(${item.start}px)` }}
               >
                 <div className="grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2">
-                  <span role="cell" className="truncate text-fg" title={r.error || r.server_name}>
-                    {r.status !== 'ok' && <span className="mr-1 text-bad">●</span>}
-                    {r.target_name}
-                  </span>
+                  {failed ? (
+                    <button
+                      type="button"
+                      role="cell"
+                      className="truncate text-left text-fg"
+                      title={r.error || r.server_name}
+                      aria-expanded={isExpanded}
+                      onClick={() => setExpandedId(isExpanded ? null : r.id)}
+                    >
+                      <span className="mr-1 text-bad">●</span>
+                      {r.target_name}
+                    </button>
+                  ) : (
+                    <span role="cell" className="truncate text-fg" title={r.server_name}>
+                      {r.target_name}
+                    </span>
+                  )}
                   <span role="cell" className="font-mono text-xs uppercase text-muted">{r.engine}</span>
                   <span role="cell" className="font-mono tabular-nums text-fg">{formatBps(r.download_bps)}</span>
                   <span role="cell" className="font-mono tabular-nums text-muted">{formatBps(r.upload_bps)}</span>
@@ -102,6 +120,9 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                     </button>
                   </span>
                 </div>
+                {isExpanded && r.error && (
+                  <p className="text-bad whitespace-pre-wrap max-h-32 overflow-auto text-xs">{r.error}</p>
+                )}
               </div>
             );
           })}

@@ -71,6 +71,36 @@ describe('ResultsTable delete confirmation', () => {
   });
 });
 
+describe('ResultsTable errors', () => {
+  it('reveals the full error text when a failed row is expanded', async () => {
+    render(
+      <ResultsTable
+        rows={[makeResult({ id: 3, target_name: 'wan-2', status: 'failed', error: 'dial tcp: i/o timeout' })]}
+        onDelete={vi.fn()}
+        onReexecute={vi.fn()}
+        onTag={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByText('dial tcp: i/o timeout')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText('wan-2'));
+    expect(await screen.findByText('dial tcp: i/o timeout')).toBeInTheDocument();
+  });
+
+  it('does not expand a successful row', () => {
+    const { container } = render(
+      <ResultsTable
+        rows={[makeResult({ id: 4, target_name: 'wan-3', status: 'ok' })]}
+        onDelete={vi.fn()}
+        onReexecute={vi.fn()}
+        onTag={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByText('wan-3'));
+    expect(container.querySelector('.text-bad.whitespace-pre-wrap')).toBeNull();
+  });
+});
+
 describe('ResultsTable accessibility', () => {
   it('exposes a table/row/cell role structure and labeled action buttons', () => {
     render(

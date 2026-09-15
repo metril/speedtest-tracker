@@ -29,6 +29,9 @@ export interface LiveRun {
   /** finished is true once the run reached a terminal status; the panel
    * keeps showing the settled values instead of blanking. */
   finished: boolean;
+  /** error is the run-level failure message (RunPayload.error), set once
+   * the run finishes with a non-"done" status. */
+  error: string;
 }
 
 export interface LiveRunEvent {
@@ -58,6 +61,7 @@ interface ProgressPayload {
 interface RunPayload {
   run_id: number;
   status: string;
+  error?: string;
   targets_total?: number;
   targets_done?: number;
 }
@@ -124,6 +128,7 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
           targetsDone: sameRun ? prev!.targetsDone : 0,
           samples: next,
           finished: false,
+          error: sameRun ? prev!.error : '',
         };
       });
     };
@@ -180,6 +185,7 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
             targetsDone: r.targets_done ?? 0,
             samples: [],
             finished: TERMINAL.has(r.status),
+            error: r.error ?? '',
           };
         }
         return {
@@ -188,6 +194,7 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
           finished: TERMINAL.has(r.status),
           targetsTotal: r.targets_total ?? prev.targetsTotal,
           targetsDone: r.targets_done ?? prev.targetsDone,
+          error: r.error ?? prev.error,
         };
       });
     };

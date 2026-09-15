@@ -189,6 +189,19 @@ describe('useLiveRun', () => {
     }
   });
 
+  it('parses the error from a run event that creates the run state', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('run', { run_id: 1, status: 'failed', targets_total: 1, targets_done: 0, error: 'dial tcp: timeout' }));
+    expect(result.current?.error).toBe('dial tcp: timeout');
+  });
+
+  it('parses the error from a run event that updates existing run state', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9 }));
+    act(() => emit('run', { run_id: 1, status: 'failed', targets_total: 1, targets_done: 1, error: 'connection refused' }));
+    expect(result.current?.error).toBe('connection refused');
+  });
+
   it('does not go stale once the run already finished normally', () => {
     vi.useFakeTimers();
     try {

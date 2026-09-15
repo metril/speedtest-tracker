@@ -99,6 +99,9 @@ export function TargetCard({
               </div>
             </div>
             <p className="mt-1 text-xs text-muted">{formatRelative(latest.started_at)}</p>
+            {latest.status !== 'ok' && latest.error && (
+              <p className="mt-1 truncate text-xs text-bad" title={latest.error}>{latest.error}</p>
+            )}
             <div className="mt-2">
               <MiniSparkline samples={spark} />
             </div>

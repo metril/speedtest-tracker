@@ -12,7 +12,7 @@ function live(overrides: Partial<LiveRun> = {}): LiveRun {
     runId: 1, targetId: 2, resultId: 0, engine: 'ookla', phase: 'download',
     progress: 0.4, bps: 240_000_000, pingMs: 8.2, jitterMs: 1.1, lossPct: 0,
     serverName: 'Init7 Zurich', isp: 'Init7', status: 'running',
-    targetsTotal: 2, targetsDone: 1, samples: [1e6, 2e6, 3e6], finished: false,
+    targetsTotal: 2, targetsDone: 1, samples: [1e6, 2e6, 3e6], finished: false, error: '',
     ...overrides,
   };
 }
@@ -91,6 +91,22 @@ describe('LivePanel', () => {
       expanded: true, open: vi.fn(), close: vi.fn(),
     });
     expect(screen.getByRole('link', { name: /view result/i })).toHaveAttribute('href', '/results?result_id=42');
+  });
+
+  it('shows the error when the run finished with a non-done status', () => {
+    renderPanel({
+      live: live({ finished: true, status: 'failed', error: 'dial tcp: connection refused' }),
+      expanded: true, open: vi.fn(), close: vi.fn(),
+    });
+    expect(screen.getByText('dial tcp: connection refused')).toBeInTheDocument();
+  });
+
+  it('does not show an error block for a successfully finished run', () => {
+    renderPanel({
+      live: live({ finished: true, status: 'done', error: '' }),
+      expanded: true, open: vi.fn(), close: vi.fn(),
+    });
+    expect(screen.queryByText('dial tcp: connection refused')).not.toBeInTheDocument();
   });
 
   it('closes on Escape', async () => {

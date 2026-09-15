@@ -120,6 +120,10 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
 
         <Stepper total={live.targetsTotal} done={live.targetsDone} />
 
+        {live.finished && live.status !== 'done' && live.error && (
+          <p className="text-bad whitespace-pre-wrap max-h-32 overflow-auto text-sm">{live.error}</p>
+        )}
+
         <footer className="mt-auto flex items-center gap-3">
           {live.finished ? (
             <>
