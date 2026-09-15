@@ -444,7 +444,7 @@ Identity and auth endpoints:
   result_id, at`) with any configured headers. `apprise` delivers through an
   embedded copy of [apprise-go](https://github.com/unraid/apprise-go) — no
   external Apprise API server to run — fanning the alert out to every URL
-  configured on the channel, e.g. `ntfy://ntfy.sh/mytopic` or
+  configured on the channel, e.g. `ntfys://ntfy.sh/mytopic` or
   `discord://webhook_id/webhook_token`; see apprise-go's README for the full
   list of supported services and URL formats. Each channel has a **Test**
   button, which uses the *saved* channel — save before testing.

@@ -63,9 +63,16 @@ func migrateNtfyChannel(ch settings.Channel, logger *slog.Logger) settings.Chann
 
 // buildNtfyURL turns a legacy ntfy channel's full topic URL (e.g.
 // "https://ntfy.sh/mytopic" or "https://ntfy.example.com/mytopic") into
-// the apprise-go equivalent: "ntfy://[token@]host/topic?priority=&tags=",
+// the apprise-go equivalent: "ntfy://host/topic?token=&priority=&tags=",
 // carrying over ch.Token, ch.Priority and ch.Tags. ntfys:// is used when
 // the original URL was https, ntfy:// (plain HTTP) when it was http.
+//
+// The token travels as a "token" query parameter rather than URL
+// userinfo: apprise-go's ntfy target (internal/notify/ntfy.go) only
+// selects bearer auth (Authorization: Bearer <token>, matching the old
+// ntfy channel's own header) when the token comes from that query
+// parameter — a bare "token@host" userinfo is instead sent as HTTP Basic
+// auth with an empty password, which is not equivalent.
 func buildNtfyURL(ch settings.Channel) (string, error) {
 	u, err := url.Parse(strings.TrimSpace(ch.URL))
 	if err != nil {
@@ -82,11 +89,11 @@ func buildNtfyURL(ch settings.Channel) (string, error) {
 
 	topic := strings.Trim(u.Path, "/")
 	built := url.URL{Scheme: scheme, Host: u.Host, Path: "/" + topic}
-	if ch.Token != "" {
-		built.User = url.User(ch.Token)
-	}
 
 	q := url.Values{}
+	if ch.Token != "" {
+		q.Set("token", ch.Token)
+	}
 	if ch.Priority != "" {
 		q.Set("priority", ch.Priority)
 	}

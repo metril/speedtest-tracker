@@ -20,9 +20,12 @@ interface Props {
 }
 
 /** ChannelEditor edits one notification channel. Changing Type keeps all
- * fields (url, headers, tags, urls) in local state so a type flip-flop
- * doesn't lose data such as a saved Apprise URL list; fields the new
- * type doesn't use are only stripped when the form is submitted. */
+ * fields (url, headers, urls) in local state so a type flip-flop doesn't
+ * lose data such as a saved Apprise URL list; fields the new type
+ * doesn't use are only stripped when the form is submitted. Tags is not
+ * editable here: apprise-go (the embedded delivery library) has no tag
+ * option, so it would be inert; the field still exists on the model
+ * because ntfy-channel migration reads it from legacy stored data. */
 export function ChannelEditor({
   value, onChange, onRemove, onTest, testResult, testPending, unsaved,
 }: Props) {
@@ -81,17 +84,6 @@ export function ChannelEditor({
           <textarea id={`channel-${id}-urls`} className={inputClass}
             value={(value.urls ?? []).join('\n')}
             onChange={(e) => onChange({ ...value, urls: e.target.value.split('\n') })} />
-        </FormField>
-      )}
-
-      {value.type === 'apprise' && (
-        <FormField id={`channel-${id}-tags`} label="Tags">
-          <Input id={`channel-${id}-tags`}
-            value={(value.tags ?? []).join(', ')}
-            onChange={(e) => onChange({
-              ...value,
-              tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
-            })} />
         </FormField>
       )}
 

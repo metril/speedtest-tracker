@@ -3,9 +3,12 @@ package notify_test
 import (
 	"bytes"
 	"log/slog"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
+
+	apprise "github.com/unraid/apprise-go"
 
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/settings"
@@ -39,11 +42,22 @@ func TestMigrateNtfyChannelsRewritesToApprise(t *testing.T) {
 		t.Fatalf("urls = %v, want one", migrated.URLs)
 	}
 	got := migrated.URLs[0]
-	if !strings.HasPrefix(got, "ntfys://tk_1@ntfy.example.com/speedtest?") {
-		t.Fatalf("url = %q, want ntfys://tk_1@ntfy.example.com/speedtest?...", got)
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatalf("built url %q does not parse: %v", got, err)
 	}
-	if !strings.Contains(got, "priority=high") || !strings.Contains(got, "tags=warning") {
-		t.Fatalf("url = %q, want priority and tags carried over", got)
+	if parsed.Scheme != "ntfys" || parsed.Host != "ntfy.example.com" || parsed.Path != "/speedtest" {
+		t.Fatalf("url = %q, want ntfys://ntfy.example.com/speedtest", got)
+	}
+	if parsed.User != nil {
+		t.Fatalf("url = %q, want no userinfo (bearer token must travel as ?token=, not user@host)", got)
+	}
+	q := parsed.Query()
+	if q.Get("token") != "tk_1" || q.Get("priority") != "high" || q.Get("tags") != "warning" {
+		t.Fatalf("query = %v, want token/priority/tags carried over", q)
+	}
+	if err := apprise.New().Add(got); err != nil {
+		t.Fatalf("apprise-go rejects the built url %q: %v", got, err)
 	}
 
 	// Untouched: the non-ntfy channel passes through unchanged.

@@ -68,16 +68,13 @@ describe('ChannelEditor', () => {
     expect(onTest).not.toHaveBeenCalled();
   });
 
-  it('joins tags for display and splits edits back into an array', async () => {
-    const onChange = vi.fn();
+  it('does not render a Tags field for apprise (apprise-go has no tag option)', async () => {
     const appriseChannel: NotifyChannel = {
       id: 'c2', type: 'apprise', name: 'phone', enabled: true, url: '', tags: ['a', 'b'],
     };
     render(
-      <ChannelEditor value={appriseChannel} onChange={onChange} onRemove={vi.fn()} onTest={vi.fn()} />,
+      <ChannelEditor value={appriseChannel} onChange={vi.fn()} onRemove={vi.fn()} onTest={vi.fn()} />,
     );
-    expect(screen.getByLabelText('Tags')).toHaveValue('a, b');
-    await userEvent.type(screen.getByLabelText('Tags'), 'c');
-    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ tags: ['a', 'bc'] }));
+    expect(screen.queryByLabelText('Tags')).not.toBeInTheDocument();
   });
 });

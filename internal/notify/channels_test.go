@@ -115,7 +115,6 @@ func TestValidateChannel(t *testing.T) {
 		{"bad type", settings.Channel{ID: "c1", Type: "pigeon", URL: "https://x"}, "type"},
 		{"bad url", settings.Channel{ID: "c1", Type: "webhook", URL: "ftp://x"}, "url"},
 		{"no id", settings.Channel{Type: "webhook", URL: "https://x"}, "id"},
-		{"bad priority", settings.Channel{ID: "c", Type: "webhook", URL: "https://x", Priority: "loudest"}, "priority"},
 		{"ok apprise", settings.Channel{ID: "c1", Type: "apprise", URLs: []string{"ntfy://host/topic"}}, ""},
 		{"apprise no urls", settings.Channel{ID: "c1", Type: "apprise"}, "urls"},
 		{"apprise bad url", settings.Channel{ID: "c1", Type: "apprise", URLs: []string{"not-a-valid-scheme://x"}}, "apprise url"},

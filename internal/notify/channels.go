@@ -18,7 +18,6 @@ import (
 )
 
 var validChannelTypes = map[string]bool{"webhook": true, "apprise": true}
-var validPriorities = map[string]bool{"min": true, "low": true, "default": true, "high": true, "max": true}
 
 // ValidateChannel checks a Channel for well-formedness before it is stored
 // or used for delivery. apprise channels are validated by URLs (each must
@@ -50,9 +49,6 @@ func ValidateChannel(ch settings.Channel) error {
 		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 			return fmt.Errorf("channel %s: url must be an absolute http(s) URL", name)
 		}
-	}
-	if ch.Priority != "" && !validPriorities[ch.Priority] {
-		return fmt.Errorf("channel %s: priority must be one of min, low, default, high, max", name)
 	}
 	for k := range ch.Headers {
 		if !isValidHTTPToken(k) {
