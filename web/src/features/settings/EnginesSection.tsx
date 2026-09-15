@@ -1,55 +1,84 @@
-import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
-import { SwitchField } from '../../components/SwitchField';
+import { Switch } from '@/components/ui/switch';
+import { SettingsCard, SettingsRow, useSettingsRowField } from '../../components/settings';
 import { Iperf3ServerListSection } from './Iperf3ServerListSection';
-import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
+function TextField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const props = useSettingsRowField();
+  return <Input {...props} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function NumberField({ value, onChange }: { value: number; onChange: (v: number) => void }) {
+  const props = useSettingsRowField();
+  return <Input {...props} type="number" min={1} value={value} onChange={(e) => onChange(Number(e.target.value))} />;
+}
+
+function SwitchControl({ checked, onCheckedChange }: { checked: boolean; onCheckedChange: (v: boolean) => void }) {
+  const props = useSettingsRowField();
+  return (
+    <div className="flex justify-end">
+      <Switch {...props} checked={checked} onCheckedChange={onCheckedChange} />
+    </div>
+  );
+}
+
 export function EnginesSection() {
-  const { engines, setEngines, saving, error, saved, save, readOnly } = useSettingsSection('engines');
+  const { engines, setEngines } = useSettingsSection('engines');
 
   return (
-    <Section
-      id="engines-heading" title="Engines" saving={saving}
-      error={error} saved={saved} readOnly={readOnly}
-      onSave={() => save('engines', { engines })}
-    >
-      <FormField id="engines-speedtest-bin" label="Speedtest binary path">
-        <Input id="engines-speedtest-bin" value={engines.speedtest_bin}
-          onChange={(e) => setEngines({ ...engines, speedtest_bin: e.target.value })} />
-      </FormField>
-      <FormField id="engines-iperf3-bin" label="iperf3 binary path">
-        <Input id="engines-iperf3-bin" value={engines.iperf3_bin}
-          onChange={(e) => setEngines({ ...engines, iperf3_bin: e.target.value })} />
-      </FormField>
-      <SwitchField
-        id="engines-ookla-accept-license" label="Accept Ookla license"
-        checked={engines.ookla_accept_license}
-        onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_license: checked })}
-      />
-      <SwitchField
-        id="engines-ookla-accept-gdpr" label="Accept Ookla GDPR terms"
-        checked={engines.ookla_accept_gdpr}
-        onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_gdpr: checked })}
-      />
-      <FormField id="engines-ttl" label="Server list TTL (seconds)">
-        <Input id="engines-ttl" type="number" min={1}
-          value={engines.server_list_ttl_seconds}
-          onChange={(e) => setEngines({ ...engines, server_list_ttl_seconds: Number(e.target.value) })} />
-      </FormField>
+    <div className="grid gap-6">
+      <SettingsCard title="Binaries">
+        <SettingsRow label="Speedtest binary path" htmlFor="engines-speedtest-bin" lockKey="engines.speedtest_bin">
+          <TextField value={engines.speedtest_bin} onChange={(v) => setEngines({ ...engines, speedtest_bin: v })} />
+        </SettingsRow>
+        <SettingsRow label="iperf3 binary path" htmlFor="engines-iperf3-bin" lockKey="engines.iperf3_bin">
+          <TextField value={engines.iperf3_bin} onChange={(v) => setEngines({ ...engines, iperf3_bin: v })} />
+        </SettingsRow>
+      </SettingsCard>
 
-      <div className="grid gap-2 border-t border-line pt-4">
-        <h3 className="text-sm font-semibold text-fg">iperf3 server list</h3>
-        <p className="text-sm text-faint">
-          A cached list of public iperf3 servers, refreshed daily, used by the target form's
-          &quot;Pick from public list&quot; picker. Clear the URL to disable the list entirely.
-        </p>
-        <FormField id="engines-iperf3-list-url" label="iperf3 server list URL">
-          <Input id="engines-iperf3-list-url" value={engines.iperf3_list_url}
-            onChange={(e) => setEngines({ ...engines, iperf3_list_url: e.target.value })} />
-        </FormField>
-        <Iperf3ServerListSection />
-      </div>
-    </Section>
+      <SettingsCard title="Ookla terms">
+        <SettingsRow
+          label="Accept Ookla license" description="Required to run speedtest.net tests."
+          htmlFor="engines-ookla-accept-license" lockKey="engines.ookla_accept_license"
+        >
+          <SwitchControl
+            checked={engines.ookla_accept_license}
+            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_license: checked })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Accept Ookla GDPR terms" description="Required for the Ookla engine in GDPR jurisdictions."
+          htmlFor="engines-ookla-accept-gdpr" lockKey="engines.ookla_accept_gdpr"
+        >
+          <SwitchControl
+            checked={engines.ookla_accept_gdpr}
+            onCheckedChange={(checked) => setEngines({ ...engines, ookla_accept_gdpr: checked })}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Server list TTL (seconds)" htmlFor="engines-ttl" lockKey="engines.server_list_ttl_seconds" size="sm"
+        >
+          <NumberField
+            value={engines.server_list_ttl_seconds}
+            onChange={(v) => setEngines({ ...engines, server_list_ttl_seconds: v })}
+          />
+        </SettingsRow>
+      </SettingsCard>
+
+      <SettingsCard
+        title="iperf3 public server list"
+        description="A cached list of public iperf3 servers, refreshed daily, used by the target
+          form's &quot;Pick from public list&quot; picker."
+        footer={<Iperf3ServerListSection />}
+      >
+        <SettingsRow
+          label="iperf3 server list URL" description="Clear to disable the list."
+          htmlFor="engines-iperf3-list-url" lockKey="engines.iperf3_list_url"
+        >
+          <TextField value={engines.iperf3_list_url} onChange={(v) => setEngines({ ...engines, iperf3_list_url: v })} />
+        </SettingsRow>
+      </SettingsCard>
+    </div>
   );
 }
