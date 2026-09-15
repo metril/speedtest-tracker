@@ -1,5 +1,5 @@
 import {
-  CalendarClock, ChevronsLeft, ChevronsRight, Gauge, ListChecks, ListTree, Menu, Settings as SettingsIcon, Target,
+  CalendarClock, ChevronsLeft, ChevronsRight, Gauge, ListChecks, Menu, Settings as SettingsIcon, Target,
 } from 'lucide-react';
 import { useState, type ComponentType } from 'react';
 import { NavLink, Outlet } from 'react-router';
@@ -14,7 +14,6 @@ const NAV: { to: string; label: string; icon: ComponentType<{ className?: string
   { to: '/', label: 'Dashboard', icon: Gauge },
   { to: '/results', label: 'Results', icon: ListChecks },
   { to: '/targets', label: 'Targets', icon: Target },
-  { to: '/queues', label: 'Queues', icon: ListTree },
   { to: '/schedules', label: 'Schedules', icon: CalendarClock },
   { to: '/settings', label: 'Settings', icon: SettingsIcon },
 ];

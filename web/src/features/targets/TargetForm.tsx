@@ -6,6 +6,7 @@ import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { ENGINES, type Target, type TargetInput, type ThresholdSet } from '../../lib/api';
 import { useQueues } from '../../lib/queries';
+import { QueuesDialog } from '../queues/QueuesDialog';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
 import { ThresholdFields, validateThresholds } from './ThresholdFields';
 
@@ -32,6 +33,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   // Custom section on (see EngineOptionFields' forceOpenAdvancedSignal) so
   // a hidden field can't hide the reason Save silently did nothing.
   const [forceOpenAdvancedSignal, setForceOpenAdvancedSignal] = useState(0);
+  const [queuesOpen, setQueuesOpen] = useState(false);
 
   const nameInvalid = name.trim() === '';
   const optionsError = validateEngineOptions(engine, options);
@@ -86,6 +88,13 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
                 onChange={(e) => setQueueId(Number(e.target.value))}>
                 {(queues.data ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
               </select>
+              <button
+                type="button"
+                className="mt-1 text-left text-xs text-accent hover:underline"
+                onClick={() => setQueuesOpen(true)}
+              >
+                Manage queues…
+              </button>
             </FormField>
           </div>
 
@@ -120,6 +129,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
           </div>
         </form>
       </CardContent>
+      <QueuesDialog open={queuesOpen} onOpenChange={setQueuesOpen} />
     </Card>
   );
 }

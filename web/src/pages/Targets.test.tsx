@@ -41,6 +41,28 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe('Targets page queues dialog', () => {
+  it('opens the queues dialog from the header button', async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/targets')) return jsonResponse([target()]);
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      if (url.endsWith('/queues')) return jsonResponse([{ id: 1, name: 'wan', created_at: '' }]);
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Manage queues' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText('Queues')).toBeInTheDocument();
+    expect(await within(dialog).findByText('wan')).toBeInTheDocument();
+  });
+});
+
 describe('Targets page delete confirmation', () => {
   it('does not delete when the confirmation dialog is canceled', async () => {
     const targets = [target()];

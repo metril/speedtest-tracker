@@ -30,8 +30,8 @@ export function useTargets() {
   return useQuery({ queryKey: queryKeys.targets, queryFn: api.listTargets });
 }
 
-export function useQueues() {
-  return useQuery({ queryKey: queryKeys.queues, queryFn: api.listQueues });
+export function useQueues(enabled = true) {
+  return useQuery({ queryKey: queryKeys.queues, queryFn: api.listQueues, enabled });
 }
 
 export function useCreateQueue() {

@@ -280,7 +280,8 @@ time; different queues run in parallel — so putting a WAN test and a LAN
 test in separate queues lets them run together, while two targets that
 would interfere with each other (e.g. sharing the same uplink) belong in
 one queue. New installs are seeded with `wan` and `lan`, but queues are
-just user-managed names: rename, add or remove them from the Queues page.
+just user-managed names: rename, add or remove them from the "Manage
+queues" dialog on the Targets page.
 Names must be unique, non-empty and at most 64 characters. The last
 remaining queue can't be deleted, and a queue with targets still assigned
 to it answers 409 `queue_in_use` until they're moved elsewhere. A target

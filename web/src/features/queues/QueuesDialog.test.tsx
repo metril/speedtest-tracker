@@ -6,8 +6,8 @@ import type { ReactNode } from 'react';
 import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
-import type { Queue } from '../lib/api';
-import { Queues } from './Queues';
+import type { Queue } from '../../lib/api';
+import { QueuesDialog } from './QueuesDialog';
 
 function wrap(node: ReactNode) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -31,10 +31,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-describe('Queues page', () => {
+describe('QueuesDialog', () => {
   it('lists queues and explains the run-in-parallel semantics', async () => {
     fetchMock.mockImplementation(async () => jsonResponse([wan, lan]));
-    wrap(<Queues />);
+    wrap(<QueuesDialog open onOpenChange={() => {}} />);
     expect(screen.getByText(/run one at a time; different queues run in parallel/)).toBeInTheDocument();
     expect(await screen.findByText('wan')).toBeInTheDocument();
     expect(screen.getByText('lan')).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe('Queues page', () => {
       }
       return jsonResponse([wan, lan]);
     });
-    wrap(<Queues />);
+    wrap(<QueuesDialog open onOpenChange={() => {}} />);
     await screen.findByText('wan');
 
     fireEvent.change(screen.getByLabelText('New queue name'), { target: { value: 'office' } });
@@ -69,7 +69,7 @@ describe('Queues page', () => {
       }
       return jsonResponse([wan, lan]);
     });
-    wrap(<Queues />);
+    wrap(<QueuesDialog open onOpenChange={() => {}} />);
     await screen.findByText('wan');
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Rename' })[0]);
@@ -92,12 +92,18 @@ describe('Queues page', () => {
       }
       return jsonResponse([wan, lan]);
     });
-    wrap(<Queues />);
+    wrap(<QueuesDialog open onOpenChange={() => {}} />);
     await screen.findByText('wan');
 
     fireEvent.click(screen.getAllByRole('button', { name: 'Delete' })[0]);
     fireEvent.click(await screen.findByRole('button', { name: 'Delete' }));
 
     expect(await screen.findByText('targets still reference this queue')).toBeInTheDocument();
+  });
+
+  it('renders nothing when closed', () => {
+    fetchMock.mockImplementation(async () => jsonResponse([wan, lan]));
+    wrap(<QueuesDialog open={false} onOpenChange={() => {}} />);
+    expect(screen.queryByText(/run one at a time/)).not.toBeInTheDocument();
   });
 });

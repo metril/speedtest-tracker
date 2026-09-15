@@ -8,6 +8,7 @@ import {
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TargetForm } from '../features/targets/TargetForm';
 import { HistoryDialog } from '../features/targets/HistoryDialog';
+import { QueuesDialog } from '../features/queues/QueuesDialog';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import type { Target, TargetInput } from '../lib/api';
 import { ApiError } from '../lib/api';
@@ -111,6 +112,7 @@ export function Targets() {
   const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [confirmDelete, setConfirmDelete] = useState<Target | null>(null);
+  const [queuesOpen, setQueuesOpen] = useState(false);
   // Reverse map: target id -> names of schedules that include it, built
   // from the schedules' own target_ids rather than a per-target fetch.
   const schedulesByTarget = new Map<number, string[]>();
@@ -141,12 +143,17 @@ export function Targets() {
 
   return (
     <section className="grid gap-4">
-      <header className="flex items-center justify-between">
+      <header className="flex items-center justify-between gap-2">
         <h1 className="text-xl font-semibold tracking-tight">Targets</h1>
-        {editing.mode === 'none' && (
-          <Button type="button" onClick={() => setEditing({ mode: 'new' })}>New target</Button>
-        )}
+        <div className="flex gap-2">
+          <Button type="button" variant="outline" onClick={() => setQueuesOpen(true)}>Manage queues</Button>
+          {editing.mode === 'none' && (
+            <Button type="button" onClick={() => setEditing({ mode: 'new' })}>New target</Button>
+          )}
+        </div>
       </header>
+
+      <QueuesDialog open={queuesOpen} onOpenChange={setQueuesOpen} />
 
       {editing.mode !== 'none' && (
         <TargetForm
