@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.0](https://github.com/metril/speedtest-tracker/compare/v0.7.1...v0.8.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **docker:** the container user changed from uid 10001 to 1000:1000. Data volumes created by earlier images need a one-time `chown -R 1000:1000` on their contents.
+
+### Features
+
+* **docker:** run as uid/gid 1000 instead of 10001 ([8b6eb33](https://github.com/metril/speedtest-tracker/commit/8b6eb3394cecbbcd6ac5347d25d5bbc6d1a24512))
+
 ## [0.7.1](https://github.com/metril/speedtest-tracker/compare/v0.7.0...v0.7.1) (2026-09-15)
 
 
