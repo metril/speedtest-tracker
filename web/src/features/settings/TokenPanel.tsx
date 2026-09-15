@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
-import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
+import { SettingsRow, useSettingsRowField } from '@/components/settings';
 import type { CreatedToken } from '../../lib/api';
 import { ApiError } from '../../lib/api';
 import { formatDateTime } from '../../lib/format';
@@ -9,6 +9,11 @@ import { useCreateToken, useDeleteToken, useTokens } from '../../lib/queries';
 
 function message(err: unknown): string {
   return err instanceof ApiError ? err.message : 'Request failed.';
+}
+
+function NameField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const props = useSettingsRowField();
+  return <Input {...props} value={value} onChange={(e) => onChange(e.target.value)} />;
 }
 
 /** TokenPanel creates and lists API tokens. The plaintext of a newly
@@ -77,11 +82,11 @@ export function TokenPanel() {
   };
 
   return (
-    <div className="grid gap-3">
-      {error && <p role="alert" className="text-sm text-bad">{error}</p>}
+    <>
+      {error && <p role="alert" className="mx-4 mt-3 text-sm text-bad">{error}</p>}
 
       {created ? (
-        <div className="grid gap-2 rounded-md border border-line bg-raised p-3">
+        <div className="m-4 grid gap-2 rounded-md border border-line bg-raised p-3">
           <p ref={tokenTextRef} className="break-all font-mono text-sm text-fg">{created.token}</p>
           <div className="flex items-center gap-3">
             <Button type="button" onClick={copy}>Copy</Button>
@@ -95,48 +100,46 @@ export function TokenPanel() {
           </div>
         </div>
       ) : (
-        <div className="flex items-end gap-3">
-          <FormField id="token-name" label="Token name">
-            <Input id="token-name" value={name}
-              onChange={(e) => setName(e.target.value)} />
-          </FormField>
-          <Button type="button" disabled={create.isPending || !name.trim()}
-            onClick={submit}>
-            Create token
-          </Button>
-        </div>
+        <SettingsRow label="Token name" htmlFor="token-name">
+          <div className="flex items-end gap-3">
+            <NameField value={name} onChange={setName} />
+            <Button type="button" disabled={create.isPending || !name.trim()}
+              onClick={submit}>
+              Create token
+            </Button>
+          </div>
+        </SettingsRow>
       )}
 
-      <div className="grid gap-2">
-        {(tokens.data ?? []).map((t) => (
-          <div key={t.id} className="flex items-center justify-between gap-3 rounded-md border border-line p-2 text-sm">
-            <div className="grid gap-0.5">
-              <span className="text-fg">{t.name}</span>
-              <span className="text-faint">
-                <span className="font-mono">{t.prefix}…</span>
-                {' · created '}{formatDateTime(t.created_at)}
-                {' · last used '}{t.last_used_at ? formatDateTime(t.last_used_at) : '—'}
-              </span>
-            </div>
-            {confirmId === t.id ? (
-              <div className="flex items-center gap-2">
-                <Button type="button" variant="outline" size="sm" className="text-bad hover:bg-bad/10"
-                  disabled={del.isPending} onClick={() => revoke(t.id)}>
-                  Confirm revoke
-                </Button>
-                <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmId(null)}>
-                  Cancel
-                </Button>
-              </div>
-            ) : (
-              <Button type="button" variant="outline" size="sm" className="text-muted hover:text-bad"
-                onClick={() => setConfirmId(t.id)}>
-                Revoke {t.name}
+      {(tokens.data ?? []).map((t) => (
+        <SettingsRow
+          key={t.id} label={t.name} htmlFor={`token-${t.id}`}
+          description={(
+            <>
+              <span className="font-mono">{t.prefix}…</span>
+              {' · created '}{formatDateTime(t.created_at)}
+              {' · last used '}{t.last_used_at ? formatDateTime(t.last_used_at) : '—'}
+            </>
+          )}
+        >
+          {confirmId === t.id ? (
+            <div className="flex items-center gap-2">
+              <Button type="button" variant="outline" size="sm" className="text-bad hover:bg-bad/10"
+                disabled={del.isPending} onClick={() => revoke(t.id)}>
+                Confirm revoke
               </Button>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+              <Button type="button" variant="ghost" size="sm" onClick={() => setConfirmId(null)}>
+                Cancel
+              </Button>
+            </div>
+          ) : (
+            <Button type="button" variant="outline" size="sm" className="text-muted hover:text-bad"
+              onClick={() => setConfirmId(t.id)}>
+              Revoke {t.name}
+            </Button>
+          )}
+        </SettingsRow>
+      ))}
+    </>
   );
 }
