@@ -466,6 +466,46 @@ func TestPutSettingsKeepsStructuredExportAuthSecretsOnMask(t *testing.T) {
 	}
 }
 
+func TestPutSettingsVMAuthTypeClearsLegacyHeader(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMAuthHeader, "Bearer legacy-secret")
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"integrations": map[string]any{"vm_auth_type": "none"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	i, err := st.Integrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !i.VMAuth().Empty() {
+		t.Fatalf("VMAuth() = %+v, want empty after clearing legacy header", i.VMAuth())
+	}
+}
+
+func TestPutSettingsVLAuthTypeClearsLegacyHeader(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVLAuthHeader, "Bearer legacy-secret")
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"integrations": map[string]any{"vl_auth_type": "none"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	i, err := st.Integrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !i.VLAuth().Empty() {
+		t.Fatalf("VLAuth() = %+v, want empty after clearing legacy header", i.VLAuth())
+	}
+}
+
 func TestPutSettingsValidatesExportAuthType(t *testing.T) {
 	h, _, _ := newTestAPIWithSettings(t)
 	for name, body := range map[string]map[string]any{
@@ -1125,6 +1165,20 @@ func TestSwitchToOIDCLockoutGuard(t *testing.T) {
 	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", oidcSwitchBody(idp.URL), nil)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("switch to oidc with a reachable issuer = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSwitchToOIDCLockoutGuardRejectsUnreachableIssuer(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	issuer := srv.URL
+	srv.Close() // unreachable by the time the PUT below runs discovery
+
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", oidcSwitchBody(issuer), nil)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("switch to oidc with an unreachable issuer = %d %s, want 400", rec.Code, rec.Body)
 	}
 }
 

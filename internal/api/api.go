@@ -276,6 +276,9 @@ func New(deps Deps) http.Handler {
 
 	// OIDC login/logout live outside both the /api/v1 auth middleware and
 	// requestTimeout group: a browser redirect flow, not an API call.
+	// /auth/mode is mounted alongside them for the same reason: the
+	// unauthenticated Login page needs it before it has any session.
+	r.Get("/auth/mode", deps.authMode)
 	r.Get("/auth/oidc/start", deps.oidcStart)
 	r.Get("/auth/oidc/callback", deps.oidcCallback)
 	r.Get("/auth/logout", deps.oidcLogout)

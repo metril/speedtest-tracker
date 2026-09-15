@@ -71,6 +71,44 @@ func newAuthedAPI(t *testing.T, cfg settings.Auth) (http.Handler, string) {
 	return h, plain
 }
 
+// TestOIDCModeBearerTokenGatedByAllowTokens: in oidc mode, a bearer API
+// token is only a valid credential when AllowTokens is set -- it exists
+// so scripts/monitoring can keep using a token instead of a browser
+// session. With AllowTokens false, the same token must be rejected.
+func TestOIDCModeBearerTokenGatedByAllowTokens(t *testing.T) {
+	for _, allow := range []bool{true, false} {
+		var plain string
+		h, _, _ := newTestAPIWith(t, func(d *Deps) {
+			mw := auth.New(nil, storeTokenLookup{db: d.Store}, time.Now)
+			if err := mw.Configure(settings.Auth{Mode: settings.AuthModeOIDC, AllowTokens: allow}); err != nil {
+				t.Fatal(err)
+			}
+			d.Auth = authAdapter{mw: mw, mode: settings.AuthModeOIDC}
+
+			p, hash, prefix, err := auth.GenerateToken()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := d.Store.CreateAPIToken(context.Background(), "test", hash, prefix); err != nil {
+				t.Fatal(err)
+			}
+			plain = p
+		})
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+		req.Header.Set("Authorization", "Bearer "+plain)
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+
+		if allow && rec.Code != http.StatusOK {
+			t.Errorf("allow_tokens=true: bearer token = %d, want 200", rec.Code)
+		}
+		if !allow && rec.Code != http.StatusUnauthorized {
+			t.Errorf("allow_tokens=false: bearer token = %d, want 401", rec.Code)
+		}
+	}
+}
+
 func TestAuthProtectsAPIButNotOpsEndpoints(t *testing.T) {
 	h, plain := newAuthedAPI(t, settings.Auth{Mode: settings.AuthModeToken})
 

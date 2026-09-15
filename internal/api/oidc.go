@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -25,6 +26,27 @@ type SessionStore interface {
 	DeleteSession(ctx context.Context, id string) error
 }
 
+// authModeResponse is what GET /auth/mode reports: just the configured
+// auth mode, so the unauthenticated Login page knows what to render
+// (an SSO button, a token/forward_auth hint, or nothing at all) instead
+// of always assuming oidc.
+type authModeResponse struct {
+	Mode string `json:"mode"`
+}
+
+// authMode reports the server's configured auth mode. It is deliberately
+// public (mounted outside the /api/v1 auth middleware, next to
+// /auth/oidc/*): the whole point is that the Login page -- which by
+// definition has no session yet -- can call it to decide what to render.
+// A nil Deps.Auth (no auth middleware mounted) means open mode.
+func (d Deps) authMode(w http.ResponseWriter, r *http.Request) {
+	mode := "open"
+	if d.Auth != nil {
+		mode = d.Auth.Mode()
+	}
+	writeJSON(w, http.StatusOK, authModeResponse{Mode: mode})
+}
+
 // oidcNotConfigured answers a request that needs OIDC (Deps.OIDC() is
 // nil, meaning auth mode oidc has no valid provider yet) with a redirect
 // carrying an error the SPA's login page can render.
@@ -43,10 +65,7 @@ func (d Deps) oidcStart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	returnTo := r.URL.Query().Get("return_to")
-	if !strings.HasPrefix(returnTo, "/") || strings.HasPrefix(returnTo, "//") {
-		returnTo = "/"
-	}
+	returnTo := sanitizeReturnTo(r.URL.Query().Get("return_to"))
 
 	state := randomToken()
 	verifier := oauth2.GenerateVerifier()
@@ -184,6 +203,32 @@ func (d Deps) now() time.Time {
 		return d.Now()
 	}
 	return time.Now()
+}
+
+// sanitizeReturnTo restricts an OIDC return_to value to a same-origin
+// relative path, refusing anything a browser could interpret as pointing
+// elsewhere. url.Parse alone is not enough: a scheme-less, host-less
+// value like `/\evil.com` still parses with Path == "/\evil.com", but
+// browsers normalize the backslash to a slash and treat it as
+// "//evil.com" -- a protocol-relative URL to another host. So beyond
+// requiring an empty scheme/host and a leading "/", any leading "//" or
+// "/\" is rejected outright; anything that fails these checks falls back
+// to "/".
+func sanitizeReturnTo(returnTo string) string {
+	u, err := url.Parse(returnTo)
+	if err != nil {
+		return "/"
+	}
+	if u.Scheme != "" || u.Host != "" {
+		return "/"
+	}
+	if !strings.HasPrefix(u.Path, "/") {
+		return "/"
+	}
+	if strings.HasPrefix(u.Path, "//") || strings.HasPrefix(u.Path, `/\`) {
+		return "/"
+	}
+	return returnTo
 }
 
 func redirectLoginError(w http.ResponseWriter, r *http.Request, code string) {

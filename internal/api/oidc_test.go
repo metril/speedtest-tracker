@@ -86,6 +86,45 @@ func newOIDCTestAPI(t *testing.T, cfgOverride func(*oidcauth.Config)) *oidcTestE
 	return env
 }
 
+func TestSanitizeReturnTo(t *testing.T) {
+	cases := map[string]string{
+		`/\evil.com`:       "/",
+		"//evil.com":       "/",
+		"https://evil.com": "/",
+		"/ok?x=1":          "/ok?x=1",
+		"/dashboard":       "/dashboard",
+		"":                 "/",
+		"not-a-path":       "/",
+	}
+	for in, want := range cases {
+		if got := sanitizeReturnTo(in); got != want {
+			t.Errorf("sanitizeReturnTo(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestAuthModeOpenWhenNoAuthMounted(t *testing.T) {
+	h := newAPI(t)
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/mode", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mode":"open"`) {
+		t.Fatalf("/auth/mode = %d %s, want 200 mode=open", rec.Code, rec.Body)
+	}
+}
+
+func TestAuthModeReportsConfiguredMode(t *testing.T) {
+	h, _ := newAuthedAPI(t, settings.Auth{Mode: settings.AuthModeToken})
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/mode", nil)
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"mode":"token"`) {
+		t.Fatalf("/auth/mode = %d %s, want 200 mode=token", rec.Code, rec.Body)
+	}
+	// /auth/mode must not require the bearer token: no Authorization
+	// header is set on the request above, and it still answered 200.
+}
+
 func TestOIDCStartSetsCookieAndRedirects(t *testing.T) {
 	env := newOIDCTestAPI(t, nil)
 	rec := httptest.NewRecorder()

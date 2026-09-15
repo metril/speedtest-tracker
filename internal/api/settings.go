@@ -430,6 +430,21 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMURL, i.VMURL) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthHeader, i.VMAuthHeader) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthType, i.VMAuthType) },
+			// A request that explicitly writes vm_auth_type takes over
+			// from the legacy vm_auth_header fallback (VMAuth() only
+			// consults it when VMAuthType is unset/none), but the UI can
+			// never send an empty vm_auth_header itself -- it always
+			// echoes back the masked placeholder, which setSecret above
+			// treats as "leave unchanged". So switching auth type must
+			// clear the legacy header here, in the same write, or a
+			// stored legacy header keeps being used forever even after
+			// the caller picks "none".
+			func() error {
+				if i.VMAuthType == nil {
+					return nil
+				}
+				return d.Settings.Set(ctx, settings.KeyVMAuthHeader, "")
+			},
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthUsername, i.VMAuthUsername) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthPassword, i.VMAuthPassword) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthToken, i.VMAuthToken) },
@@ -440,6 +455,14 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLURL, i.VLURL) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthHeader, i.VLAuthHeader) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthType, i.VLAuthType) },
+			// See the matching vm_auth_type write above: clears the
+			// legacy header the same way when vl_auth_type is written.
+			func() error {
+				if i.VLAuthType == nil {
+					return nil
+				}
+				return d.Settings.Set(ctx, settings.KeyVLAuthHeader, "")
+			},
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthUsername, i.VLAuthUsername) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthPassword, i.VLAuthPassword) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthToken, i.VLAuthToken) },
