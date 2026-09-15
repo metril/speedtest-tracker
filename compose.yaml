@@ -15,6 +15,12 @@ services:
     #   ST_AUTH_GROUPS_HEADER: Remote-Groups
     #   ST_AUTH_TRUSTED_PROXIES: '["172.16.0.0/12"]'
     #   ST_AUTH_ADMIN_GROUP: admins
+    # Or OIDC:
+    #   ST_AUTH_MODE: oidc
+    #   ST_AUTH_OIDC_ISSUER: https://authelia.example.com
+    #   ST_AUTH_OIDC_CLIENT_ID: speedtest-tracker
+    #   ST_AUTH_OIDC_CLIENT_SECRET: changeme
+    #   ST_AUTH_OIDC_ALLOWED_GROUPS: '["admins"]'
     ports: ["8080:8080"]
     volumes: ["speedtest-data:/data"]
     restart: unless-stopped

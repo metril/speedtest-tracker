@@ -65,7 +65,7 @@ Semantics:
 
 ## Authentication
 
-Three modes, set via `auth.mode` (Settings → Auth or `ST_AUTH_MODE`):
+Four modes, set via `auth.mode` (Settings → Auth or `ST_AUTH_MODE`):
 
 - **`open`** (default) — no authentication; anyone who can reach the port
   has full control. The UI shows a permanent banner while this mode is
@@ -75,6 +75,11 @@ Three modes, set via `auth.mode` (Settings → Auth or `ST_AUTH_MODE`):
   *Accept API tokens as well* (`auth.allow_tokens`), which is how scripts
   reach an instance sitting behind SSO.
 - **`token`** — every request needs a bearer API token.
+- **`oidc`** — Authorization Code + PKCE against an external OIDC provider;
+  the browser gets a session cookie after login. Can also accept bearer
+  tokens via `auth.allow_tokens`.
+
+In every mode, a non-admin identity is read-only: write requests get `403`.
 
 ### Forward auth
 
@@ -149,6 +154,33 @@ speedtest.example.com {
 If Caddy shares the host with the app (rather than running in its own
 container network), the trusted CIDR is `127.0.0.1/32` — the loopback
 address Caddy connects from, not the client's.
+
+### OIDC
+
+Login redirects to the provider; on return the callback at
+`/auth/oidc/callback` completes the Authorization Code + PKCE exchange and
+sets a session cookie. `/login` is the sign-in page; `/auth/logout` ends the
+session. Register `<base>/auth/oidc/callback` as the redirect URI with the
+provider.
+
+| Setting/env | Default | Meaning |
+| --- | --- | --- |
+| `ST_AUTH_OIDC_ISSUER` | — | Provider issuer URL (used for discovery) |
+| `ST_AUTH_OIDC_CLIENT_ID` | — | OAuth client ID |
+| `ST_AUTH_OIDC_CLIENT_SECRET` | — | OAuth client secret |
+| `ST_AUTH_OIDC_REDIRECT_BASE_URL` | derived from `Host`/`X-Forwarded-*` | Override when those headers aren't forwarded cleanly |
+| `ST_AUTH_OIDC_SCOPES` | `[]` | Extra scopes beyond `openid profile email`, JSON array |
+| `ST_AUTH_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying the user's groups |
+| `ST_AUTH_OIDC_ALLOWED_GROUPS` | `[]` | JSON array; empty allows every group |
+| `ST_AUTH_OIDC_ALLOWED_EMAILS` | `[]` | JSON array; empty allows every email |
+| `ST_AUTH_SESSION_TTL_HOURS` | `24` | Session cookie lifetime |
+
+`auth.admin_group` (`ST_AUTH_ADMIN_GROUP`) applies here too: members are
+admins, everyone else is read-only; unset means every signed-in user is
+admin. Group claim mapping: *Authentik* — add `groups` to the scope
+mapping's claim output. *Authelia* — its OIDC provider emits `groups` by
+default. *Keycloak* — add a "group membership" mapper with claim name
+`groups`.
 
 ### API tokens
 
