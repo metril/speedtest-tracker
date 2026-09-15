@@ -116,6 +116,11 @@ func (s *Store) GetTargetRevision(ctx context.Context, id int64, version int) (*
 // "delete" and that have no live row — i.e. deleted and not since
 // restored.
 func (s *Store) ListDeletedTargets(ctx context.Context) ([]DeletedTarget, error) {
+	lookup, err := s.loadQueueLookup(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list deleted targets: %w", err)
+	}
+
 	rows, err := s.Read.QueryContext(ctx, `
 		SELECT tr.target_id, tr.version, tr.snapshot, tr.created_at
 		FROM target_revisions tr
@@ -144,14 +149,9 @@ func (s *Store) ListDeletedTargets(ctx context.Context) ([]DeletedTarget, error)
 		if err := json.Unmarshal([]byte(snapshot), &t); err != nil {
 			return nil, fmt.Errorf("unmarshal deleted target %d snapshot: %w", targetID, err)
 		}
-		queueName := ""
-		if qid, err := s.ResolveSnapshotQueueID(ctx, json.RawMessage(snapshot)); err == nil {
-			if q, err := s.GetQueue(ctx, qid); err == nil {
-				queueName = q.Name
-			}
-		}
+		qid := lookup.resolve(json.RawMessage(snapshot))
 		out = append(out, DeletedTarget{
-			ID: targetID, Name: t.Name, Engine: t.Engine, QueueName: queueName,
+			ID: targetID, Name: t.Name, Engine: t.Engine, QueueName: lookup.byID[qid].Name,
 			DeletedAt: createdAt, Version: version,
 		})
 	}

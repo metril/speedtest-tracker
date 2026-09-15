@@ -112,10 +112,14 @@ type ProgressEvent struct {
 // progressInterval caps progress events at 10 Hz per result.
 const progressInterval = 100 * time.Millisecond
 
-// job is one queue's share of a run.
+// job is one queue's share of a run. queueID is what routes it to the
+// right worker (stable identity: a queue rename must not change which
+// channel a job lands in); queueName is carried along only for display
+// (ResultMeta, QueueDepths/the Prometheus label).
 type job struct {
 	runID     int64
-	queue     string
+	queueID   int64
+	queueName string
 	targets   []store.Target
 	snapshots map[int64]json.RawMessage
 }
@@ -145,12 +149,18 @@ type Runner struct {
 	// r.mu, and no other goroutine needs it.
 	enqueueMu sync.Mutex
 
-	mu      sync.Mutex
-	queues  map[string]chan job
-	runs    map[int64]*runState
-	closing bool
-	wg      sync.WaitGroup
-	started bool
+	mu sync.Mutex
+	// queues is keyed by queue id, not name: identity must stay stable
+	// across a mid-flight rename so same-queue targets keep serializing
+	// through the same channel. queueNames tracks each queue's
+	// most-recently-seen display name, updated whenever a job for that id
+	// is created, for QueueDepths/the Prometheus label.
+	queues     map[int64]chan job
+	queueNames map[int64]string
+	runs       map[int64]*runState
+	closing    bool
+	wg         sync.WaitGroup
+	started    bool
 }
 
 // New returns a Runner. Call Start before Enqueue.
@@ -174,9 +184,10 @@ func New(cfg Config) *Runner {
 		cfg.Sink = Sinks(nil)
 	}
 	return &Runner{
-		cfg:    cfg,
-		queues: map[string]chan job{},
-		runs:   map[int64]*runState{},
+		cfg:        cfg,
+		queues:     map[int64]chan job{},
+		queueNames: map[int64]string{},
+		runs:       map[int64]*runState{},
 	}
 }
 
@@ -187,14 +198,16 @@ func (r *Runner) Start() {
 	r.started = true
 }
 
-// queueChan returns (creating if needed) the channel for a queue, plus its
-// worker. Caller holds r.mu.
-func (r *Runner) queueChan(queue string) chan job {
-	if ch, ok := r.queues[queue]; ok {
+// queueChan returns (creating if needed) the channel for a queue id, plus
+// its worker, and records name as that queue's freshest known display
+// name. Caller holds r.mu.
+func (r *Runner) queueChan(id int64, name string) chan job {
+	r.queueNames[id] = name
+	if ch, ok := r.queues[id]; ok {
 		return ch
 	}
 	ch := make(chan job, r.cfg.QueueCap)
-	r.queues[queue] = ch
+	r.queues[id] = ch
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -247,14 +260,18 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		return 0, ErrNoTargets
 	}
 
-	byQueue := map[string][]store.Target{}
-	order := []string{}
+	// Grouped by QueueID (the stable identity), not QueueName: a queue
+	// rename mid-run must not split what should be one serialized group
+	// into two, or merge two different queues that briefly share a name.
+	byQueue := map[int64][]store.Target{}
+	queueNames := map[int64]string{}
+	order := []int64{}
 	for _, t := range targets {
-		queue := t.QueueName
-		if _, seen := byQueue[queue]; !seen {
-			order = append(order, queue)
+		if _, seen := byQueue[t.QueueID]; !seen {
+			order = append(order, t.QueueID)
 		}
-		byQueue[queue] = append(byQueue[queue], t)
+		byQueue[t.QueueID] = append(byQueue[t.QueueID], t)
+		queueNames[t.QueueID] = t.QueueName
 	}
 
 	r.enqueueMu.Lock()
@@ -303,8 +320,8 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	}
 
 	chans := make([]chan job, 0, len(order))
-	for _, queue := range order {
-		chans = append(chans, r.queueChan(queue))
+	for _, qid := range order {
+		chans = append(chans, r.queueChan(qid, queueNames[qid]))
 	}
 
 	// Publish "queued" before any queue send: a worker cannot even attempt to
@@ -316,9 +333,9 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.publishRun(runID, "queued", "", len(targets), 0)
 
 	queueFull := false
-	for i, queue := range order {
+	for i, qid := range order {
 		select {
-		case chans[i] <- job{runID: runID, queue: queue, targets: byQueue[queue], snapshots: req.Snapshots}:
+		case chans[i] <- job{runID: runID, queueID: qid, queueName: queueNames[qid], targets: byQueue[qid], snapshots: req.Snapshots}:
 		default:
 			queueFull = true
 		}
@@ -411,7 +428,7 @@ func (r *Runner) execute(j job) {
 		if ctx.Err() != nil {
 			break
 		}
-		if failed := r.runTarget(ctx, j.runID, j.queue, t, j.snapshots[t.ID]); failed {
+		if failed := r.runTarget(ctx, j.runID, j.queueName, t, j.snapshots[t.ID]); failed {
 			queueFailed = true
 		}
 		// The result row for this target has landed: advance the stepper.
@@ -616,13 +633,15 @@ func (r *Runner) claimForForceCancel(id int64) (total, done int, ok bool) {
 }
 
 // QueueDepths reports each queue's current queue depth (jobs buffered, not
-// yet dequeued by the queue worker), for metrics.
+// yet dequeued by the queue worker), for metrics, keyed by each queue's
+// most-recently-seen display name (channels themselves are keyed by id,
+// which is not meaningful to show on a Prometheus label).
 func (r *Runner) QueueDepths() map[string]int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	depths := make(map[string]int, len(r.queues))
-	for queue, ch := range r.queues {
-		depths[queue] = len(ch)
+	for id, ch := range r.queues {
+		depths[r.queueNames[id]] = len(ch)
 	}
 	return depths
 }

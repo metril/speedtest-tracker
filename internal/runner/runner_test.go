@@ -1133,3 +1133,47 @@ func TestQueueDepthsReportsPerQueue(t *testing.T) {
 		t.Fatal("QueueDepths returned nil")
 	}
 }
+
+// TestQueueDepthsTracksRenameWithoutSplittingChannel covers the identity
+// fix: the runner's per-queue channel is keyed by queue id, not name, so
+// renaming a queue mid-flight must not create a second channel entry (which
+// would both leak an extra Prometheus label value and, more seriously,
+// silently un-serialize what should still be one queue). QueueDepths must
+// report exactly one entry for the queue, under its current name.
+func TestQueueDepthsTracksRenameWithoutSplittingChannel(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	ctx := context.Background()
+
+	wan, err := db.GetQueueByName(ctx, "wan")
+	if err != nil {
+		t.Fatalf("GetQueueByName: %v", err)
+	}
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "t", Engine: "fake", Enabled: true, QueueID: wan.ID})
+	if err != nil {
+		t.Fatalf("CreateTarget: %v", err)
+	}
+
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatalf("Enqueue: %v", err)
+	}
+	waitForRun(t, db, runID)
+
+	if _, err := db.RenameQueue(ctx, wan.ID, "wan-renamed"); err != nil {
+		t.Fatalf("RenameQueue: %v", err)
+	}
+
+	runID2, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatalf("Enqueue after rename: %v", err)
+	}
+	waitForRun(t, db, runID2)
+
+	depths := r.QueueDepths()
+	if len(depths) != 1 {
+		t.Fatalf("QueueDepths after rename = %+v, want exactly one entry (channel keyed by id, not name)", depths)
+	}
+	if _, ok := depths["wan-renamed"]; !ok {
+		t.Errorf("QueueDepths = %+v, want key %q", depths, "wan-renamed")
+	}
+}

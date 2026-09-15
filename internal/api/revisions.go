@@ -109,17 +109,18 @@ func (d Deps) revertTargetRevision(w http.ResponseWriter, r *http.Request) {
 		internalError(w, d.Logger, "unmarshal revision snapshot", err)
 		return
 	}
-	// Older revisions (written before queues existed) carry only a "lane"
-	// name in their snapshot, not "queue_id": resolve it the same way a
-	// restore does, falling back to the default queue.
-	if snap.QueueID == 0 {
-		qid, err := d.Store.ResolveSnapshotQueueID(r.Context(), rev.Snapshot)
-		if err != nil {
-			internalError(w, d.Logger, "resolve revision queue", err)
-			return
-		}
-		snap.QueueID = qid
+	// Always re-resolve the queue rather than trusting snap.QueueID as-is:
+	// older revisions (written before queues existed) carry only a "lane"
+	// name, and even a revision that does carry "queue_id" may name a
+	// queue since deleted. ResolveSnapshotQueueID handles all three cases
+	// (present/valid, present/stale, legacy lane), falling back to the
+	// default queue.
+	qid, err := d.Store.ResolveSnapshotQueueID(r.Context(), rev.Snapshot)
+	if err != nil {
+		internalError(w, d.Logger, "resolve revision queue", err)
+		return
 	}
+	snap.QueueID = qid
 
 	b := targetBody{
 		Name: snap.Name, Engine: snap.Engine, Enabled: snap.Enabled,

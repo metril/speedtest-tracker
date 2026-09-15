@@ -260,7 +260,7 @@ func (s *Store) DeleteSchedule(ctx context.Context, id int64) error {
 }
 
 // InsertSkippedRun records a cron fire that never ran (a previous run still
-// in flight, or a full lane queue) as a terminal "skipped" run row, so the
+// in flight, or a full queue) as a terminal "skipped" run row, so the
 // outage view can show the gap.
 func (s *Store) InsertSkippedRun(ctx context.Context, scheduleID int64, reason string) (int64, error) {
 	res, err := s.Write.ExecContext(ctx, `

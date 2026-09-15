@@ -120,7 +120,7 @@ func (s *Scheduler) Reload(ctx context.Context) error {
 
 // fire is the cron callback: it only enqueues. Anything that prevents the
 // run from being queued (a previous run of this schedule still in flight,
-// a full lane queue, a shutdown) is recorded as a terminal "skipped" run so
+// a full queue, a shutdown) is recorded as a terminal "skipped" run so
 // the outage view can show the gap. Missed fires during downtime are never
 // backfilled.
 func (s *Scheduler) fire(sc store.Schedule) {
@@ -146,7 +146,7 @@ func (s *Scheduler) fire(sc store.Schedule) {
 	case err == nil:
 		s.cfg.Logger.Info("schedule fired", "schedule", sc.Name, "schedule_id", sc.ID, "run_id", runID)
 	case errors.Is(err, runner.ErrQueueFull):
-		s.skip(ctx, sc, "lane queue full")
+		s.skip(ctx, sc, "queue full")
 	case errors.Is(err, runner.ErrNoTargets):
 		s.skip(ctx, sc, "no runnable targets")
 	case errors.Is(err, runner.ErrShuttingDown):

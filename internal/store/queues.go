@@ -164,28 +164,72 @@ func (s *Store) DeleteQueue(ctx context.Context, id int64) error {
 	return tx.Commit()
 }
 
-// ResolveSnapshotQueueID resolves the queue a stored Target JSON snapshot
-// belongs to. Snapshots written since queues were introduced carry
-// "queue_id" directly; older ones carry only "lane", a queue name to
-// resolve by lookup. Either way, an id that no longer names a live queue
-// (e.g. lane's queue was since deleted) falls back to DefaultQueueID.
-func (s *Store) ResolveSnapshotQueueID(ctx context.Context, raw json.RawMessage) (int64, error) {
+// queueLookup is every queue reduced to the two indexes snapshot
+// resolution needs, loaded once so a caller resolving many snapshots
+// (e.g. ListDeletedTargets) can do it without a query per row.
+type queueLookup struct {
+	byID      map[int64]Queue
+	byName    map[string]Queue
+	defaultID int64
+}
+
+// loadQueueLookup loads every queue in one query.
+func (s *Store) loadQueueLookup(ctx context.Context) (queueLookup, error) {
+	queues, err := s.ListQueues(ctx)
+	if err != nil {
+		return queueLookup{}, fmt.Errorf("load queues: %w", err)
+	}
+	if len(queues) == 0 {
+		// Unreachable in practice (DeleteQueue refuses to remove the last
+		// queue), but fail loudly rather than silently resolving every
+		// snapshot to queue id 0.
+		return queueLookup{}, fmt.Errorf("load queues: no queues exist")
+	}
+	l := queueLookup{byID: make(map[int64]Queue, len(queues)), byName: make(map[string]Queue, len(queues))}
+	for i, q := range queues {
+		l.byID[q.ID] = q
+		l.byName[q.Name] = q
+		if i == 0 {
+			l.defaultID = q.ID // ListQueues orders by id ascending: the default queue.
+		}
+	}
+	return l, nil
+}
+
+// resolve resolves a stored Target JSON snapshot's queue against the
+// already-loaded lookup. Snapshots written since queues were introduced
+// carry "queue_id" directly; older ones carry only "lane", a queue name to
+// resolve by name. Either way, an id/name that no longer matches a live
+// queue falls back to the default queue.
+func (l queueLookup) resolve(raw json.RawMessage) int64 {
 	var probe struct {
 		QueueID int64  `json:"queue_id"`
 		Lane    string `json:"lane"`
 	}
 	if err := json.Unmarshal(raw, &probe); err != nil {
-		return 0, fmt.Errorf("parse snapshot: %w", err)
+		return l.defaultID
 	}
 	if probe.QueueID != 0 {
-		if _, err := s.GetQueue(ctx, probe.QueueID); err == nil {
-			return probe.QueueID, nil
+		if _, ok := l.byID[probe.QueueID]; ok {
+			return probe.QueueID
 		}
 	}
 	if probe.Lane != "" {
-		if q, err := s.GetQueueByName(ctx, probe.Lane); err == nil {
-			return q.ID, nil
+		if q, ok := l.byName[probe.Lane]; ok {
+			return q.ID
 		}
 	}
-	return s.DefaultQueueID(ctx)
+	return l.defaultID
+}
+
+// ResolveSnapshotQueueID resolves the queue a stored Target JSON snapshot
+// belongs to. See queueLookup.resolve for the resolution rules; callers
+// resolving more than one snapshot should use loadQueueLookup directly to
+// avoid a query per snapshot.
+func (s *Store) ResolveSnapshotQueueID(ctx context.Context, raw json.RawMessage) (int64, error) {
+	l, err := s.loadQueueLookup(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("resolve snapshot queue: %w", err)
+	}
+	return l.resolve(raw), nil
 }

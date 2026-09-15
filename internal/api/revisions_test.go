@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"testing"
@@ -107,6 +108,57 @@ func TestRevertTargetRevision(t *testing.T) {
 	}
 	if rec := do(t, h, http.MethodPost, "/api/v1/targets/999999/revisions/1/revert", nil); rec.Code != http.StatusNotFound {
 		t.Errorf("revert missing target = %d, want 404", rec.Code)
+	}
+}
+
+// TestRevertTargetRevisionToDeletedQueueFallsBackToDefault covers a
+// new-format snapshot (carries "queue_id" directly) whose queue was
+// deleted after the revision was taken: revert must not 400 on a stale
+// queue_id, it must fall back to the default queue like a legacy "lane"
+// snapshot would.
+func TestRevertTargetRevisionToDeletedQueueFallsBackToDefault(t *testing.T) {
+	h, db, _ := newTestAPI(t)
+	ctx := context.Background()
+
+	office, err := db.CreateQueue(ctx, "office")
+	if err != nil {
+		t.Fatalf("CreateQueue: %v", err)
+	}
+
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": office.ID,
+		"options": map[string]any{},
+	})
+	var created store.Target
+	json.NewDecoder(rec.Body).Decode(&created)
+	if created.QueueID != office.ID {
+		t.Fatalf("created queue = %d, want %d", created.QueueID, office.ID)
+	}
+	path := "/api/v1/targets/" + itoa(created.ID)
+
+	// Move the target off "office" so the queue can be deleted, then
+	// delete it: version 1's snapshot still names office.ID in its
+	// queue_id field, but that id no longer resolves to a live queue.
+	do(t, h, http.MethodPut, path, map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
+		"options": map[string]any{},
+	})
+	if err := db.DeleteQueue(ctx, office.ID); err != nil {
+		t.Fatalf("DeleteQueue: %v", err)
+	}
+
+	rec = do(t, h, http.MethodPost, path+"/revisions/1/revert", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("revert = %d body=%s", rec.Code, rec.Body)
+	}
+	var reverted store.Target
+	json.NewDecoder(rec.Body).Decode(&reverted)
+	def, err := db.DefaultQueueID(ctx)
+	if err != nil {
+		t.Fatalf("DefaultQueueID: %v", err)
+	}
+	if reverted.QueueID != def {
+		t.Errorf("reverted queue = %d, want default %d", reverted.QueueID, def)
 	}
 }
 

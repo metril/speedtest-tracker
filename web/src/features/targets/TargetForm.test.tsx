@@ -108,9 +108,10 @@ describe('TargetForm', () => {
     });
   });
 
-  it('refuses to submit without a name', () => {
+  it('refuses to submit without a name', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'lan' })).toBeInTheDocument());
 
     fireEvent.click(screen.getByRole('button', { name: 'Save target' }));
     expect(onSubmit).not.toHaveBeenCalled();
@@ -135,9 +136,10 @@ describe('TargetForm', () => {
     expect(screen.getByLabelText('Ookla server ID')).toHaveValue('1234');
   });
 
-  it('includes a filled iperf3 password in the submitted options', () => {
+  it('includes a filled iperf3 password in the submitted options', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'lan' })).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
@@ -209,9 +211,10 @@ describe('TargetForm', () => {
     expect(screen.getByLabelText('Bidirectional (--bidir)')).toBeDisabled();
   });
 
-  it('requires a username and rsa key when a password is set, blocking submit', () => {
+  it('requires a username and rsa key when a password is set, blocking submit', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'lan' })).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
@@ -226,9 +229,10 @@ describe('TargetForm', () => {
     expect(screen.getAllByText('Password requires a username and RSA public key path')).toHaveLength(2);
   });
 
-  it('shows the blocking options error next to Save and turns Custom back on after a failed submit', () => {
+  it('shows the blocking options error next to Save and turns Custom back on after a failed submit', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
+    await waitFor(() => expect(screen.getByRole('option', { name: 'lan' })).toBeInTheDocument());
 
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });

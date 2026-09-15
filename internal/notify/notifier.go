@@ -1,5 +1,5 @@
 // Notifier evaluates completed results and delivers alert/recovery
-// notifications asynchronously, so the runner's lane goroutines are never
+// notifications asynchronously, so the runner's queue goroutines are never
 // blocked on a slow or unreachable channel.
 package notify
 
@@ -43,7 +43,7 @@ type Stats struct {
 }
 
 // Notifier evaluates results and delivers notifications. OnResult is
-// called on the runner's lane goroutine and must never block, so it only
+// called on the runner's queue goroutine and must never block, so it only
 // does a non-blocking send onto queue; everything else — the state reads
 // and writes and all HTTP — happens on the worker goroutine started by
 // Start.
@@ -154,7 +154,7 @@ func (n *Notifier) Close(ctx context.Context) error {
 }
 
 // OnResult implements runner.ResultSink-shaped delivery: it must never
-// block the caller's lane goroutine. res is owned by the runner and may
+// block the caller's queue goroutine. res is owned by the runner and may
 // be mutated after this call returns, so it is copied before queueing.
 func (n *Notifier) OnResult(ctx context.Context, res *store.Result, meta Meta) {
 	cp := *res
@@ -162,7 +162,7 @@ func (n *Notifier) OnResult(ctx context.Context, res *store.Result, meta Meta) {
 	case n.queue <- &cp:
 	default:
 		// Queue full: drop the oldest so a burst of results cannot wedge
-		// the lane worker, and count it.
+		// the queue worker, and count it.
 		select {
 		case <-n.queue:
 			n.dropped.Add(1)

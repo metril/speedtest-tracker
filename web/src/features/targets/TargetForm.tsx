@@ -40,8 +40,11 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   // surface while ThresholdFields' Custom notification toggle is on.
   const thresholdsError = validateThresholds(thresholds);
   // Falls back to the first queue once the list loads, so a fresh form
-  // (queueId still 0) always submits a real queue id.
+  // (queueId still 0) always submits a real queue id. Still 0 while
+  // useQueues() is loading (or failed) -- queueUnresolved below blocks
+  // submit for that window so queue_id: 0 is never sent.
   const selectedQueueId = queueId || queues.data?.[0]?.id || 0;
+  const queueUnresolved = selectedQueueId === 0;
 
   return (
     <Card>
@@ -54,7 +57,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
           onSubmit={(e) => {
             e.preventDefault();
             setTouched(true);
-            if (nameInvalid || optionsError || thresholdsError) {
+            if (nameInvalid || optionsError || thresholdsError || queueUnresolved) {
               if (optionsError) setForceOpenAdvancedSignal((n) => n + 1);
               return;
             }
@@ -108,7 +111,7 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
           {error && <p className="text-sm text-bad">{error}</p>}
 
           <div className="flex gap-2">
-            <Button type="submit" disabled={submitting}>
+            <Button type="submit" disabled={submitting || queueUnresolved}>
               Save target
             </Button>
             <Button type="button" variant="outline" onClick={onCancel}>
