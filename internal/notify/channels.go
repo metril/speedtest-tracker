@@ -12,14 +12,18 @@ import (
 	"strings"
 	"time"
 
+	apprise "github.com/unraid/apprise-go"
+
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
 
-var validChannelTypes = map[string]bool{"webhook": true, "ntfy": true, "apprise": true}
+var validChannelTypes = map[string]bool{"webhook": true, "apprise": true}
 var validPriorities = map[string]bool{"min": true, "low": true, "default": true, "high": true, "max": true}
 
 // ValidateChannel checks a Channel for well-formedness before it is stored
-// or used for delivery.
+// or used for delivery. apprise channels are validated by URLs (each must
+// parse as a supported apprise-go target URL); the other types validate
+// URL as an absolute http(s) endpoint.
 func ValidateChannel(ch settings.Channel) error {
 	name := ch.ID
 	if name == "" {
@@ -29,11 +33,23 @@ func ValidateChannel(ch settings.Channel) error {
 		return fmt.Errorf("channel %s: id must be set", name)
 	}
 	if !validChannelTypes[ch.Type] {
-		return fmt.Errorf("channel %s: type must be one of webhook, ntfy, apprise", name)
+		return fmt.Errorf("channel %s: type must be one of webhook, apprise", name)
 	}
-	u, err := url.Parse(ch.URL)
-	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
-		return fmt.Errorf("channel %s: url must be an absolute http(s) URL", name)
+	if ch.Type == "apprise" {
+		if len(ch.URLs) == 0 {
+			return fmt.Errorf("channel %s: apprise urls must be set", name)
+		}
+		client := apprise.New()
+		for _, u := range ch.URLs {
+			if err := client.Add(u); err != nil {
+				return fmt.Errorf("channel %s: apprise url %q: %w", name, u, err)
+			}
+		}
+	} else {
+		u, err := url.Parse(ch.URL)
+		if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			return fmt.Errorf("channel %s: url must be an absolute http(s) URL", name)
+		}
 	}
 	if ch.Priority != "" && !validPriorities[ch.Priority] {
 		return fmt.Errorf("channel %s: priority must be one of min, low, default, high, max", name)
@@ -57,6 +73,10 @@ func isValidHTTPToken(s string) bool {
 // timeout. Any non-2xx response is returned as an error carrying the
 // status code and up to 256 bytes of the response body.
 func Deliver(ctx context.Context, client *http.Client, ch settings.Channel, m Message) error {
+	if ch.Type == "apprise" {
+		return deliverApprise(ctx, ch, m)
+	}
+
 	if client == nil {
 		client = &http.Client{Timeout: 10 * time.Second}
 	}
@@ -82,47 +102,6 @@ func Deliver(ctx context.Context, client *http.Client, ch settings.Channel, m Me
 			req.Header.Set(k, v)
 		}
 
-	case "ntfy":
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, ch.URL, strings.NewReader(m.Body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Title", m.Title)
-		if ch.Priority != "" {
-			req.Header.Set("Priority", ch.Priority)
-		}
-		if len(ch.Tags) > 0 {
-			req.Header.Set("Tags", strings.Join(ch.Tags, ","))
-		}
-		if ch.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+ch.Token)
-		}
-
-	case "apprise":
-		payload := map[string]any{
-			"title": m.Title,
-			"body":  m.Body,
-			"type":  appriseType(m.Kind),
-		}
-		if len(ch.Tags) > 0 {
-			payload["tag"] = strings.Join(ch.Tags, ",")
-		}
-		if len(ch.URLs) > 0 {
-			payload["urls"] = ch.URLs
-		}
-		body, encErr := json.Marshal(payload)
-		if encErr != nil {
-			return fmt.Errorf("encode apprise message: %w", encErr)
-		}
-		req, err = http.NewRequestWithContext(ctx, http.MethodPost, ch.URL, bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if ch.Token != "" {
-			req.Header.Set("Authorization", "Bearer "+ch.Token)
-		}
-
 	default:
 		return fmt.Errorf("unknown channel type %q", ch.Type)
 	}
@@ -144,9 +123,36 @@ func Deliver(ctx context.Context, client *http.Client, ch settings.Channel, m Me
 	return nil
 }
 
-func appriseType(kind string) string {
-	if kind == "recovery" {
-		return "success"
+// deliverApprise sends m through the embedded apprise-go library to every
+// URL configured on ch. The library has no context-aware Send, so it runs
+// on its own goroutine and the call honours ctx's deadline/cancellation
+// independently; a timeout here leaves the goroutine to finish on its own
+// (the library owns its own HTTP timeouts internally). The returned error
+// is the library's own — it already names the failing target URL — and is
+// returned unwrapped.
+func deliverApprise(ctx context.Context, ch settings.Channel, m Message) error {
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- apprise.Send(ch.URLs, m.Body, apprise.WithTitle(m.Title), apprise.WithNotifyType(mapNotifyType(m)))
+	}()
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	return "warning"
+}
+
+// mapNotifyType maps a rendered Message onto apprise-go's semantic
+// notification types: a recovery is a success, a test-failure alert is a
+// failure, and every other alert is a warning.
+func mapNotifyType(m Message) apprise.NotifyType {
+	switch {
+	case m.Kind == "recovery":
+		return apprise.NotifySuccess
+	case m.Metric == MetricFailure:
+		return apprise.NotifyFailure
+	default:
+		return apprise.NotifyWarning
+	}
 }

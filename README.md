@@ -439,13 +439,22 @@ Identity and auth endpoints:
   suppressed and counted in `speedtest_notifications_suppressed_total`; the
   firing state is still recorded, so the morning does not open with a flood
   of overnight alerts.
-- **Channels** — `webhook` POSTs the message as JSON (fields: `kind, title,
-  body, target, target_id, metric, value, limit, unit, result_id, at`) with
-  any configured headers; `ntfy` POSTs the body as text to the full topic URL
-  with `Title`, `Priority` and `Tags` headers and an optional bearer token;
-  `apprise` POSTs `{title, body, type, tag, urls}` to an Apprise API
-  `/notify` endpoint. Each channel has a **Test** button, which uses the
-  *saved* channel — save before testing.
+- **Channels** — two types. `webhook` POSTs the message as JSON (fields:
+  `kind, title, body, target, target_id, metric, value, limit, unit,
+  result_id, at`) with any configured headers. `apprise` delivers through an
+  embedded copy of [apprise-go](https://github.com/unraid/apprise-go) — no
+  external Apprise API server to run — fanning the alert out to every URL
+  configured on the channel, e.g. `ntfy://ntfy.sh/mytopic` or
+  `discord://webhook_id/webhook_token`; see apprise-go's README for the full
+  list of supported services and URL formats. Each channel has a **Test**
+  button, which uses the *saved* channel — save before testing.
+  > **Breaking change:** the standalone `ntfy` channel type is gone. Any
+  > `ntfy` channel is rewritten to `apprise` automatically the first time
+  > the app starts after upgrading, using an equivalent `ntfy://` URL built
+  > from its old URL, token, priority and tags; a channel whose old URL
+  > can't be parsed is disabled (not deleted) and a warning is logged.
+  > apprise-go is a young library (v0.3.x) — pin issues to it, not this
+  > project, if a specific service integration misbehaves.
 - **Reliability** — evaluation and delivery run on the notifier's own
   goroutine behind a 256-slot queue, so a slow or dead channel never delays a
   test; overflow drops the oldest queued result and increments

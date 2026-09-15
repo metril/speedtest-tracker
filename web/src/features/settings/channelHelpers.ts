@@ -6,22 +6,21 @@ import type { NotifyChannel } from '../../lib/api';
  * in sync with the fields ChannelEditor shows for each type. */
 export function stripIrrelevantChannelFields(channel: NotifyChannel): NotifyChannel {
   const {
-    id, type, name, enabled, url, token, headers, priority, tags, urls,
+    id, type, name, enabled, url, headers, tags, urls,
   } = channel;
-  const base: NotifyChannel = {
-    id, type, name, enabled, url,
-  };
   switch (type) {
     case 'webhook':
-      return { ...base, headers };
-    case 'ntfy':
       return {
-        ...base, token, priority, tags,
+        id, type, name, enabled, url, headers,
       };
     case 'apprise':
-      return { ...base, token, tags, urls };
+      return {
+        id, type, name, enabled, url: '', tags, urls,
+      };
     default:
-      return base;
+      return {
+        id, type, name, enabled, url,
+      };
   }
 }
 

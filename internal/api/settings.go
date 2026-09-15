@@ -250,6 +250,23 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		internalError(w, d.Logger, "load notifications settings", err)
 		return
 	}
+	// Merged before validation, not just before the writes: an apprise
+	// channel's URLs are validated as real apprise-go target URLs, so a
+	// masked "***" placeholder must already be resolved back to the
+	// stored URL (or rejected as a no-op below) before validateSettings
+	// ever sees it — otherwise every echoed-back masked apprise URL would
+	// fail validation as a bogus target.
+	var mergedChannels *[]settings.Channel
+	if n := body.Notifications; n != nil && n.Channels != nil {
+		merged, err := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
+		if err != nil {
+			errBadRequest(w, err.Error())
+			return
+		}
+		mergedChannels = &merged
+		*n.Channels = merged
+	}
+
 	if err := validateSettings(body, current); err != nil {
 		errBadRequest(w, err.Error())
 		return
@@ -274,19 +291,6 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			errBadRequest(w, err.Error())
 			return
 		}
-	}
-
-	// Merged up front, alongside validation, so a channel whose masked
-	// secret cannot be carried forward (type/url changed) rejects the
-	// whole PUT as a no-op rather than after other sections already wrote.
-	var mergedChannels *[]settings.Channel
-	if n := body.Notifications; n != nil && n.Channels != nil {
-		merged, err := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
-		if err != nil {
-			errBadRequest(w, err.Error())
-			return
-		}
-		mergedChannels = &merged
 	}
 
 	// Validation above ran over the full document up front, so a Set

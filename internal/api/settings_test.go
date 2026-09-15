@@ -375,7 +375,7 @@ func (s stubTester) TestChannel(context.Context, settings.Channel) error { retur
 func TestGetSettingsMasksChannelTokens(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
-		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"},
+		{ID: "c1", Type: "webhook", URL: "https://hook.example/1", Token: "tk_1"},
 		{ID: "c2", Type: "webhook", URL: "https://hook"},
 	})
 	var body struct {
@@ -397,16 +397,16 @@ func TestGetSettingsMasksChannelTokens(t *testing.T) {
 func TestPutNotificationsKeepsMaskedTokenByID(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
-		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"}})
+		{ID: "c1", Type: "webhook", URL: "https://hook.example/1", Token: "tk_1"}})
 	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
 		"notifications": map[string]any{"channels": []map[string]any{
-			{"id": "c1", "type": "ntfy", "url": "https://ntfy.sh/x", "token": settings.MaskedSecret}}},
+			{"id": "c1", "type": "webhook", "url": "https://hook.example/1", "token": settings.MaskedSecret}}},
 	})
 	if rec.Code != http.StatusOK {
 		t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
 	}
 	got, _ := st.Notifications(context.Background())
-	if got.Channels[0].Token != "tk_1" || got.Channels[0].URL != "https://ntfy.sh/x" {
+	if got.Channels[0].Token != "tk_1" || got.Channels[0].URL != "https://hook.example/1" {
 		t.Fatalf("channel = %+v, want the stored token kept", got.Channels[0])
 	}
 }
@@ -420,21 +420,21 @@ func TestPutNotificationsRejectsMaskedTokenAfterURLChange(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	ctx := context.Background()
 	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
-		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x", Token: "tk_1"}})
+		{ID: "c1", Type: "webhook", URL: "https://hook.example/1", Token: "tk_1"}})
 	st.Set(ctx, settings.KeyNotifyCooldownMinutes, 30)
 
 	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
 		"notifications": map[string]any{
 			"cooldown_minutes": 45,
 			"channels": []map[string]any{
-				{"id": "c1", "type": "ntfy", "url": "https://attacker.example/x", "token": settings.MaskedSecret}},
+				{"id": "c1", "type": "webhook", "url": "https://attacker.example/x", "token": settings.MaskedSecret}},
 		},
 	})
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
 	}
 	got, _ := st.Notifications(ctx)
-	if got.Channels[0].URL != "https://ntfy.sh/x" || got.CooldownMinutes != 30 {
+	if got.Channels[0].URL != "https://hook.example/1" || got.CooldownMinutes != 30 {
 		t.Fatalf("rejected PUT was not a no-op: %+v", got)
 	}
 }
@@ -493,8 +493,8 @@ func TestPutNotificationsValidation(t *testing.T) {
 		{"bad channel type", "type", map[string]any{"channels": []map[string]any{
 			{"id": "c1", "type": "pigeon", "url": "https://x"}}}},
 		{"duplicate id", "duplicate", map[string]any{"channels": []map[string]any{
-			{"id": "c1", "type": "ntfy", "url": "https://x"},
-			{"id": "c1", "type": "ntfy", "url": "https://y"}}}},
+			{"id": "c1", "type": "webhook", "url": "https://x"},
+			{"id": "c1", "type": "webhook", "url": "https://y"}}}},
 		{"cooldown", "cooldown_minutes", map[string]any{"cooldown_minutes": 0}},
 		{"quiet hours", "quiet_hours", map[string]any{"quiet_hours_start": "25:00"}},
 		{"half-set quiet hours", "quiet_hours", map[string]any{"quiet_hours_start": "22:00"}},
@@ -512,7 +512,7 @@ func TestPutNotificationsValidation(t *testing.T) {
 func TestTestNotifyChannel(t *testing.T) {
 	h, st := newSettingsAPI(t, withNotifier(stubTester{err: errors.New("connection refused")}))
 	st.Set(context.Background(), settings.KeyNotifyChannels, []settings.Channel{
-		{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x"}})
+		{ID: "c1", Type: "webhook", URL: "https://hook.example/1"}})
 
 	var body struct {
 		OK    bool   `json:"ok"`

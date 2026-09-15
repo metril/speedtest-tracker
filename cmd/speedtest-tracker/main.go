@@ -300,6 +300,26 @@ func applyNotifications(ctx context.Context, st *settings.Store, n *notify.Notif
 	return nil
 }
 
+// migrateNtfyChannels rewrites any stored "ntfy" channels to "apprise" and
+// persists the result, once at startup after settings are loaded and
+// before the notifier is configured from them. A no-op when there is
+// nothing to migrate.
+func migrateNtfyChannels(ctx context.Context, st *settings.Store, logger *slog.Logger) error {
+	cfg, err := st.Notifications(ctx)
+	if err != nil {
+		return err
+	}
+	migrated, changed := notify.MigrateNtfyChannels(cfg.Channels, logger)
+	if !changed {
+		return nil
+	}
+	if err := st.Set(ctx, settings.KeyNotifyChannels, migrated); err != nil {
+		return fmt.Errorf("persist migrated notify channels: %w", err)
+	}
+	logger.Info("notify: migrated ntfy channels to apprise", "channels", len(migrated))
+	return nil
+}
+
 func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	cfg := config.Load()
 	logger.Info("starting", "version", version, "db_path", cfg.DBPath, "listen", cfg.Listen)
@@ -353,6 +373,10 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 
 	var metricsEnabled atomic.Bool
 	if err := applyIntegrations(ctx, st, vm, vlHandler, &metricsEnabled, logger); err != nil {
+		return err
+	}
+
+	if err := migrateNtfyChannels(ctx, st, logger); err != nil {
 		return err
 	}
 

@@ -1,6 +1,6 @@
 // Package notify evaluates completed results against per-target and global
 // thresholds and delivers alert and recovery notifications to the
-// configured webhook, ntfy and Apprise channels. Evaluation is pure; all
+// configured webhook and apprise channels. Evaluation is pure; all
 // delivery happens on the Notifier's own goroutine so the runner is never
 // blocked.
 package notify

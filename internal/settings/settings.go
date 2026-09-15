@@ -184,9 +184,11 @@ type Thresholds struct {
 }
 
 // Channel is one notification destination. Which fields matter depends on
-// Type: "webhook" uses URL and Headers, "ntfy" uses URL (the full topic
-// URL), Token, Priority and Tags, "apprise" uses URL (the Apprise API
-// notify endpoint), Tags and URLs.
+// Type: "webhook" uses URL and Headers; "apprise" uses URLs — one or more
+// github.com/unraid/apprise-go target URLs, e.g. "ntfy://host/topic" or
+// "discord://webhook_id/webhook_token" — and Tags. URL, Token and Priority
+// are unused for apprise; they only remain on the struct so stored data
+// from before the ntfy channel type was removed still decodes.
 type Channel struct {
 	ID       string            `json:"id"`
 	Type     string            `json:"type"`

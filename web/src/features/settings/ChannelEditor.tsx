@@ -20,9 +20,9 @@ interface Props {
 }
 
 /** ChannelEditor edits one notification channel. Changing Type keeps all
- * fields (headers, token, priority, tags, urls) in local state so a
- * type flip-flop doesn't lose data such as a token; fields the new type
- * doesn't use are only stripped when the form is submitted. */
+ * fields (url, headers, tags, urls) in local state so a type flip-flop
+ * doesn't lose data such as a saved Apprise URL list; fields the new
+ * type doesn't use are only stripped when the form is submitted. */
 export function ChannelEditor({
   value, onChange, onRemove, onTest, testResult, testPending, unsaved,
 }: Props) {
@@ -55,15 +55,16 @@ export function ChannelEditor({
         <select id={`channel-${id}-type`} className={inputClass} value={value.type}
           onChange={(e) => changeType(e.target.value as NotifyChannelType)}>
           <option value="webhook">webhook</option>
-          <option value="ntfy">ntfy</option>
           <option value="apprise">apprise</option>
         </select>
       </FormField>
 
-      <FormField id={`channel-${id}-url`} label="URL">
-        <Input id={`channel-${id}-url`} value={value.url}
-          onChange={(e) => onChange({ ...value, url: e.target.value })} />
-      </FormField>
+      {value.type === 'webhook' && (
+        <FormField id={`channel-${id}-url`} label="URL">
+          <Input id={`channel-${id}-url`} value={value.url}
+            onChange={(e) => onChange({ ...value, url: e.target.value })} />
+        </FormField>
+      )}
 
       {value.type === 'webhook' && (
         <div aria-label="Headers">
@@ -75,27 +76,15 @@ export function ChannelEditor({
         </div>
       )}
 
-      {(value.type === 'ntfy' || value.type === 'apprise') && (
-        <FormField id={`channel-${id}-token`} label="Token">
-          <Input id={`channel-${id}-token`} type="password" placeholder="leave unchanged"
-            value={value.token ?? ''} onChange={(e) => onChange({ ...value, token: e.target.value })} />
+      {value.type === 'apprise' && (
+        <FormField id={`channel-${id}-urls`} label="Apprise URLs">
+          <textarea id={`channel-${id}-urls`} className={inputClass}
+            value={(value.urls ?? []).join('\n')}
+            onChange={(e) => onChange({ ...value, urls: e.target.value.split('\n') })} />
         </FormField>
       )}
 
-      {value.type === 'ntfy' && (
-        <FormField id={`channel-${id}-priority`} label="Priority">
-          <select id={`channel-${id}-priority`} className={inputClass} value={value.priority ?? 'default'}
-            onChange={(e) => onChange({ ...value, priority: e.target.value })}>
-            <option value="min">min</option>
-            <option value="low">low</option>
-            <option value="default">default</option>
-            <option value="high">high</option>
-            <option value="max">max</option>
-          </select>
-        </FormField>
-      )}
-
-      {(value.type === 'ntfy' || value.type === 'apprise') && (
+      {value.type === 'apprise' && (
         <FormField id={`channel-${id}-tags`} label="Tags">
           <Input id={`channel-${id}-tags`}
             value={(value.tags ?? []).join(', ')}
@@ -103,14 +92,6 @@ export function ChannelEditor({
               ...value,
               tags: e.target.value.split(',').map((t) => t.trim()).filter(Boolean),
             })} />
-        </FormField>
-      )}
-
-      {value.type === 'apprise' && (
-        <FormField id={`channel-${id}-urls`} label="Apprise URLs">
-          <textarea id={`channel-${id}-urls`} className={inputClass}
-            value={(value.urls ?? []).join('\n')}
-            onChange={(e) => onChange({ ...value, urls: e.target.value.split('\n') })} />
         </FormField>
       )}
 

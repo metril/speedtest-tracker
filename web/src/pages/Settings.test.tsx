@@ -264,14 +264,14 @@ describe('Settings page', () => {
     expect(put.mock.calls[0][0].general).toBeUndefined();
   });
 
-  it('adds a channel and echoes an untouched token back masked', async () => {
+  it('adds a channel and echoes untouched apprise urls back masked', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({
       put,
       path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
-          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', token: '***',
+          id: 'c1', type: 'apprise', name: 'phone', enabled: true, url: '', urls: ['***'],
         }],
       }),
     });
@@ -279,7 +279,7 @@ describe('Settings page', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Save Notifications' }));
     const sent = put.mock.calls[0][0].notifications.channels;
     expect(sent).toHaveLength(2);
-    expect(sent[0].token).toBe('***');
+    expect(sent[0].urls).toEqual(['***']);
   });
 
   it('reports a channel test result inline', async () => {
@@ -289,7 +289,7 @@ describe('Settings page', () => {
       path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
-          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+          id: 'c1', type: 'apprise', name: 'phone', enabled: true, url: '', urls: ['ntfy://host/topic'],
         }],
       }),
     });
@@ -302,7 +302,7 @@ describe('Settings page', () => {
       path: '/settings/notifications',
       settings: settingsFixture({
         channels: [{
-          id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+          id: 'c1', type: 'apprise', name: 'phone', enabled: true, url: '', urls: ['ntfy://host/topic'],
         }],
       }),
     });
@@ -330,10 +330,10 @@ describe('Settings page', () => {
       settings: settingsFixture({
         channels: [
           {
-            id: 'c1', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x',
+            id: 'c1', type: 'apprise', name: 'phone', enabled: true, url: '', urls: ['ntfy://host/x'],
           },
           {
-            id: 'c2', type: 'ntfy', name: 'laptop', enabled: true, url: 'https://ntfy.sh/y',
+            id: 'c2', type: 'apprise', name: 'laptop', enabled: true, url: '', urls: ['ntfy://host/y'],
           },
         ],
       }),
@@ -363,9 +363,9 @@ describe('Settings page', () => {
       }),
     });
     expect(await screen.findByLabelText('Headers')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Priority')).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Type'), 'ntfy');
-    expect(screen.getByLabelText('Priority')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Apprise URLs')).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'apprise');
+    expect(screen.getByLabelText('Apprise URLs')).toBeInTheDocument();
     expect(screen.queryByLabelText('Headers')).not.toBeInTheDocument();
   });
 

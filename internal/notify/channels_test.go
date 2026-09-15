@@ -3,7 +3,6 @@ package notify_test
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -40,48 +39,57 @@ func TestDeliverWebhookPostsJSONWithHeaders(t *testing.T) {
 	}
 }
 
-func TestDeliverNtfyUsesHeadersAndToken(t *testing.T) {
-	var h http.Header
-	var body []byte
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h = r.Header.Clone()
-		body, _ = io.ReadAll(r.Body)
-	}))
-	defer srv.Close()
-
-	ch := settings.Channel{Type: "ntfy", URL: srv.URL, Token: "tk_1",
-		Priority: "high", Tags: []string{"warning", "satellite"}}
-	m := notify.Message{Kind: "alert", Title: "Home: ping above 50 ms", Body: "80.0 ms (limit 50.0 ms)"}
-	if err := notify.Deliver(context.Background(), srv.Client(), ch, m); err != nil {
-		t.Fatal(err)
-	}
-	if h.Get("Title") != m.Title || h.Get("Priority") != "high" ||
-		h.Get("Tags") != "warning,satellite" || h.Get("Authorization") != "Bearer tk_1" {
-		t.Fatalf("headers = %v", h)
-	}
-	if string(body) != m.Body {
-		t.Fatalf("body = %q, want %q", body, m.Body)
-	}
-}
-
-func TestDeliverAppriseSendsTagsAndURLs(t *testing.T) {
+// TestDeliverAppriseSendsToConfiguredURLs verifies end-to-end delivery
+// through the embedded apprise-go library: a "json://" target talks
+// plain HTTP, so it can point at an httptest.Server and prove the
+// library actually posts the rendered message, with no network access
+// required. ch.URL is deliberately left unset — apprise channels don't
+// use it.
+func TestDeliverAppriseSendsToConfiguredURLs(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&body)
 	}))
 	defer srv.Close()
 
-	ch := settings.Channel{Type: "apprise", URL: srv.URL + "/notify",
-		Tags: []string{"home"}, URLs: []string{"mailto://a:b@example.com"}}
+	target := "json://" + strings.TrimPrefix(srv.URL, "http://")
+	ch := settings.Channel{Type: "apprise", Tags: []string{"home"}, URLs: []string{target}}
 	m := notify.Message{Kind: "recovery", Title: "Home: download recovered", Body: "120.0 Mbps"}
-	if err := notify.Deliver(context.Background(), srv.Client(), ch, m); err != nil {
+	if err := notify.Deliver(context.Background(), nil, ch, m); err != nil {
 		t.Fatal(err)
 	}
-	if body["title"] != m.Title || body["body"] != m.Body || body["type"] != "success" || body["tag"] != "home" {
+	if body["title"] != m.Title || body["message"] != m.Body || body["type"] != "success" {
 		t.Fatalf("payload = %v", body)
 	}
-	if urls, _ := body["urls"].([]any); len(urls) != 1 {
-		t.Fatalf("urls = %v", body["urls"])
+}
+
+// TestDeliverAppriseFailureType covers the notify-type mapping for a
+// MetricFailure alert (failure, not the generic alert warning).
+func TestDeliverAppriseFailureType(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewDecoder(r.Body).Decode(&body)
+	}))
+	defer srv.Close()
+
+	target := "json://" + strings.TrimPrefix(srv.URL, "http://")
+	ch := settings.Channel{Type: "apprise", URLs: []string{target}}
+	m := notify.Message{Kind: "alert", Metric: notify.MetricFailure, Title: "Home: test failed", Body: "dial tcp: refused"}
+	if err := notify.Deliver(context.Background(), nil, ch, m); err != nil {
+		t.Fatal(err)
+	}
+	if body["type"] != "failure" {
+		t.Fatalf("type = %v, want failure", body["type"])
+	}
+}
+
+// TestDeliverAppriseWrapsTargetError checks that a bad target surfaces
+// the library's own error (which names the failing URL) unwrapped.
+func TestDeliverAppriseWrapsTargetError(t *testing.T) {
+	ch := settings.Channel{Type: "apprise", URLs: []string{"json://127.0.0.1:1/x"}}
+	err := notify.Deliver(context.Background(), nil, ch, notify.Message{Title: "t", Body: "b"})
+	if err == nil || !strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Fatalf("err = %v, want one naming the failing target", err)
 	}
 }
 
@@ -103,11 +111,14 @@ func TestValidateChannel(t *testing.T) {
 		ch   settings.Channel
 		want string
 	}{
-		{"ok", settings.Channel{ID: "c1", Type: "ntfy", URL: "https://ntfy.sh/x"}, ""},
+		{"ok webhook", settings.Channel{ID: "c1", Type: "webhook", URL: "https://hook"}, ""},
 		{"bad type", settings.Channel{ID: "c1", Type: "pigeon", URL: "https://x"}, "type"},
-		{"bad url", settings.Channel{ID: "c1", Type: "ntfy", URL: "ftp://x"}, "url"},
-		{"no id", settings.Channel{Type: "ntfy", URL: "https://x"}, "id"},
-		{"bad priority", settings.Channel{ID: "c", Type: "ntfy", URL: "https://x", Priority: "loudest"}, "priority"},
+		{"bad url", settings.Channel{ID: "c1", Type: "webhook", URL: "ftp://x"}, "url"},
+		{"no id", settings.Channel{Type: "webhook", URL: "https://x"}, "id"},
+		{"bad priority", settings.Channel{ID: "c", Type: "webhook", URL: "https://x", Priority: "loudest"}, "priority"},
+		{"ok apprise", settings.Channel{ID: "c1", Type: "apprise", URLs: []string{"ntfy://host/topic"}}, ""},
+		{"apprise no urls", settings.Channel{ID: "c1", Type: "apprise"}, "urls"},
+		{"apprise bad url", settings.Channel{ID: "c1", Type: "apprise", URLs: []string{"not-a-valid-scheme://x"}}, "apprise url"},
 	} {
 		err := notify.ValidateChannel(tc.ch)
 		if (tc.want == "") != (err == nil) || (err != nil && !strings.Contains(err.Error(), tc.want)) {

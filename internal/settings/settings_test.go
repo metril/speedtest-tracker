@@ -340,8 +340,8 @@ func TestNotificationsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	chans := []Channel{{
-		ID: "c1", Type: "ntfy", Name: "phone", Enabled: true,
-		URL: "https://ntfy.sh/speedtest", Token: "tk_1", Priority: "high", Tags: []string{"warning"},
+		ID: "c1", Type: "apprise", Name: "phone", Enabled: true,
+		URLs: []string{"ntfy://tk_1@ntfy.example.com/speedtest?priority=high"}, Tags: []string{"warning"},
 	}}
 	min := 100.0
 	for key, val := range map[string]any{
@@ -363,7 +363,9 @@ func TestNotificationsRoundTrip(t *testing.T) {
 	if !got.Enabled || got.CooldownMinutes != 15 || got.QuietHoursStart != "22:00" {
 		t.Fatalf("round trip = %+v", got)
 	}
-	if len(got.Channels) != 1 || got.Channels[0].Token != "tk_1" || got.Channels[0].Tags[0] != "warning" {
+	if len(got.Channels) != 1 || len(got.Channels[0].URLs) != 1 ||
+		got.Channels[0].URLs[0] != "ntfy://tk_1@ntfy.example.com/speedtest?priority=high" ||
+		got.Channels[0].Tags[0] != "warning" {
 		t.Fatalf("channels = %+v", got.Channels)
 	}
 	if got.DefaultThresholds.DownloadMbpsMin == nil || *got.DefaultThresholds.DownloadMbpsMin != 100 {

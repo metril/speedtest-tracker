@@ -424,7 +424,7 @@ export interface ThresholdSet {
   sla_upload_mbps?: number | null;
 }
 
-export type NotifyChannelType = 'webhook' | 'ntfy' | 'apprise';
+export type NotifyChannelType = 'webhook' | 'apprise';
 
 export interface NotifyChannel {
   id: string;

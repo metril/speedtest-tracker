@@ -110,7 +110,7 @@ export function Settings() {
   const addChannel = () => {
     if (!notifications) return;
     const channel: NotifyChannel = {
-      id: newId(8), type: 'ntfy', name: 'New channel', enabled: true, url: '',
+      id: newId(8), type: 'webhook', name: 'New channel', enabled: true, url: '',
     };
     setNotifications({ ...notifications, channels: [...notifications.channels, channel] });
   };

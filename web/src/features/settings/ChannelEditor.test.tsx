@@ -16,25 +16,24 @@ describe('ChannelEditor', () => {
       <ChannelEditor value={webhookChannel} onChange={onChange} onRemove={vi.fn()} onTest={vi.fn()} />,
     );
     expect(screen.getByLabelText('Headers')).toBeInTheDocument();
-    expect(screen.queryByLabelText('Priority')).not.toBeInTheDocument();
-    expect(screen.queryByLabelText('Token')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Apprise URLs')).not.toBeInTheDocument();
   });
 
-  it('keeps prior-type fields (e.g. a token) in state across a type flip-flop', async () => {
+  it('keeps prior-type fields (e.g. Apprise URLs) in state across a type flip-flop', async () => {
     // A stateful harness stands in for Settings.tsx's controlled state, so
     // this exercises the real onChange -> value round trip a flip-flop
-    // (ntfy -> webhook -> ntfy) goes through in the app.
+    // (apprise -> webhook -> apprise) goes through in the app.
     function Harness() {
       const [value, setValue] = useState<NotifyChannel>({
-        id: 'c2', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', token: 'secret-token',
+        id: 'c2', type: 'apprise', name: 'phone', enabled: true, url: '', urls: ['ntfy://example.com/topic'],
       });
       return <ChannelEditor value={value} onChange={setValue} onRemove={vi.fn()} onTest={vi.fn()} />;
     }
     render(<Harness />);
     await userEvent.selectOptions(screen.getByLabelText('Type'), 'webhook');
-    expect(screen.queryByLabelText('Token')).not.toBeInTheDocument();
-    await userEvent.selectOptions(screen.getByLabelText('Type'), 'ntfy');
-    expect(screen.getByLabelText('Token')).toHaveValue('secret-token');
+    expect(screen.queryByLabelText('Apprise URLs')).not.toBeInTheDocument();
+    await userEvent.selectOptions(screen.getByLabelText('Type'), 'apprise');
+    expect(screen.getByLabelText('Apprise URLs')).toHaveValue('ntfy://example.com/topic');
   });
 
   it('calls onTest and shows the returned result', async () => {
@@ -71,11 +70,11 @@ describe('ChannelEditor', () => {
 
   it('joins tags for display and splits edits back into an array', async () => {
     const onChange = vi.fn();
-    const ntfyChannel: NotifyChannel = {
-      id: 'c2', type: 'ntfy', name: 'phone', enabled: true, url: 'https://ntfy.sh/x', tags: ['a', 'b'],
+    const appriseChannel: NotifyChannel = {
+      id: 'c2', type: 'apprise', name: 'phone', enabled: true, url: '', tags: ['a', 'b'],
     };
     render(
-      <ChannelEditor value={ntfyChannel} onChange={onChange} onRemove={vi.fn()} onTest={vi.fn()} />,
+      <ChannelEditor value={appriseChannel} onChange={onChange} onRemove={vi.fn()} onTest={vi.fn()} />,
     );
     expect(screen.getByLabelText('Tags')).toHaveValue('a, b');
     await userEvent.type(screen.getByLabelText('Tags'), 'c');
