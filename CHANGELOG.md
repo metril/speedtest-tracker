@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.7.0](https://github.com/metril/speedtest-tracker/compare/v0.6.0...v0.7.0) (2026-09-15)
+
+
+### ⚠ BREAKING CHANGES
+
+* **notify:** the standalone "ntfy" channel type is removed. Any existing ntfy channel is rewritten to type "apprise" automatically on first startup after upgrading (an ntfy://[token@]host/topic?priority=&tags= URL built from its old fields); a channel whose old URL can't be parsed is disabled, not deleted, and a warning is logged. The external Apprise API server this app used to require is no longer used at all.
+
+### Features
+
+* **notify:** embed apprise-go, drop ntfy channel type and external Apprise server ([d80111e](https://github.com/metril/speedtest-tracker/commit/d80111e899ecc9f08aa2881b4dd59a096035fc0e))
+* rotate through an ordered host list per target run ([4a01a53](https://github.com/metril/speedtest-tracker/commit/4a01a530e6ece85a792d6f4802071ddf703c45a2))
+* user-managed queues replace fixed wan/lan lanes ([a42b6dd](https://github.com/metril/speedtest-tracker/commit/a42b6dd325051a8b06c24c3935a665a1c97f9548))
+* **web:** add Queues page, rename Lane to Queue throughout ([41e9b24](https://github.com/metril/speedtest-tracker/commit/41e9b24f6e11aa5b8396ae999584426718380a70))
+* **web:** rotate through an ordered host/server list per target ([bb4b797](https://github.com/metril/speedtest-tracker/commit/bb4b797d7269b5ed7d7d08f35e1b11fc206ed045))
+* **web:** surface speed test errors in live panel, results and dashboard ([5cabceb](https://github.com/metril/speedtest-tracker/commit/5cabceb9a4856297940f394935df893546f8193d))
+
+
+### Bug Fixes
+
+* harden queue resolution, key runner channels by id, address review findings ([70a0772](https://github.com/metril/speedtest-tracker/commit/70a0772fe60584bb3b690a0312b51c8c9cf967dd))
+* migration 0007 fails against a pre-queues db with foreign_keys=ON ([3207cf5](https://github.com/metril/speedtest-tracker/commit/3207cf5a407010fe36f671036897598a939274e0))
+* **notify:** apprise ntfy migration bearer auth, dead priority validation, inert apprise tags UI ([b7215e8](https://github.com/metril/speedtest-tracker/commit/b7215e82bfcd167effbf805718485acc1aa51d59))
+* redact apprise credentials, match masked URLs by identity, accept legacy lane alias ([417f599](https://github.com/metril/speedtest-tracker/commit/417f59930b95d6ffb3775003301e4b677d75ff31))
+* RedactURL keeps only scheme://host, collapses path+query to /*** ([9548a3a](https://github.com/metril/speedtest-tracker/commit/9548a3abeea048293254c304012c8b7c6d2bdb16))
+* **web:** align previous-period overlay by time offset ([a9e6872](https://github.com/metril/speedtest-tracker/commit/a9e68727b20ee21574b266b6b358b8d8e79e7c84))
+* **web:** dismiss live drawer for user-started runs ([85dc69d](https://github.com/metril/speedtest-tracker/commit/85dc69dd836453b5809188c8726d986c2bb62f92))
+* **web:** pass run id on re-execute open, fix CompactBar expand arg ([6a28ad1](https://github.com/metril/speedtest-tracker/commit/6a28ad13a8692f4c5da507b67196ea45dc438092))
+* **web:** pick up engine error from result event in live run state ([8cdd19f](https://github.com/metril/speedtest-tracker/commit/8cdd19f8a0b03a76e9278c93b98e55db25915e2f))
+
 ## [0.6.0](https://github.com/metril/speedtest-tracker/compare/v0.5.0...v0.6.0) (2026-09-14)
 
 
