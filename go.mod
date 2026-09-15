@@ -3,10 +3,13 @@ module github.com/metril/speedtest-tracker
 go 1.25.0
 
 require (
+	github.com/coreos/go-oidc/v3 v3.17.0
 	github.com/go-chi/chi/v5 v5.3.2
+	github.com/go-jose/go-jose/v4 v4.1.5
 	github.com/prometheus/client_golang v1.22.0
 	github.com/robfig/cron/v3 v3.0.1
 	github.com/unraid/apprise-go v0.3.3
+	golang.org/x/oauth2 v0.30.0
 	modernc.org/sqlite v1.58.0
 )
 
