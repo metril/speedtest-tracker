@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import { KeyValueInput } from '../../components/settings/KeyValueInput';
+import { TestButton } from '../../components/settings/TestButton';
 import { SwitchField } from '../../components/SwitchField';
 import type { NotifyChannel, NotifyChannelType } from '../../lib/api';
 import { inputClass } from './styles';
@@ -37,18 +38,30 @@ export function ChannelEditor({
   };
 
   return (
-    <div className="grid gap-3 rounded-md border border-line p-3">
-      <div className="flex items-center justify-between gap-3">
+    <div className="grid gap-3 px-4 py-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="uppercase">{value.type}</Badge>
           <span className="text-sm font-medium text-fg">{value.name}</span>
         </div>
-        <SwitchField
-          id={`channel-${id}-enabled`} label="Enabled"
-          checked={value.enabled}
-          onCheckedChange={(checked) => onChange({ ...value, enabled: checked })}
-        />
+        <div className="flex items-center gap-3">
+          <TestButton
+            label={`Test ${value.name}`} onTest={onTest} pending={!!testPending}
+            result={testResult} disabled={testPending || unsaved || readOnly}
+            disabledReason={unsaved ? 'Save first to test this channel' : readOnly ? 'Read-only: admin group required' : undefined}
+          />
+          <Button type="button" variant="ghost" className="text-muted hover:text-bad"
+            disabled={readOnly} onClick={onRemove}>
+            Remove {value.name}
+          </Button>
+        </div>
       </div>
+
+      <SwitchField
+        id={`channel-${id}-enabled`} label="Enabled"
+        checked={value.enabled}
+        onCheckedChange={(checked) => onChange({ ...value, enabled: checked })}
+      />
 
       <FormField id={`channel-${id}-name`} label="Name">
         <Input id={`channel-${id}-name`} value={value.name}
@@ -87,22 +100,6 @@ export function ChannelEditor({
             onChange={(e) => onChange({ ...value, urls: e.target.value.split('\n') })} />
         </FormField>
       )}
-
-      <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={testPending || unsaved || readOnly}
-          title={unsaved ? 'Save first to test this channel' : undefined} onClick={onTest}>
-          Test {value.name}
-        </Button>
-        <Button type="button" variant="ghost" className="text-muted hover:text-bad"
-          disabled={readOnly} onClick={onRemove}>
-          Remove {value.name}
-        </Button>
-        {unsaved && <p className="text-sm text-faint">Save first to test this channel</p>}
-        {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
-        {testResult && (
-          <p className={testResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{testResult.message}</p>
-        )}
-      </div>
     </div>
   );
 }
