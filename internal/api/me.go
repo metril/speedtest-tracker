@@ -11,6 +11,8 @@ import (
 type meResponse struct {
 	Mode    string   `json:"mode"`
 	User    string   `json:"user"`
+	Email   string   `json:"email,omitempty"`
+	Name    string   `json:"name,omitempty"`
 	Groups  []string `json:"groups"`
 	IsAdmin bool     `json:"is_admin"`
 }
@@ -31,6 +33,8 @@ func (d Deps) me(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, meResponse{
 		Mode:    mode,
 		User:    id.User,
+		Email:   id.Email,
+		Name:    id.Name,
 		Groups:  groups,
 		IsAdmin: isAdmin,
 	})

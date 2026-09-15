@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
 	"github.com/metril/speedtest-tracker/internal/engine"
+	"github.com/metril/speedtest-tracker/internal/oidcauth"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/sse"
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -91,6 +92,26 @@ type Deps struct {
 	// nil leaves every route open, which is what the existing handler
 	// tests and the `run --engine` CLI path rely on.
 	Auth Authenticator
+
+	// OIDC returns the currently configured OIDC provider for the
+	// /auth/oidc/* endpoints. Optional: nil (or a func returning nil)
+	// means auth mode oidc has no valid provider yet, so the endpoints
+	// redirect to /login?error=oidc_not_configured instead of 503ing —
+	// they run outside the /api/v1 auth middleware.
+	OIDC func() *oidcauth.Provider
+
+	// Sessions backs session creation/deletion for the OIDC login and
+	// logout endpoints. Optional: nil means those endpoints answer as if
+	// OIDC were not configured.
+	Sessions SessionStore
+
+	// StateCodec signs/verifies the OIDC login flow's state cookie.
+	// Optional: nil means the OIDC endpoints answer as if OIDC were not
+	// configured.
+	StateCodec *oidcauth.StateCodec
+
+	// Now returns the current time. Optional: nil uses time.Now.
+	Now func() time.Time
 
 	// summary caches /stats/summary bodies; New fills it in.
 	summary *summaryCache
@@ -250,6 +271,13 @@ func New(deps Deps) http.Handler {
 			v1.Delete("/settings/tokens/{id}", deps.deleteToken)
 		}
 	})
+
+	// OIDC login/logout live outside both the /api/v1 auth middleware and
+	// requestTimeout group: a browser redirect flow, not an API call.
+	r.Get("/auth/oidc/start", deps.oidcStart)
+	r.Get("/auth/oidc/callback", deps.oidcCallback)
+	r.Get("/auth/logout", deps.oidcLogout)
+	r.Post("/auth/logout", deps.oidcLogout)
 
 	// The SPA is not gated: it is a static shell that fetches
 	// /api/v1/me itself and renders a sign-in hint on 401.
