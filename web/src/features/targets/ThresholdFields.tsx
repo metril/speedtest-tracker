@@ -12,6 +12,11 @@ interface Props {
    * only means something on a target, where it can suppress a metric that
    * still has a global default. */
   allowDisable?: boolean;
+  /** showCustomToggle hides the "Custom notification" switch and behaves
+   * as if it were always on. The redesigned settings layout embeds
+   * ThresholdFields directly inside its own card/toggle chrome, so it
+   * doesn't need this component's own toggle affordance. */
+  showCustomToggle?: boolean;
 }
 
 const field = 'w-full rounded border border-line bg-surface px-2 py-1 text-sm text-fg focus:border-accent focus:outline-none';
@@ -88,8 +93,9 @@ function modeOf(v: number | null | undefined): Mode {
  * apply when "Custom notification" is on; off, the target follows the
  * global defaults untouched (an empty {} is equivalent to "off" on the
  * wire, but the toggle is purely a UI affordance for clearing overrides). */
-export function ThresholdFields({ value, onChange, allowDisable = true }: Props) {
+export function ThresholdFields({ value, onChange, allowDisable = true, showCustomToggle = true }: Props) {
   const [custom, setCustom] = useState(() => Object.keys(value).length > 0);
+  const effectiveCustom = showCustomToggle ? custom : true;
   const [raw, setRaw] = useState<Record<NumericKey, string>>(() => ({
     ...BLANK,
     download_mbps_min: toRaw(value.download_mbps_min),
@@ -151,12 +157,14 @@ export function ThresholdFields({ value, onChange, allowDisable = true }: Props)
 
   return (
     <div className="grid gap-3">
-      <SwitchField
-        id="threshold-custom" label="Custom notification" checked={custom} onCheckedChange={toggleCustom}
-        hint="Off: this target uses the global notification defaults from Settings → Notifications."
-      />
+      {showCustomToggle && (
+        <SwitchField
+          id="threshold-custom" label="Custom notification" checked={custom} onCheckedChange={toggleCustom}
+          hint="Off: this target uses the global notification defaults from Settings → Notifications."
+        />
+      )}
 
-      {custom && (
+      {effectiveCustom && (
         <>
           {Object.keys(value).length === 0 && (
             <p className="text-xs text-faint">
