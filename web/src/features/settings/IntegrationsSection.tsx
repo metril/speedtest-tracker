@@ -32,6 +32,7 @@ export function IntegrationsSection() {
       <ExportAuthFields
         idPrefix="vm" label="VictoriaMetrics auth"
         locked={isLocked}
+        readOnly={readOnly}
         value={{
           type: integrations.vm_auth_type,
           username: integrations.vm_auth_username,
@@ -85,6 +86,7 @@ export function IntegrationsSection() {
       <ExportAuthFields
         idPrefix="vl" label="VictoriaLogs auth"
         locked={isLocked}
+        readOnly={readOnly}
         value={{
           type: integrations.vl_auth_type,
           username: integrations.vl_auth_username,

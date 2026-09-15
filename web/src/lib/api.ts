@@ -573,6 +573,16 @@ export const logout = async () => {
   await fetch('/auth/logout', { method: 'POST' });
 };
 
+/** authMode reports the server's configured auth mode. It backs the
+ * unauthenticated Login page, so like logout() it hits /auth/mode
+ * directly instead of /api/v1 -- there is no session yet for request()
+ * to be gated on. */
+export const authMode = async (): Promise<AuthMode> => {
+  const res = await fetch('/auth/mode');
+  const body = JSON.parse(await res.text());
+  return body.mode as AuthMode;
+};
+
 /** ApiTokenInfo never carries the token itself -- only CreatedToken does,
  * and only in the response to the request that created it. */
 export interface ApiTokenInfo {

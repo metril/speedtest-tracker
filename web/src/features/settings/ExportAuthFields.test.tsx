@@ -44,4 +44,16 @@ describe('ExportAuthFields', () => {
     render(<Harness initial={{ type: 'bearer', token: '***' }} />);
     expect(screen.getByLabelText('VictoriaMetrics auth token')).toHaveAttribute('placeholder', 'leave unchanged');
   });
+
+  it('disables the type select and every field when readOnly', () => {
+    render(
+      <ExportAuthFields
+        idPrefix="vm" label="VictoriaMetrics auth" readOnly
+        value={{ type: 'basic', username: 'u' }} onChange={() => {}}
+      />,
+    );
+    expect(screen.getByLabelText('VictoriaMetrics auth')).toBeDisabled();
+    expect(screen.getByLabelText('VictoriaMetrics auth username')).toBeDisabled();
+    expect(screen.getByLabelText('VictoriaMetrics auth password')).toBeDisabled();
+  });
 });

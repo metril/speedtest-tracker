@@ -30,6 +30,7 @@ it('redirects to /login when /me answers 401', async () => {
     if (url.startsWith('/api/v1/me')) {
       return jsonResponse({ error: { code: 'unauthenticated', message: 'not signed in' } }, 401);
     }
+    if (url.startsWith('/auth/mode')) return jsonResponse({ mode: 'oidc' });
     throw new Error(`unexpected fetch: ${url}`);
   }));
   render(<App />);

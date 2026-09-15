@@ -25,6 +25,7 @@ export const queryKeys = {
   settings: ['settings'] as const,
   me: ['me'] as const,
   tokens: ['tokens'] as const,
+  authMode: ['auth-mode'] as const,
 };
 
 export function useTargets() {
@@ -345,6 +346,15 @@ export function useMe() {
 
 export function useLogout() {
   return useMutation({ mutationFn: api.logout });
+}
+
+/** useAuthMode is the server's configured auth mode, fetched by the
+ * unauthenticated Login page to decide what to render (an SSO button,
+ * a token/forward_auth hint, or a redirect to / for open mode). Unlike
+ * useMe() it never 401s -- /auth/mode is public -- so no retry tuning is
+ * needed. */
+export function useAuthMode() {
+  return useQuery({ queryKey: queryKeys.authMode, queryFn: api.authMode, staleTime: Infinity });
 }
 
 export function useTokens() {
