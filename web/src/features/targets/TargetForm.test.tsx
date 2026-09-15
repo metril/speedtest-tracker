@@ -1,9 +1,18 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createContext, useContext, type ReactNode } from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TargetForm } from './TargetForm';
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
+}
+
+const queues = [
+  { id: 1, name: 'wan', created_at: '' },
+  { id: 2, name: 'lan', created_at: '' },
+];
 
 // TargetForm renders EngineOptionFields' Ookla/iperf3 server pickers, which
 // wrap their results in a Radix Popover. Rendering Radix's real
@@ -32,6 +41,23 @@ function wrap(node: ReactNode) {
   return render(<QueryClientProvider client={qc}>{node}</QueryClientProvider>);
 }
 
+beforeEach(() => {
+  // Scoped to /queues: other fetch calls (Ookla/iperf3 server search) are
+  // left to fail as they did before this stub existed, so they don't
+  // start behaving differently under a blanket "everything succeeds" mock.
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    if (String(input).includes('/queues')) return jsonResponse(queues);
+    return jsonResponse({ error: { code: 'not_found', message: 'not mocked' } }, 404);
+  }));
+});
+afterEach(() => {
+  // Belt-and-braces: if a test throws before its own vi.useRealTimers()
+  // (e.g. an assertion failure mid-test), fake timers would otherwise
+  // leak into every later test in this file and hang them.
+  vi.useRealTimers();
+  vi.unstubAllGlobals();
+});
+
 describe('TargetForm', () => {
   it('shows the iperf3 option fields when iperf3 is chosen and Custom is switched on', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
@@ -58,13 +84,15 @@ describe('TargetForm', () => {
     expect(screen.getAllByRole('checkbox', { name: '1 MB' })).toHaveLength(2);
   });
 
-  it('submits name, engine, lane and typed options', () => {
+  it('submits name, engine, queue and typed options', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm onSubmit={onSubmit} onCancel={vi.fn()} submitting={false} />);
 
+    await waitFor(() => expect(screen.getByRole('option', { name: 'lan' })).toBeInTheDocument());
+
     fireEvent.change(screen.getByLabelText('Name'), { target: { value: 'NAS' } });
     fireEvent.change(screen.getByLabelText('Engine'), { target: { value: 'iperf3' } });
-    fireEvent.change(screen.getByLabelText('Lane'), { target: { value: 'lan' } });
+    fireEvent.change(screen.getByLabelText('Queue'), { target: { value: '2' } });
     fireEvent.click(screen.getByLabelText('Custom'));
     fireEvent.change(screen.getByLabelText('Host'), { target: { value: '10.0.0.5' } });
     fireEvent.change(screen.getByLabelText('Port'), { target: { value: '5201' } });
@@ -74,7 +102,7 @@ describe('TargetForm', () => {
       name: 'NAS',
       engine: 'iperf3',
       enabled: true,
-      lane: 'lan',
+      queue_id: 2,
       options: { host: '10.0.0.5', port: 5201 },
       thresholds: {},
     });
@@ -93,7 +121,7 @@ describe('TargetForm', () => {
     wrap(
       <TargetForm
         initial={{
-          id: 4, name: 'Home', engine: 'ookla', enabled: false, lane: 'wan',
+          id: 4, name: 'Home', engine: 'ookla', enabled: false, queue_id: 1, queue_name: 'wan',
           options: { server_id: 1234 }, thresholds: {},
           created_at: '', updated_at: '',
         }}
@@ -149,7 +177,7 @@ describe('TargetForm', () => {
     wrap(
       <TargetForm
         initial={{
-          id: 9, name: 'Legacy', engine: 'iperf3', enabled: true, lane: 'wan',
+          id: 9, name: 'Legacy', engine: 'iperf3', enabled: true, queue_id: 1, queue_name: 'wan',
           options: { reverse: true, bidir: true }, thresholds: {},
           created_at: '', updated_at: '',
         }}
@@ -226,13 +254,16 @@ describe('TargetForm', () => {
 
   it('debounces the ookla server search so one request fires per pause', async () => {
     vi.useFakeTimers();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      status: 200,
-      statusText: 'ok',
-      text: async () => JSON.stringify([]),
+    // TargetForm's own /queues fetch (via useQueues) also goes through this
+    // mock on mount; the assertions below only care about ookla search
+    // calls, so they filter that one out rather than asserting on the
+    // mock's call count directly.
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).includes('/queues')) return { ok: true, status: 200, statusText: 'ok', text: async () => JSON.stringify(queues) };
+      return { ok: true, status: 200, statusText: 'ok', text: async () => JSON.stringify([]) };
     });
     vi.stubGlobal('fetch', fetchMock);
+    const ooklaCalls = () => fetchMock.mock.calls.filter((c) => !String(c[0]).includes('/queues'));
 
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     const search = screen.getByLabelText('Search servers');
@@ -243,13 +274,13 @@ describe('TargetForm', () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(299);
     });
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(ooklaCalls()).toHaveLength(0);
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(1);
     });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(String(fetchMock.mock.calls[0][0])).toContain('lond');
+    expect(ooklaCalls()).toHaveLength(1);
+    expect(String(ooklaCalls()[0][0])).toContain('lond');
 
     vi.useRealTimers();
     vi.unstubAllGlobals();
@@ -271,7 +302,7 @@ describe('TargetForm', () => {
 
   it('seeds threshold fields from an existing target with Custom notification on', async () => {
     wrap(<TargetForm initial={{
-      id: 4, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      id: 4, name: 'Home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan', options: {},
       thresholds: { ping_ms_max: 40 }, created_at: '', updated_at: '',
     }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
     expect(screen.getByLabelText('Custom notification')).toHaveAttribute('aria-checked', 'true');
@@ -283,7 +314,7 @@ describe('TargetForm', () => {
 
   it('opens a seeded target with a disabled metric in Off mode', () => {
     wrap(<TargetForm initial={{
-      id: 6, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      id: 6, name: 'Home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan', options: {},
       thresholds: { ping_ms_max: null }, created_at: '', updated_at: '',
     }} onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
     expect(screen.getByLabelText('Custom notification')).toHaveAttribute('aria-checked', 'true');
@@ -306,7 +337,7 @@ describe('TargetForm', () => {
   it('removes the key when switching a metric from Off back to Inherit', async () => {
     const onSubmit = vi.fn();
     wrap(<TargetForm initial={{
-      id: 7, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      id: 7, name: 'Home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan', options: {},
       thresholds: { ping_ms_max: null }, created_at: '', updated_at: '',
     }} onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
     await userEvent.selectOptions(screen.getByLabelText('Max ping (ms) mode'), 'Inherit');
@@ -398,7 +429,7 @@ describe('TargetForm', () => {
 
   it('shows a seeded notify_on_failure: false target with the failure select set to Off', async () => {
     wrap(<TargetForm initial={{
-      id: 5, name: 'Home', engine: 'ookla', enabled: true, lane: 'wan', options: {},
+      id: 5, name: 'Home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan', options: {},
       thresholds: { notify_on_failure: false }, created_at: '', updated_at: '',
     }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
     expect(screen.getByLabelText('Notify on failed test')).toHaveValue('false');

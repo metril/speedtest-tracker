@@ -39,7 +39,7 @@ const settings = {
 };
 
 const target = {
-  id: 1, name: 'home', engine: 'fake', enabled: true, lane: 'wan',
+  id: 1, name: 'home', engine: 'fake', enabled: true, queue_id: 1, queue_name: 'wan',
   options: {}, thresholds: {}, created_at: '', updated_at: '',
 };
 

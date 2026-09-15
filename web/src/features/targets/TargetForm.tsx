@@ -5,10 +5,9 @@ import { inputClass } from '@/features/settings/styles';
 import { FormField } from '../../components/FormField';
 import { SwitchField } from '../../components/SwitchField';
 import { ENGINES, type Target, type TargetInput, type ThresholdSet } from '../../lib/api';
+import { useQueues } from '../../lib/queries';
 import { EngineOptionFields, validateEngineOptions, type Options } from './EngineOptionFields';
 import { ThresholdFields, validateThresholds } from './ThresholdFields';
-
-const LANES = ['wan', 'lan'] as const;
 
 interface Props {
   initial?: Target;
@@ -21,9 +20,10 @@ interface Props {
 
 /** TargetForm creates or edits one target. */
 export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: Props) {
+  const queues = useQueues();
   const [name, setName] = useState(initial?.name ?? '');
   const [engine, setEngine] = useState(initial?.engine ?? 'ookla');
-  const [lane, setLane] = useState(initial?.lane ?? 'wan');
+  const [queueId, setQueueId] = useState(initial?.queue_id ?? 0);
   const [enabled, setEnabled] = useState(initial?.enabled ?? true);
   const [options, setOptions] = useState<Options>(initial?.options ?? {});
   const [thresholds, setThresholds] = useState<ThresholdSet>((initial?.thresholds as ThresholdSet) ?? {});
@@ -39,6 +39,9 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   // validateThresholds({}) is always undefined, so thresholdsError can only
   // surface while ThresholdFields' Custom notification toggle is on.
   const thresholdsError = validateThresholds(thresholds);
+  // Falls back to the first queue once the list loads, so a fresh form
+  // (queueId still 0) always submits a real queue id.
+  const selectedQueueId = queueId || queues.data?.[0]?.id || 0;
 
   return (
     <Card>
@@ -56,7 +59,8 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
               return;
             }
             onSubmit({
-              name: name.trim(), engine, enabled, lane, options, thresholds: thresholds as Record<string, unknown>,
+              name: name.trim(), engine, enabled, queue_id: selectedQueueId, options,
+              thresholds: thresholds as Record<string, unknown>,
             });
           }}
         >
@@ -71,10 +75,13 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
                 {ENGINES.map((e) => <option key={e} value={e}>{e}</option>)}
               </select>
             </FormField>
-            <FormField id="target-lane" label="Lane">
-              <select id="target-lane" className={inputClass} value={lane}
-                onChange={(e) => setLane(e.target.value)}>
-                {LANES.map((l) => <option key={l} value={l}>{l}</option>)}
+            <FormField
+              id="target-queue" label="Queue"
+              hint="Targets in the same queue run one at a time; different queues run in parallel."
+            >
+              <select id="target-queue" className={inputClass} value={selectedQueueId}
+                onChange={(e) => setQueueId(Number(e.target.value))}>
+                {(queues.data ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
               </select>
             </FormField>
           </div>

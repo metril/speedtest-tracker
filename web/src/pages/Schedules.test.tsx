@@ -22,8 +22,8 @@ const schedule2 = {
   target_ids: [2], next_run: '2026-09-14T04:00:00Z', last_run: null,
   created_at: '', updated_at: '',
 };
-const target1 = { id: 1, name: 't1', engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
-const target2 = { id: 2, name: 't2', engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
+const target1 = { id: 1, name: 't1', engine: 'fake', enabled: true, queue_id: 1, queue_name: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
+const target2 = { id: 2, name: 't2', engine: 'fake', enabled: true, queue_id: 1, queue_name: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
 
 let fetchMock: ReturnType<typeof vi.fn>;
 
@@ -91,7 +91,7 @@ describe('Schedules page', () => {
       if (init?.method === 'POST' && url === '/api/v1/schedules') {
         return jsonResponse({
           schedule: { ...schedule, id: 3, name: 'new-one' },
-          warnings: ['overlaps with schedule "nightly" on lane "wan"'],
+          warnings: ['overlaps with schedule "nightly" on queue "wan"'],
         }, 201);
       }
       if (url.startsWith('/api/v1/schedules')) return jsonResponse({ schedules: [schedule, schedule2] });

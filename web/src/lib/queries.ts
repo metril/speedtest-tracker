@@ -3,11 +3,12 @@ import {
 } from '@tanstack/react-query';
 import * as api from './api';
 import type {
-  Range, ResultFilters, ScheduleInput, TargetInput,
+  QueueInput, Range, ResultFilters, ScheduleInput, TargetInput,
 } from './api';
 
 export const queryKeys = {
   targets: ['targets'] as const,
+  queues: ['queues'] as const,
   results: (filters: ResultFilters) => ['results', filters] as const,
   ooklaServers: (q: string, country?: string) => ['ookla-servers', q, country ?? ''] as const,
   iperf3Servers: (q: string) => ['iperf3-servers', q] as const,
@@ -27,6 +28,37 @@ export const queryKeys = {
 
 export function useTargets() {
   return useQuery({ queryKey: queryKeys.targets, queryFn: api.listTargets });
+}
+
+export function useQueues() {
+  return useQuery({ queryKey: queryKeys.queues, queryFn: api.listQueues });
+}
+
+export function useCreateQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (q: QueueInput) => api.createQueue(q),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.queues }),
+  });
+}
+
+export function useRenameQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, queue }: { id: number; queue: QueueInput }) => api.renameQueue(id, queue),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.queues });
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+    },
+  });
+}
+
+export function useDeleteQueue() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.deleteQueue(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.queues }),
+  });
 }
 
 export function useCreateTarget() {

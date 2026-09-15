@@ -10,7 +10,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 function target(id: number, name: string): Target {
-  return { id, name, engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
+  return { id, name, engine: 'fake', enabled: true, queue_id: 1, queue_name: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '' };
 }
 
 function wrap(node: React.ReactNode) {

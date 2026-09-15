@@ -4,8 +4,11 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Target } from '../../lib/api';
 import { TargetPicker } from './TargetPicker';
 
-function target(id: number, name: string, engine: string, lane: string): Target {
-  return { id, name, engine, enabled: true, lane, options: {}, thresholds: {}, created_at: '', updated_at: '' };
+function target(id: number, name: string, engine: string, queueName: string): Target {
+  return {
+    id, name, engine, enabled: true, queue_id: queueName === 'wan' ? 1 : 2, queue_name: queueName,
+    options: {}, thresholds: {}, created_at: '', updated_at: '',
+  };
 }
 
 const targets = [

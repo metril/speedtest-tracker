@@ -10,7 +10,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const target1 = {
-  id: 1, name: 'home', engine: 'fake', enabled: true, lane: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '',
+  id: 1, name: 'home', engine: 'fake', enabled: true, queue_id: 1, queue_name: 'wan', options: {}, thresholds: {}, created_at: '', updated_at: '',
 };
 
 let fetchMock: ReturnType<typeof vi.fn>;

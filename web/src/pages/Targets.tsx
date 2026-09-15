@@ -50,7 +50,7 @@ function RecentlyDeleted() {
                 <TableRow>
                   <TableHead>Name</TableHead>
                   <TableHead>Engine</TableHead>
-                  <TableHead>Lane</TableHead>
+                  <TableHead>Queue</TableHead>
                   <TableHead>Deleted</TableHead>
                   <TableHead className="text-right">Actions</TableHead>
                 </TableRow>
@@ -60,7 +60,7 @@ function RecentlyDeleted() {
                   <TableRow key={d.id}>
                     <TableCell className="text-fg">{d.name}</TableCell>
                     <TableCell className="text-muted">{d.engine}</TableCell>
-                    <TableCell className="text-muted">{d.lane}</TableCell>
+                    <TableCell className="text-muted">{d.queue_name}</TableCell>
                     <TableCell className="text-muted">{new Date(d.deleted_at).toLocaleString()}</TableCell>
                     <TableCell className="text-right">
                       <Button
@@ -160,7 +160,7 @@ export function Targets() {
               <TableRow>
                 <TableHead>Name</TableHead>
                 <TableHead>Engine</TableHead>
-                <TableHead>Lane</TableHead>
+                <TableHead>Queue</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead>Schedules</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -173,7 +173,7 @@ export function Targets() {
                   <TableCell>
                     <Badge variant="outline" className="font-mono uppercase">{t.engine}</Badge>
                   </TableCell>
-                  <TableCell className="text-muted">{t.lane}</TableCell>
+                  <TableCell className="text-muted">{t.queue_name}</TableCell>
                   <TableCell>
                     <span className={t.enabled ? 'text-ok' : 'text-faint'}>
                       {t.enabled ? 'enabled' : 'disabled'}

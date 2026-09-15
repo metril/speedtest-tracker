@@ -20,7 +20,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 }
 
 const target: Target = {
-  id: 1, name: 'home', engine: 'ookla', enabled: true, lane: 'wan',
+  id: 1, name: 'home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan',
   options: {}, thresholds: {}, created_at: '', updated_at: '',
 };
 

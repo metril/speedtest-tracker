@@ -16,7 +16,7 @@ function wrap(node: ReactNode) {
 
 function target(overrides: Partial<Target> = {}): Target {
   return {
-    id: 1, name: 'home', engine: 'ookla', enabled: true, lane: 'wan',
+    id: 1, name: 'home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan',
     options: {}, thresholds: {}, created_at: '', updated_at: '',
     ...overrides,
   };
@@ -109,7 +109,7 @@ describe('Targets page delete confirmation', () => {
       if (url.endsWith('/targets/deleted')) {
         return jsonResponse(isDeleted
           ? [{
-            id: 1, name: 'home', engine: 'ookla', lane: 'wan',
+            id: 1, name: 'home', engine: 'ookla', queue_id: 1, queue_name: 'wan',
             deleted_at: '2026-01-01T00:00:00Z', version: 2,
           }]
           : []);
@@ -148,7 +148,7 @@ describe('Targets page recently deleted section', () => {
     let resolveRestore: (() => void) | undefined;
     const targets = [target({ id: 1, name: 'home' }), target({ id: 2, name: 'office' })];
     const deletedRow = (id: number, name: string) => ({
-      id, name, engine: 'ookla', lane: 'wan', deleted_at: '2026-01-01T00:00:00Z', version: 1,
+      id, name, engine: 'ookla', queue_id: 1, queue_name: 'wan', deleted_at: '2026-01-01T00:00:00Z', version: 1,
     });
 
     fetchMock.mockImplementation(async (input, init) => {

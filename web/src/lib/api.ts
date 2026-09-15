@@ -5,11 +5,18 @@ export interface Target {
   name: string;
   engine: string;
   enabled: boolean;
-  lane: string;
+  queue_id: number;
+  queue_name: string;
   options: Record<string, unknown>;
   thresholds: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+}
+
+export interface Queue {
+  id: number;
+  name: string;
+  created_at: string;
 }
 
 export interface Result {
@@ -182,9 +189,13 @@ export interface TargetInput {
   name: string;
   engine: string;
   enabled: boolean;
-  lane: string;
+  queue_id: number;
   options: Record<string, unknown>;
   thresholds?: Record<string, unknown>;
+}
+
+export interface QueueInput {
+  name: string;
 }
 
 /** ApiError carries the server's {error:{code,message}} envelope. */
@@ -233,8 +244,16 @@ export const runTarget = (id: number) =>
 export const testTargetOptions = (engine: string, options: Record<string, unknown>) =>
   request<{ ok: boolean }>('/targets/test', {
     method: 'POST',
-    body: JSON.stringify({ name: 'validation', engine, enabled: true, lane: 'wan', options }),
+    body: JSON.stringify({ name: 'validation', engine, enabled: true, options }),
   });
+
+export const listQueues = () => request<Queue[]>('/queues');
+export const createQueue = (q: QueueInput) =>
+  request<Queue>('/queues', { method: 'POST', body: JSON.stringify(q) });
+export const renameQueue = (id: number, q: QueueInput) =>
+  request<Queue>(`/queues/${id}`, { method: 'PUT', body: JSON.stringify(q) });
+export const deleteQueue = (id: number) =>
+  request<void>(`/queues/${id}`, { method: 'DELETE' });
 export const listOoklaServers = (q: string, country?: string) =>
   request<OoklaSearchResult>(`/ookla/servers${query({ q, country })}`);
 
@@ -252,7 +271,7 @@ export interface DeletedTarget {
   id: number;
   name: string;
   engine: string;
-  lane: string;
+  queue_name: string;
   deleted_at: string;
   version: number;
 }

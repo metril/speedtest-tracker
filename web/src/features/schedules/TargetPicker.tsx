@@ -9,21 +9,21 @@ interface Props {
 }
 
 /** TargetPicker lets a schedule pick targets out of a potentially large
- * pool: text search on name, engine/lane chip filters, and a checkbox list
+ * pool: text search on name, engine/queue chip filters, and a checkbox list
  * with bulk select/clear of whatever currently matches the filters.
  * Checking a box appends to the selection order; unchecking removes it —
  * reordering the selection itself is SortableTargetList's job. */
 export function TargetPicker({ targets, selected, onChange }: Props) {
   const [query, setQuery] = useState('');
   const [engines, setEngines] = useState<Set<string>>(new Set());
-  const [lanes, setLanes] = useState<Set<string>>(new Set());
+  const [queues, setQueues] = useState<Set<string>>(new Set());
 
   const allEngines = useMemo(
     () => [...new Set(targets.map((t) => t.engine))].sort(),
     [targets],
   );
-  const allLanes = useMemo(
-    () => [...new Set(targets.map((t) => t.lane))].sort(),
+  const allQueues = useMemo(
+    () => [...new Set(targets.map((t) => t.queue_name))].sort(),
     [targets],
   );
 
@@ -34,10 +34,10 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
     return targets.filter((t) => {
       if (q && !t.name.toLowerCase().includes(q)) return false;
       if (engines.size > 0 && !engines.has(t.engine)) return false;
-      if (lanes.size > 0 && !lanes.has(t.lane)) return false;
+      if (queues.size > 0 && !queues.has(t.queue_name)) return false;
       return true;
     });
-  }, [targets, query, engines, lanes]);
+  }, [targets, query, engines, queues]);
 
   const toggleChip = (set: Set<string>, setSet: (s: Set<string>) => void, value: string) => {
     const next = new Set(set);
@@ -88,15 +88,15 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
               {engine}
             </button>
           ))}
-          {allLanes.map((lane) => (
+          {allQueues.map((queue) => (
             <button
-              key={lane} type="button" aria-pressed={lanes.has(lane)}
-              onClick={() => toggleChip(lanes, setLanes, lane)}
+              key={queue} type="button" aria-pressed={queues.has(queue)}
+              onClick={() => toggleChip(queues, setQueues, queue)}
               className={`rounded-full border px-2 py-0.5 text-xs ${
-                lanes.has(lane) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-raised'
+                queues.has(queue) ? 'border-accent bg-accent/10 text-accent' : 'border-line text-muted hover:bg-raised'
               }`}
             >
-              {lane}
+              {queue}
             </button>
           ))}
         </div>
@@ -131,7 +131,7 @@ export function TargetPicker({ targets, selected, onChange }: Props) {
                 />
                 <span className="flex-1 text-fg">{t.name}</span>
                 <span className="rounded bg-raised px-1.5 py-0.5 font-mono text-xs uppercase text-muted">{t.engine}</span>
-                <span className="text-xs text-faint">{t.lane}</span>
+                <span className="text-xs text-faint">{t.queue_name}</span>
               </label>
             </li>
           );
