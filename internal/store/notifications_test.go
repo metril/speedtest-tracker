@@ -10,7 +10,7 @@ import (
 // foreign key.
 func insertTestTarget(t *testing.T, s *Store, ctx context.Context) int64 {
 	t.Helper()
-	id, err := s.CreateTarget(ctx, &Target{Name: "t", Engine: "ookla", Lane: "wan"})
+	id, err := s.CreateTarget(ctx, &Target{Name: "t", Engine: "ookla", QueueID: 1})
 	if err != nil {
 		t.Fatalf("CreateTarget: %v", err)
 	}

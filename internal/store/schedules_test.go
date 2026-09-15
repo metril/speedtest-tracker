@@ -16,7 +16,7 @@ func newScheduleStore(t *testing.T) (*Store, []int64) {
 	t.Cleanup(func() { db.Close() })
 	ids := []int64{}
 	for _, name := range []string{"a", "b", "c"} {
-		id, err := db.CreateTarget(context.Background(), &Target{Name: name, Engine: "fake", Enabled: true, Lane: "wan"})
+		id, err := db.CreateTarget(context.Background(), &Target{Name: name, Engine: "fake", Enabled: true, QueueID: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -176,7 +176,7 @@ func TestListRunsFiltersByScheduleID(t *testing.T) {
 
 func TestListSchedulesAttachesLastRunInOneQuery(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	id, err := s.CreateSchedule(ctx, &Schedule{Name: "nightly", Cron: "@hourly", Enabled: true, TargetIDs: []int64{tid}})
 	if err != nil {
 		t.Fatal(err)

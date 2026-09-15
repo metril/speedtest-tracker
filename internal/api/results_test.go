@@ -20,7 +20,7 @@ func seedResults(t *testing.T, db *store.Store, n int) (int64, []int64) {
 	t.Helper()
 	ctx := context.Background()
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":7}`)})
 	if err != nil {
 		t.Fatal(err)
@@ -278,7 +278,7 @@ func TestReexecuteResultEnqueuesTarget(t *testing.T) {
 func TestRunsRoutes(t *testing.T) {
 	h, db, run := newTestAPI(t)
 	ctx := context.Background()
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 
 	rec := do(t, h, http.MethodPost, "/api/v1/runs", map[string]any{"target_ids": []int64{tid}})
 	if rec.Code != http.StatusAccepted {

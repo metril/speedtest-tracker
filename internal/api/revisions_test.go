@@ -12,7 +12,7 @@ func TestTargetRevisionsListAndChangedFields(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": map[string]any{},
 	})
 	var created store.Target
@@ -20,11 +20,11 @@ func TestTargetRevisionsListAndChangedFields(t *testing.T) {
 	path := "/api/v1/targets/" + itoa(created.ID)
 
 	do(t, h, http.MethodPut, path, map[string]any{
-		"name": "renamed", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "renamed", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": map[string]any{},
 	})
 	do(t, h, http.MethodPut, path, map[string]any{
-		"name": "renamed", "engine": "fake", "enabled": false, "lane": "lan",
+		"name": "renamed", "engine": "fake", "enabled": false, "queue_id": 2,
 		"options": map[string]any{},
 	})
 
@@ -49,7 +49,7 @@ func TestTargetRevisionsListAndChangedFields(t *testing.T) {
 	if revs[0].Version != 3 || revs[0].Action != "update" {
 		t.Errorf("revs[0] = %+v", revs[0])
 	}
-	wantChanged := map[string]bool{"enabled": true, "lane": true}
+	wantChanged := map[string]bool{"enabled": true, "queue_id": true}
 	if len(revs[0].Changed) != 2 {
 		t.Errorf("revs[0].Changed = %v, want %v", revs[0].Changed, wantChanged)
 	}
@@ -70,7 +70,7 @@ func TestRevertTargetRevision(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": map[string]any{},
 	})
 	var created store.Target
@@ -78,7 +78,7 @@ func TestRevertTargetRevision(t *testing.T) {
 	path := "/api/v1/targets/" + itoa(created.ID)
 
 	do(t, h, http.MethodPut, path, map[string]any{
-		"name": "renamed", "engine": "fake", "enabled": false, "lane": "lan",
+		"name": "renamed", "engine": "fake", "enabled": false, "queue_id": 2,
 		"options": map[string]any{},
 	})
 
@@ -88,7 +88,7 @@ func TestRevertTargetRevision(t *testing.T) {
 	}
 	var reverted store.Target
 	json.NewDecoder(rec.Body).Decode(&reverted)
-	if reverted.Name != "home" || !reverted.Enabled || reverted.Lane != "wan" {
+	if reverted.Name != "home" || !reverted.Enabled || reverted.QueueID != 1 {
 		t.Errorf("reverted = %+v", reverted)
 	}
 
@@ -114,7 +114,7 @@ func TestDeletedTargetsListAndRestore(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": map[string]any{},
 	})
 	var created store.Target

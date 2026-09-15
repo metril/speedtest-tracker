@@ -25,27 +25,40 @@ func TestOpenAppliesMigrations(t *testing.T) {
 	err := s.Read.QueryRow(
 		`SELECT count(*) FROM sqlite_master WHERE type='table' AND name IN
 		 ('targets','schedules','schedule_targets','runs','results','tags',
-		  'result_tags','settings','notification_state','schema_migrations')`,
+		  'result_tags','settings','notification_state','schema_migrations','queues')`,
 	).Scan(&n)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if n != 10 {
-		t.Errorf("tables = %d, want 10", n)
+	if n != 11 {
+		t.Errorf("tables = %d, want 11", n)
 	}
 }
 
-func TestTargetsHasLaneColumnDefaultWan(t *testing.T) {
+func TestTargetsQueueIDDefaultsToWan(t *testing.T) {
 	s := openTemp(t)
 	if _, err := s.Write.Exec(`INSERT INTO targets(name,engine) VALUES('t','ookla')`); err != nil {
 		t.Fatalf("insert: %v", err)
 	}
-	var lane string
-	if err := s.Read.QueryRow(`SELECT lane FROM targets WHERE name='t'`).Scan(&lane); err != nil {
+	var queueName string
+	if err := s.Read.QueryRow(
+		`SELECT q.name FROM targets t JOIN queues q ON q.id=t.queue_id WHERE t.name='t'`,
+	).Scan(&queueName); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if lane != "wan" {
-		t.Errorf("lane = %q, want wan", lane)
+	if queueName != "wan" {
+		t.Errorf("queue = %q, want wan", queueName)
+	}
+}
+
+func TestQueuesSeededWanAndLan(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	queues, err := s.ListQueues(ctx)
+	if err != nil {
+		t.Fatalf("ListQueues: %v", err)
+	}
+	if len(queues) != 2 || queues[0].Name != "wan" || queues[1].Name != "lan" {
+		t.Errorf("queues = %+v, want [wan lan]", queues)
 	}
 }
 
@@ -66,8 +79,8 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	if err := s2.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("scan: %v", err)
 	}
-	if n != 6 {
-		t.Errorf("schema_migrations rows = %d, want 6", n)
+	if n != 7 {
+		t.Errorf("schema_migrations rows = %d, want 7", n)
 	}
 }
 
@@ -144,8 +157,8 @@ func TestOpenEscapesSpecialPathCharacters(t *testing.T) {
 	if err := s.Read.QueryRow(`SELECT count(*) FROM schema_migrations`).Scan(&n); err != nil {
 		t.Fatalf("query: %v", err)
 	}
-	if n != 6 {
-		t.Errorf("schema_migrations rows = %d, want 6", n)
+	if n != 7 {
+		t.Errorf("schema_migrations rows = %d, want 7", n)
 	}
 }
 

@@ -9,7 +9,7 @@ import (
 
 func TestHistoryBucketsGroupsByInterval(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	// Two results in the 10:00 hour, one in the 11:00 hour, one failure.
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z")
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:45:00.000Z")
@@ -35,8 +35,8 @@ func TestHistoryBucketsGroupsByInterval(t *testing.T) {
 
 func TestHistoryBucketsExcludesOtherTargetsAndRange(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:05:00.000Z")
 	insertResultAt(t, s, b, "fake", "ok", "2026-09-13T10:06:00.000Z")
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-01T10:05:00.000Z")
@@ -52,7 +52,7 @@ func TestHistoryBucketsExcludesOtherTargetsAndRange(t *testing.T) {
 
 func TestHistoryBucketsExcludesFailedRowFromAvgButCountsIt(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z")
 	// A failed row with zero metrics: should count toward Count/FailCount
 	// but not drag the averages to zero.
@@ -86,7 +86,7 @@ func TestHistoryBucketsExcludesFailedRowFromAvgButCountsIt(t *testing.T) {
 // have let it through.
 func TestHistoryBucketsExcludesFailedNonZeroReadingFromAggregates(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z") // download_bps=100e6
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "failed",
@@ -118,7 +118,7 @@ func TestHistoryBucketsExcludesFailedNonZeroReadingFromAggregates(t *testing.T) 
 // missing the way NULLIF(x,0) used to.
 func TestHistoryBucketsIncludesGenuineZeroFromOkRow(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z") // download_bps=100e6
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &tid, TargetName: "home", Engine: "fake", Status: "ok",

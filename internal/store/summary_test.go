@@ -9,8 +9,8 @@ import (
 
 func TestSummaryPerTargetAndOverall(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "nas", Engine: "fake", Enabled: true, Lane: "lan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "nas", Engine: "fake", Enabled: true, QueueID: 2})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T11:00:00.000Z")
 	insertResultAt(t, s, b, "fake", "ok", "2026-09-13T12:00:00.000Z")
@@ -42,7 +42,7 @@ func TestSummaryPerTargetAndOverall(t *testing.T) {
 
 func TestSummaryIncludesTargetWithoutResultsInWindow(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "cold", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "cold", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-08-01T10:00:00.000Z")
 
 	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", SLAPlan{})
@@ -63,7 +63,7 @@ func TestSummaryIncludesTargetWithoutResultsInWindow(t *testing.T) {
 // status.
 func TestSummaryExcludesFailedNonZeroReadingFromAggregates(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z") // download_bps=100e6
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &a, TargetName: "home", Engine: "fake", Status: "failed",
@@ -94,7 +94,7 @@ func TestSummaryExcludesFailedNonZeroReadingFromAggregates(t *testing.T) {
 // is counted rather than treated as missing.
 func TestSummaryIncludesGenuineZeroFromOkRow(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z") // download_bps=100e6
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &a, TargetName: "home", Engine: "fake", Status: "ok",
@@ -125,7 +125,7 @@ func mbps(v float64) *float64 { return &v }
 // target's thresholds set an SLA speed.
 func TestSummarySLAComplianceNilWithoutPlan(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 
 	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", SLAPlan{})
@@ -145,7 +145,7 @@ func TestSummarySLAComplianceNilWithoutPlan(t *testing.T) {
 // requiring both download and upload to meet the plan.
 func TestSummarySLAComplianceFromGeneralPlan(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	// insertResultAt always uses download=100e6 (100Mbps), upload=50e6 (50Mbps).
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")     // meets 90/40 plan
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:05:00.000Z")     // meets 90/40 plan
@@ -186,7 +186,7 @@ func TestSummarySLAComplianceTargetOverrideWinsOverGeneral(t *testing.T) {
 	// 100Mbps never meets); upload falls back to the general 40Mbps plan
 	// (which insertResultAt's 50Mbps meets).
 	thresholds, _ := json.Marshal(map[string]any{"sla_download_mbps": 200})
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Thresholds: thresholds})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 
@@ -211,8 +211,8 @@ func TestSummarySLAComplianceTargetOverrideWinsOverGeneral(t *testing.T) {
 // count, not a simple average across targets.
 func TestSummarySLAComplianceWeightedOverall(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "meets", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "fails", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "meets", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "fails", Engine: "fake", Enabled: true, QueueID: 1})
 	// "meets": 1 result, always compliant (100Mbps/50Mbps vs 90/40 plan).
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	// "fails": 3 results, all below the download plan.
@@ -246,7 +246,7 @@ func TestSummarySLAComplianceWeightedOverall(t *testing.T) {
 // an omitted field from an explicit JSON null on a plain *float64).
 func TestSummarySLAPlanZeroOrNegativeTreatedAsUnset(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 
 	for _, plan := range []SLAPlan{
@@ -272,7 +272,7 @@ func TestSummarySLAPlanZeroOrNegativeTreatedAsUnset(t *testing.T) {
 func TestSummarySLATargetOverrideZeroFallsBackToGeneral(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 	thresholds, _ := json.Marshal(map[string]any{"sla_download_mbps": 0})
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Thresholds: thresholds})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z") // 100/50 Mbps
 
@@ -295,7 +295,7 @@ func TestSummarySLATargetOverrideZeroFallsBackToGeneral(t *testing.T) {
 // the denominator entirely.
 func TestSummarySLASkipsUnmeasuredDirection(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	plan := SLAPlan{DownloadMbps: mbps(90), UploadMbps: mbps(40)}
 
 	// Forward-only (download-only) result: upload_bps=0 means "not
@@ -322,7 +322,7 @@ func TestSummarySLASkipsUnmeasuredDirection(t *testing.T) {
 	// A second target whose only result has both directions at 0 (neither
 	// measured) must be excluded from the denominator entirely: nil, not
 	// 0/0 or a miss.
-	b, _ := s.CreateTarget(ctx, &Target{Name: "empty", Engine: "fake", Enabled: true, Lane: "wan"})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "empty", Engine: "fake", Enabled: true, QueueID: 1})
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &b, TargetName: "empty", Engine: "fake", Status: "ok",
 		StartedAt: "2026-09-13T10:00:00.000Z", DurationMs: 500,
@@ -354,7 +354,7 @@ func TestSummarySLASkipsUnmeasuredDirection(t *testing.T) {
 // direction rather than crash or miscount.
 func TestSummarySLAHandlesNullDownloadUploadBps(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	if _, err := s.Write.ExecContext(ctx, `
 		INSERT INTO results(target_id,target_name,engine,options_snapshot,status,started_at,duration_ms,
 			download_bps,upload_bps,ping_ms,jitter_ms,packet_loss_pct,bytes_down,bytes_up)

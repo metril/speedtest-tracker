@@ -36,7 +36,7 @@ type targetBody struct {
 	Name       string          `json:"name"`
 	Engine     string          `json:"engine"`
 	Enabled    bool            `json:"enabled"`
-	Lane       string          `json:"lane"`
+	QueueID    int64           `json:"queue_id"`
 	Options    json.RawMessage `json:"options"`
 	Thresholds json.RawMessage `json:"thresholds"`
 }
@@ -52,16 +52,30 @@ func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
 	return id, true
 }
 
-// validateTarget checks required fields and asks the engine to validate the
-// option document. It reports whether the target is usable.
-func (d Deps) validateTarget(w http.ResponseWriter, b *targetBody) bool {
+// validateTarget checks required fields, resolves queue_id (defaulting to
+// the wan queue when absent, and rejecting an id that names no queue) and
+// asks the engine to validate the option document. It reports whether the
+// target is usable.
+func (d Deps) validateTarget(ctx context.Context, w http.ResponseWriter, b *targetBody) bool {
 	b.Name = strings.TrimSpace(b.Name)
 	if b.Name == "" {
 		errBadRequest(w, "name is required")
 		return false
 	}
-	if b.Lane == "" {
-		b.Lane = "wan"
+	if b.QueueID == 0 {
+		id, err := d.Store.DefaultQueueID(ctx)
+		if err != nil {
+			internalError(w, d.Logger, "resolve default queue failed", err)
+			return false
+		}
+		b.QueueID = id
+	} else if _, err := d.Store.GetQueue(ctx, b.QueueID); err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			errBadRequest(w, "unknown queue_id")
+			return false
+		}
+		internalError(w, d.Logger, "resolve queue failed", err)
+		return false
 	}
 	if len(b.Options) == 0 || isJSONNull(b.Options) {
 		b.Options = json.RawMessage(`{}`)
@@ -101,11 +115,11 @@ func (d Deps) listTargets(w http.ResponseWriter, r *http.Request) {
 
 func (d Deps) createTarget(w http.ResponseWriter, r *http.Request) {
 	var b targetBody
-	if !decodeJSON(w, r, &b) || !d.validateTarget(w, &b) {
+	if !decodeJSON(w, r, &b) || !d.validateTarget(r.Context(), w, &b) {
 		return
 	}
 	t := &store.Target{Name: b.Name, Engine: b.Engine, Enabled: b.Enabled,
-		Lane: b.Lane, Options: b.Options, Thresholds: b.Thresholds}
+		QueueID: b.QueueID, Options: b.Options, Thresholds: b.Thresholds}
 	id, err := d.Store.CreateTarget(r.Context(), t)
 	if err != nil {
 		internalError(w, d.Logger, "create target failed", err)
@@ -136,11 +150,11 @@ func (d Deps) updateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var b targetBody
-	if !decodeJSON(w, r, &b) || !d.validateTarget(w, &b) {
+	if !decodeJSON(w, r, &b) || !d.validateTarget(r.Context(), w, &b) {
 		return
 	}
 	t := &store.Target{ID: id, Name: b.Name, Engine: b.Engine, Enabled: b.Enabled,
-		Lane: b.Lane, Options: b.Options, Thresholds: b.Thresholds}
+		QueueID: b.QueueID, Options: b.Options, Thresholds: b.Thresholds}
 	if err := d.Store.UpdateTarget(r.Context(), t); err != nil {
 		storeError(w, d.Logger, "target", err)
 		return
@@ -187,7 +201,7 @@ func enqueueError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	case errors.Is(err, runner.ErrNoTargets):
 		errBadRequest(w, "no runnable targets")
 	case errors.Is(err, runner.ErrQueueFull):
-		writeError(w, http.StatusServiceUnavailable, "queue_full", "lane queue is full, try again shortly")
+		writeError(w, http.StatusServiceUnavailable, "queue_full", "queue is full, try again shortly")
 	case errors.Is(err, runner.ErrShuttingDown):
 		writeError(w, http.StatusServiceUnavailable, "shutting_down", "server is shutting down")
 	default:
@@ -214,7 +228,7 @@ func (d Deps) testTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b.Name = "validation" // name is irrelevant for a validation-only call
-	if !d.validateTarget(w, &b) {
+	if !d.validateTarget(r.Context(), w, &b) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": b.Engine})

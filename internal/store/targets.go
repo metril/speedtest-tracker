@@ -11,18 +11,22 @@ import (
 
 // Target is one configured speed-test target.
 type Target struct {
-	ID         int64           `json:"id"`
-	Name       string          `json:"name"`
-	Engine     string          `json:"engine"`
-	Enabled    bool            `json:"enabled"`
-	Lane       string          `json:"lane"`
+	ID      int64  `json:"id"`
+	Name    string `json:"name"`
+	Engine  string `json:"engine"`
+	Enabled bool   `json:"enabled"`
+	// QueueID is writable: it names which queue the target runs in.
+	QueueID int64 `json:"queue_id"`
+	// QueueName is read-only, resolved via a join with queues.
+	QueueName  string          `json:"queue_name"`
 	Options    json.RawMessage `json:"options"`
 	Thresholds json.RawMessage `json:"thresholds"`
 	CreatedAt  string          `json:"created_at"`
 	UpdatedAt  string          `json:"updated_at"`
 }
 
-const targetColumns = `id,name,engine,enabled,lane,options,thresholds,created_at,updated_at`
+const targetColumns = `t.id,t.name,t.engine,t.enabled,t.queue_id,q.name,t.options,t.thresholds,t.created_at,t.updated_at`
+const targetFrom = `FROM targets t JOIN queues q ON q.id = t.queue_id`
 
 // rawOrEmpty normalises a nil/empty JSON document to "{}".
 func rawOrEmpty(r json.RawMessage) string {
@@ -35,7 +39,7 @@ func rawOrEmpty(r json.RawMessage) string {
 func scanTarget(sc interface{ Scan(...any) error }) (*Target, error) {
 	var t Target
 	var options, thresh string
-	if err := sc.Scan(&t.ID, &t.Name, &t.Engine, &t.Enabled, &t.Lane,
+	if err := sc.Scan(&t.ID, &t.Name, &t.Engine, &t.Enabled, &t.QueueID, &t.QueueName,
 		&options, &thresh, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
@@ -54,8 +58,8 @@ func (s *Store) CreateTarget(ctx context.Context, t *Target) (int64, error) {
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx,
-		`INSERT INTO targets(name,engine,enabled,lane,options,thresholds) VALUES(?,?,?,?,?,?)`,
-		t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds))
+		`INSERT INTO targets(name,engine,enabled,queue_id,options,thresholds) VALUES(?,?,?,?,?,?)`,
+		t.Name, t.Engine, t.Enabled, t.QueueID, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds))
 	if err != nil {
 		return 0, fmt.Errorf("insert target: %w", err)
 	}
@@ -64,7 +68,7 @@ func (s *Store) CreateTarget(ctx context.Context, t *Target) (int64, error) {
 		return 0, fmt.Errorf("insert target: %w", err)
 	}
 
-	created, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, id))
+	created, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` WHERE t.id=?`, id))
 	if err != nil {
 		return 0, fmt.Errorf("read created target %d: %w", id, err)
 	}
@@ -80,7 +84,7 @@ func (s *Store) CreateTarget(ctx context.Context, t *Target) (int64, error) {
 
 // GetTarget returns the target with the given id, or ErrNotFound.
 func (s *Store) GetTarget(ctx context.Context, id int64) (*Target, error) {
-	row := s.Read.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, id)
+	row := s.Read.QueryRowContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` WHERE t.id=?`, id)
 	t, err := scanTarget(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, ErrNotFound
@@ -93,7 +97,7 @@ func (s *Store) GetTarget(ctx context.Context, id int64) (*Target, error) {
 
 // ListTargets returns every target ordered by name.
 func (s *Store) ListTargets(ctx context.Context) ([]Target, error) {
-	rows, err := s.Read.QueryContext(ctx, `SELECT `+targetColumns+` FROM targets ORDER BY name, id`)
+	rows, err := s.Read.QueryContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` ORDER BY t.name, t.id`)
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
@@ -119,7 +123,7 @@ func (s *Store) ListTargetsByIDs(ctx context.Context, ids []int64) ([]Target, er
 	for i, id := range ids {
 		args[i] = id
 	}
-	q := `SELECT ` + targetColumns + ` FROM targets WHERE id IN (?` +
+	q := `SELECT ` + targetColumns + ` ` + targetFrom + ` WHERE t.id IN (?` +
 		strings.Repeat(",?", len(ids)-1) + `)`
 	rows, err := s.Read.QueryContext(ctx, q, args...)
 	if err != nil {
@@ -163,10 +167,10 @@ func (s *Store) updateTargetWithAction(ctx context.Context, t *Target, action st
 	defer tx.Rollback()
 
 	res, err := tx.ExecContext(ctx, `
-		UPDATE targets SET name=?,engine=?,enabled=?,lane=?,options=?,thresholds=?,
+		UPDATE targets SET name=?,engine=?,enabled=?,queue_id=?,options=?,thresholds=?,
 			updated_at=strftime('%Y-%m-%dT%H:%M:%fZ','now')
 		WHERE id=?`,
-		t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds), t.ID)
+		t.Name, t.Engine, t.Enabled, t.QueueID, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds), t.ID)
 	if err != nil {
 		return fmt.Errorf("update target %d: %w", t.ID, err)
 	}
@@ -174,7 +178,7 @@ func (s *Store) updateTargetWithAction(ctx context.Context, t *Target, action st
 		return err
 	}
 
-	updated, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, t.ID))
+	updated, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` WHERE t.id=?`, t.ID))
 	if err != nil {
 		return fmt.Errorf("read updated target %d: %w", t.ID, err)
 	}
@@ -202,7 +206,7 @@ func (s *Store) DeleteTarget(ctx context.Context, id int64) error {
 	}
 	defer tx.Rollback()
 
-	before, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, id))
+	before, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` WHERE t.id=?`, id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}

@@ -1,6 +1,6 @@
 // Package runner executes speed tests. It keeps one buffered queue and one
-// worker goroutine per lane so a LAN iperf3 test and a WAN Ookla test can
-// run at the same time while two WAN tests never overlap.
+// worker goroutine per queue so targets in different queues can run at the
+// same time while targets in the same queue never overlap.
 package runner
 
 import (
@@ -19,7 +19,7 @@ import (
 
 // Errors returned by Enqueue.
 var (
-	ErrQueueFull    = errors.New("runner: lane queue full")
+	ErrQueueFull    = errors.New("runner: queue is full")
 	ErrNoTargets    = errors.New("runner: no runnable targets")
 	ErrShuttingDown = errors.New("runner: shutting down")
 )
@@ -37,24 +37,24 @@ type Config struct {
 	Hub         Publisher
 	Sink        ResultSink // nil => no-op
 	Logger      *slog.Logger
-	QueueCap    int           // per-lane channel capacity, default 32
+	QueueCap    int           // per-queue channel capacity, default 32
 	Grace       time.Duration // shutdown grace period, default 60s
 	TestTimeout time.Duration // per-target timeout, default 10m
 	Now         func() time.Time
 }
 
 // ResultMeta is the run context a sink needs but the result row does not
-// carry: which run and schedule produced it, and on which lane.
+// carry: which run and schedule produced it, and on which queue.
 type ResultMeta struct {
 	RunID        int64
 	Trigger      string
 	ScheduleID   *int64
 	ScheduleName string
-	Lane         string
+	QueueName    string
 }
 
 // ResultSink is notified once per persisted result. Implementations MUST
-// return promptly and never block: they run on the lane worker goroutine,
+// return promptly and never block: they run on the queue worker goroutine,
 // so a slow sink delays the next test. Anything that talks to the network
 // hands the work to its own goroutine.
 type ResultSink interface {
@@ -112,30 +112,30 @@ type ProgressEvent struct {
 // progressInterval caps progress events at 10 Hz per result.
 const progressInterval = 100 * time.Millisecond
 
-// job is one lane's share of a run.
+// job is one queue's share of a run.
 type job struct {
 	runID     int64
-	lane      string
+	queue     string
 	targets   []store.Target
 	snapshots map[int64]json.RawMessage
 }
 
-// runState tracks a run across its lane jobs.
+// runState tracks a run across its queue jobs.
 type runState struct {
 	ctx          context.Context
 	cancel       context.CancelFunc
-	pending      int // lane jobs not yet finished
+	pending      int // queue jobs not yet finished
 	total        int // targets in the whole run, for the UI stepper
 	done         int // targets that have produced a result
 	failed       bool
 	canceled     bool
-	started      bool // true once any lane has begun executing (running written)
+	started      bool // true once any queue has begun executing (running written)
 	trigger      string
 	scheduleID   *int64
 	scheduleName string
 }
 
-// Runner owns the lane queues and their workers.
+// Runner owns the queue channels and their workers.
 type Runner struct {
 	cfg Config
 
@@ -146,7 +146,7 @@ type Runner struct {
 	enqueueMu sync.Mutex
 
 	mu      sync.Mutex
-	lanes   map[string]chan job
+	queues  map[string]chan job
 	runs    map[int64]*runState
 	closing bool
 	wg      sync.WaitGroup
@@ -174,27 +174,27 @@ func New(cfg Config) *Runner {
 		cfg.Sink = Sinks(nil)
 	}
 	return &Runner{
-		cfg:   cfg,
-		lanes: map[string]chan job{},
-		runs:  map[int64]*runState{},
+		cfg:    cfg,
+		queues: map[string]chan job{},
+		runs:   map[int64]*runState{},
 	}
 }
 
-// Start marks the runner open for work. Lane workers spawn on first use.
+// Start marks the runner open for work. Queue workers spawn on first use.
 func (r *Runner) Start() {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.started = true
 }
 
-// laneChan returns (creating if needed) the queue for a lane, plus its
+// queueChan returns (creating if needed) the channel for a queue, plus its
 // worker. Caller holds r.mu.
-func (r *Runner) laneChan(lane string) chan job {
-	if ch, ok := r.lanes[lane]; ok {
+func (r *Runner) queueChan(queue string) chan job {
+	if ch, ok := r.queues[queue]; ok {
 		return ch
 	}
 	ch := make(chan job, r.cfg.QueueCap)
-	r.lanes[lane] = ch
+	r.queues[queue] = ch
 	r.wg.Add(1)
 	go func() {
 		defer r.wg.Done()
@@ -221,7 +221,7 @@ func filterRunnable(targets []store.Target, trigger string) []store.Target {
 	return out
 }
 
-// Enqueue creates a run row and queues its targets, grouped by lane. It
+// Enqueue creates a run row and queues its targets, grouped by queue. It
 // returns the run id without waiting for the test to finish. When the
 // request names a schedule that already has a queued or running run, the
 // existing run id is returned and nothing new is queued.
@@ -229,10 +229,10 @@ func filterRunnable(targets []store.Target, trigger string) []store.Target {
 // The schedule dedupe check and run creation happen under enqueueMu (a
 // separate lock from r.mu) so SQLite I/O is never done while r.mu is held.
 // r.mu is then taken only for the closing check, the run-map insert, the
-// "queued" publish and the lane-channel sends, which keeps Enqueue mutually
+// "queued" publish and the queue-channel sends, which keeps Enqueue mutually
 // exclusive with Shutdown closing those channels (so a send on a closed
 // channel can never happen) without blocking other goroutines on I/O. The
-// "queued" event is published under r.mu, before any lane send, so clients
+// "queued" event is published under r.mu, before any queue send, so clients
 // can never observe "running" before "queued" (hub.Publish is in-process
 // and non-blocking, so this costs nothing meaningful under the lock).
 // Failure-path publishes (queue full, shutting down) happen after r.mu is
@@ -247,17 +247,14 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		return 0, ErrNoTargets
 	}
 
-	byLane := map[string][]store.Target{}
+	byQueue := map[string][]store.Target{}
 	order := []string{}
 	for _, t := range targets {
-		lane := t.Lane
-		if lane == "" {
-			lane = "wan"
+		queue := t.QueueName
+		if _, seen := byQueue[queue]; !seen {
+			order = append(order, queue)
 		}
-		if _, seen := byLane[lane]; !seen {
-			order = append(order, lane)
-		}
-		byLane[lane] = append(byLane[lane], t)
+		byQueue[queue] = append(byQueue[queue], t)
 	}
 
 	r.enqueueMu.Lock()
@@ -290,7 +287,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 		r.mu.Unlock()
 		cancel()
 		// The run row was already created before we could see closing; it
-		// never gets a lane job, so resolve it as canceled rather than
+		// never gets a queue job, so resolve it as canceled rather than
 		// leaving it stuck at "queued".
 		err := r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "shutting down")
 		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
@@ -306,12 +303,12 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	}
 
 	chans := make([]chan job, 0, len(order))
-	for _, lane := range order {
-		chans = append(chans, r.laneChan(lane))
+	for _, queue := range order {
+		chans = append(chans, r.queueChan(queue))
 	}
 
-	// Publish "queued" before any lane send: a worker cannot even attempt to
-	// dequeue this run's job until it exists in a lane channel, so
+	// Publish "queued" before any queue send: a worker cannot even attempt to
+	// dequeue this run's job until it exists in a queue channel, so
 	// publishing here, still under r.mu and before those sends, guarantees
 	// clients never observe "running" before "queued". Hub.Publish is
 	// in-process and non-blocking (buffered channels with a default case),
@@ -319,9 +316,9 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.publishRun(runID, "queued", "", len(targets), 0)
 
 	queueFull := false
-	for i, lane := range order {
+	for i, queue := range order {
 		select {
-		case chans[i] <- job{runID: runID, lane: lane, targets: byLane[lane], snapshots: req.Snapshots}:
+		case chans[i] <- job{runID: runID, queue: queue, targets: byQueue[queue], snapshots: req.Snapshots}:
 		default:
 			queueFull = true
 		}
@@ -336,8 +333,8 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.mu.Unlock()
 
 	if queueFull {
-		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "lane queue full")
-		r.publishRun(runID, "failed", "lane queue full", len(targets), 0)
+		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "queue full")
+		r.publishRun(runID, "failed", "queue full", len(targets), 0)
 		return 0, ErrQueueFull
 	}
 	return runID, nil
@@ -346,11 +343,11 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 // Cancel aborts an in-flight or queued run. It reports whether the run was
 // known to the runner. Setting canceled and calling the run's CancelFunc
 // happen atomically under r.mu, together with execute's own canceled/started
-// check, so a lane can never observe canceled==false and go on to write
+// check, so a queue can never observe canceled==false and go on to write
 // "running" after Cancel has already committed to canceling the run. When
-// the run has not started any lane yet, Cancel claims it by deleting it
-// from r.runs (the same claim discipline claimForForceCancel and finishLane
-// use) and persists the canceled status itself; a lane job for this run
+// the run has not started any queue yet, Cancel claims it by deleting it
+// from r.runs (the same claim discipline claimForForceCancel and finishQueue
+// use) and persists the canceled status itself; a queue job for this run
 // still sitting in a channel will later find the run gone from r.runs and
 // return without writing or publishing anything, so the terminal status is
 // never written twice.
@@ -381,7 +378,7 @@ func (r *Runner) Cancel(runID int64) bool {
 	return true
 }
 
-// execute runs one lane's targets sequentially.
+// execute runs one queue's targets sequentially.
 func (r *Runner) execute(j job) {
 	r.mu.Lock()
 	st, ok := r.runs[j.runID]
@@ -395,10 +392,10 @@ func (r *Runner) execute(j job) {
 		// done) while still queued: never write "running" or start a
 		// target, so started_at stays unset. Checking st.canceled and
 		// r.closing here, under the same lock Cancel and Shutdown use to
-		// set them, closes the race where a lane reads ctx.Err()==nil right
+		// set them, closes the race where a queue reads ctx.Err()==nil right
 		// before one of them commits and goes on to write "running" anyway.
 		r.mu.Unlock()
-		r.finishLane(j.runID, false, true)
+		r.finishQueue(j.runID, false, true)
 		return
 	}
 	st.started = true
@@ -409,27 +406,27 @@ func (r *Runner) execute(j job) {
 		r.publishRun(j.runID, "running", "", total, r.doneCount(j.runID))
 	}
 
-	laneFailed := false
+	queueFailed := false
 	for _, t := range j.targets {
 		if ctx.Err() != nil {
 			break
 		}
-		if failed := r.runTarget(ctx, j.runID, j.lane, t, j.snapshots[t.ID]); failed {
-			laneFailed = true
+		if failed := r.runTarget(ctx, j.runID, j.queue, t, j.snapshots[t.ID]); failed {
+			queueFailed = true
 		}
 		// The result row for this target has landed: advance the stepper.
 		if total, done, ok := r.markTargetDone(j.runID); ok {
 			r.publishRun(j.runID, "running", "", total, done)
 		}
 	}
-	r.finishLane(j.runID, laneFailed, ctx.Err() != nil)
+	r.finishQueue(j.runID, queueFailed, ctx.Err() != nil)
 }
 
 // runTarget executes one target and writes exactly one result row. It
 // reports whether the result failed. When override is non-empty (a
 // re-execute replaying a stored result's options_snapshot), it is used as
 // the run's options instead of the target's current live options.
-func (r *Runner) runTarget(ctx context.Context, runID int64, lane string, t store.Target, override json.RawMessage) bool {
+func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t store.Target, override json.RawMessage) bool {
 	started := r.cfg.Now().UTC()
 	options := t.Options
 	if len(override) > 0 {
@@ -447,7 +444,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, lane string, t stor
 	}
 
 	r.mu.Lock()
-	meta := ResultMeta{RunID: runID, Lane: lane}
+	meta := ResultMeta{RunID: runID, QueueName: queue}
 	if st, ok := r.runs[runID]; ok {
 		meta.Trigger = st.trigger
 		meta.ScheduleID = st.scheduleID
@@ -523,9 +520,9 @@ func (r *Runner) storeResult(res *store.Result, meta ResultMeta) bool {
 	return true
 }
 
-// finishLane records a lane job's outcome and, when it is the run's last
-// lane, writes the terminal run status.
-func (r *Runner) finishLane(runID int64, failed, canceled bool) {
+// finishQueue records a queue job's outcome and, when it is the run's last
+// queue, writes the terminal run status.
+func (r *Runner) finishQueue(runID int64, failed, canceled bool) {
 	r.mu.Lock()
 	st, ok := r.runs[runID]
 	if !ok {
@@ -602,7 +599,7 @@ func (r *Runner) doneCount(runID int64) int {
 // claimForForceCancel atomically removes id from r.runs if it is still
 // present there, reporting whether it did, along with its stepper counts.
 // Deleting and checking under the same r.mu critical section is what makes
-// this race-free against finishLane, which deletes the same map entry
+// this race-free against finishQueue, which deletes the same map entry
 // (under r.mu too) right before it persists the run's real terminal status:
 // at most one of the two calls can observe the entry and delete it, so
 // exactly one of them gets to write the run's final status — the loser must
@@ -618,21 +615,21 @@ func (r *Runner) claimForForceCancel(id int64) (total, done int, ok bool) {
 	return st.total, st.done, true
 }
 
-// QueueDepths reports each lane's current queue depth (jobs buffered, not
-// yet dequeued by the lane worker), for metrics.
+// QueueDepths reports each queue's current queue depth (jobs buffered, not
+// yet dequeued by the queue worker), for metrics.
 func (r *Runner) QueueDepths() map[string]int {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	depths := make(map[string]int, len(r.lanes))
-	for lane, ch := range r.lanes {
-		depths[lane] = len(ch)
+	depths := make(map[string]int, len(r.queues))
+	for queue, ch := range r.queues {
+		depths[queue] = len(ch)
 	}
 	return depths
 }
 
-// Shutdown stops accepting work, waits up to Grace for in-flight lanes,
+// Shutdown stops accepting work, waits up to Grace for in-flight queues,
 // then force-cancels what is left and marks only the runs still genuinely
-// in flight as canceled — a run finishLane already resolved to done/failed
+// in flight as canceled — a run finishQueue already resolved to done/failed
 // is never relabeled. If ctx is done before everything settles, Shutdown
 // returns ctx.Err().
 func (r *Runner) Shutdown(ctx context.Context) error {
@@ -642,7 +639,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 		return nil
 	}
 	r.closing = true
-	for _, ch := range r.lanes {
+	for _, ch := range r.queues {
 		close(ch)
 	}
 	r.mu.Unlock()
@@ -681,7 +678,7 @@ func (r *Runner) Shutdown(ctx context.Context) error {
 	for _, id := range stuck {
 		total, done, ok := r.claimForForceCancel(id)
 		if !ok {
-			// finishLane already claimed and persisted the run's real
+			// finishQueue already claimed and persisted the run's real
 			// terminal status (done/failed/canceled); do not overwrite it.
 			continue
 		}

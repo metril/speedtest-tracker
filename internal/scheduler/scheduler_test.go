@@ -67,7 +67,7 @@ func seed(t *testing.T, db *store.Store, name, expr string, enabled bool) (int64
 	ctx := context.Background()
 	ids := []int64{}
 	for _, n := range []string{name + "-t1", name + "-t2"} {
-		id, err := db.CreateTarget(ctx, &store.Target{Name: n, Engine: "fake", Enabled: true, Lane: "wan"})
+		id, err := db.CreateTarget(ctx, &store.Target{Name: n, Engine: "fake", Enabled: true, QueueID: 1})
 		if err != nil {
 			t.Fatal(err)
 		}

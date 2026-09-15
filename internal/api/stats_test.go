@@ -63,7 +63,7 @@ func TestStatsSummaryReturnsTargetsAndCacheHeader(t *testing.T) {
 func TestStatsSummaryIncludesSLAComplianceFromGeneralPlan(t *testing.T) {
 	h, db, st := newTestAPIWithSettings(t)
 	ctx := context.Background()
-	tid, err := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestStatsSummaryServesFromCacheWithinTTL(t *testing.T) {
 func TestStatsSummaryCacheInvalidatesOnSLAPlanChange(t *testing.T) {
 	h, db, st := newTestAPIWithSettings(t)
 	ctx := context.Background()
-	tid, err := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestStatsSummaryOffsetShiftsWindowBack(t *testing.T) {
 func TestStatsSummaryOffsetIsHalfOpenAtBoundary(t *testing.T) {
 	h, db, _ := newTestAPIWith(t, func(d *Deps) { d.summary = newSummaryCache(0) })
 	tid, err := db.CreateTarget(context.Background(), &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{}`),
 	})
 	if err != nil {

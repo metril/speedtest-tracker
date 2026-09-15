@@ -199,6 +199,12 @@ func New(deps Deps) http.Handler {
 			t.Get("/{id}/revisions", deps.listTargetRevisions)
 			t.Post("/{id}/revisions/{version}/revert", deps.revertTargetRevision)
 		})
+		v1.Route("/queues", func(q chi.Router) {
+			q.Get("/", etagJSON(deps.listQueues))
+			q.Post("/", deps.createQueue)
+			q.Put("/{id}", deps.updateQueue)
+			q.Delete("/{id}", deps.deleteQueue)
+		})
 		v1.Route("/schedules", func(s chi.Router) {
 			s.Get("/", etagJSON(deps.listSchedules))
 			s.Post("/", deps.createSchedule)

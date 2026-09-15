@@ -11,7 +11,7 @@ func TestTargetCRUD(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 
 	id, err := s.CreateTarget(ctx, &Target{
-		Name: "home", Engine: "ookla", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "ookla", Enabled: true, QueueID: 1,
 		Options:    json.RawMessage(`{"server_id":1234}`),
 		Thresholds: json.RawMessage(`{"download_bps":1000}`),
 	})
@@ -23,7 +23,7 @@ func TestTargetCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTarget: %v", err)
 	}
-	if got.Name != "home" || got.Engine != "ookla" || !got.Enabled || got.Lane != "wan" {
+	if got.Name != "home" || got.Engine != "ookla" || !got.Enabled || got.QueueID != 1 {
 		t.Errorf("got %+v", got)
 	}
 	if string(got.Options) != `{"server_id":1234}` {
@@ -33,7 +33,7 @@ func TestTargetCRUD(t *testing.T) {
 		t.Errorf("timestamps not populated: %+v", got)
 	}
 
-	got.Name, got.Enabled, got.Lane = "renamed", false, "lan"
+	got.Name, got.Enabled, got.QueueID = "renamed", false, 2
 	got.Options = json.RawMessage(`{}`)
 	if err := s.UpdateTarget(ctx, got); err != nil {
 		t.Fatalf("UpdateTarget: %v", err)
@@ -42,7 +42,7 @@ func TestTargetCRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetTarget after update: %v", err)
 	}
-	if got2.Name != "renamed" || got2.Enabled || got2.Lane != "lan" {
+	if got2.Name != "renamed" || got2.Enabled || got2.QueueID != 2 {
 		t.Errorf("update not applied: %+v", got2)
 	}
 
@@ -64,7 +64,7 @@ func TestTargetCRUD(t *testing.T) {
 
 func TestUpdateTargetMissing(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	err := s.UpdateTarget(ctx, &Target{ID: 999, Name: "x", Engine: "fake", Lane: "wan"})
+	err := s.UpdateTarget(ctx, &Target{ID: 999, Name: "x", Engine: "fake", QueueID: 1})
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("err = %v, want ErrNotFound", err)
 	}
@@ -72,8 +72,8 @@ func TestUpdateTargetMissing(t *testing.T) {
 
 func TestListTargetsByIDsPreservesRequestOrder(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "lan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 2})
 
 	got, err := s.ListTargetsByIDs(ctx, []int64{b, a})
 	if err != nil {

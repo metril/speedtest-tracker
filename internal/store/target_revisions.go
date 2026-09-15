@@ -28,7 +28,7 @@ type DeletedTarget struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
 	Engine    string `json:"engine"`
-	Lane      string `json:"lane"`
+	QueueName string `json:"queue_name"`
 	DeletedAt string `json:"deleted_at"`
 	Version   int    `json:"version"`
 }
@@ -144,8 +144,14 @@ func (s *Store) ListDeletedTargets(ctx context.Context) ([]DeletedTarget, error)
 		if err := json.Unmarshal([]byte(snapshot), &t); err != nil {
 			return nil, fmt.Errorf("unmarshal deleted target %d snapshot: %w", targetID, err)
 		}
+		queueName := ""
+		if qid, err := s.ResolveSnapshotQueueID(ctx, json.RawMessage(snapshot)); err == nil {
+			if q, err := s.GetQueue(ctx, qid); err == nil {
+				queueName = q.Name
+			}
+		}
 		out = append(out, DeletedTarget{
-			ID: targetID, Name: t.Name, Engine: t.Engine, Lane: t.Lane,
+			ID: targetID, Name: t.Name, Engine: t.Engine, QueueName: queueName,
 			DeletedAt: createdAt, Version: version,
 		})
 	}
@@ -176,6 +182,11 @@ func (s *Store) LatestDeletedSnapshot(ctx context.Context, id int64) (*Target, e
 	if err := json.Unmarshal([]byte(snapshot), &t); err != nil {
 		return nil, fmt.Errorf("unmarshal deleted target %d snapshot: %w", id, err)
 	}
+	qid, err := s.ResolveSnapshotQueueID(ctx, json.RawMessage(snapshot))
+	if err != nil {
+		return nil, fmt.Errorf("resolve queue for deleted target %d snapshot: %w", id, err)
+	}
+	t.QueueID = qid
 	return &t, nil
 }
 
@@ -201,13 +212,13 @@ func (s *Store) RestoreTarget(ctx context.Context, t *Target) (*Target, error) {
 	// look like a brand-new target; updated_at is left to its column
 	// default (now), since the row's content is being written fresh.
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO targets(id,name,engine,enabled,lane,options,thresholds,created_at) VALUES(?,?,?,?,?,?,?,?)`,
-		t.ID, t.Name, t.Engine, t.Enabled, t.Lane, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds), t.CreatedAt,
+		`INSERT INTO targets(id,name,engine,enabled,queue_id,options,thresholds,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		t.ID, t.Name, t.Engine, t.Enabled, t.QueueID, rawOrEmpty(t.Options), rawOrEmpty(t.Thresholds), t.CreatedAt,
 	); err != nil {
 		return nil, fmt.Errorf("insert restored target %d: %w", t.ID, err)
 	}
 
-	restored, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` FROM targets WHERE id=?`, t.ID))
+	restored, err := scanTarget(tx.QueryRowContext(ctx, `SELECT `+targetColumns+` `+targetFrom+` WHERE t.id=?`, t.ID))
 	if err != nil {
 		return nil, fmt.Errorf("read restored target %d: %w", t.ID, err)
 	}

@@ -38,7 +38,7 @@ func withReload(fn func()) { reloadHook = fn }
 func createTestTarget(t *testing.T, h http.Handler, name string) int64 {
 	t.Helper()
 	rec := do(t, h, http.MethodPost, "/api/v1/targets",
-		map[string]any{"name": name, "engine": "fake", "enabled": true, "lane": "wan", "options": map[string]any{}})
+		map[string]any{"name": name, "engine": "fake", "enabled": true, "queue_id": 1, "options": map[string]any{}})
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("create target: status %d body %s", rec.Code, rec.Body.String())
 	}
@@ -446,7 +446,7 @@ func TestScheduleNextRunPrefersTheRegisteredScheduler(t *testing.T) {
 	h, db, _ := newTestAPIWith(t, func(d *Deps) {
 		d.Scheduler = stubScheduler{at: time.Date(2031, 1, 2, 3, 4, 5, 0, time.UTC), ok: true}
 	})
-	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	if _, err := db.CreateSchedule(t.Context(), &store.Schedule{
 		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}}); err != nil {
 		t.Fatal(err)
@@ -480,7 +480,7 @@ func TestScheduleNextRunFallsBackWhenSchedulerReturnsNotOK(t *testing.T) {
 	h, db, _ := newTestAPIWith(t, func(d *Deps) {
 		d.Scheduler = stubScheduler{ok: false}
 	})
-	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	if _, err := db.CreateSchedule(t.Context(), &store.Schedule{
 		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}}); err != nil {
 		t.Fatal(err)
@@ -503,7 +503,7 @@ func TestScheduleNextRunFallsBackWhenSchedulerReturnsNotOK(t *testing.T) {
 
 func TestScheduleNextRunFallsBackToTheExpression(t *testing.T) {
 	h, db, _ := newTestAPI(t) // no Scheduler wired
-	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(t.Context(), &store.Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	id, _ := db.CreateSchedule(t.Context(), &store.Schedule{
 		Name: "nightly", Cron: "@hourly", Enabled: true, Timezone: "UTC", TargetIDs: []int64{tid}})
 	runID, _ := db.CreateRun(t.Context(), "cron", &id)

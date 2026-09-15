@@ -86,7 +86,7 @@ func enqueueFakeTarget(t *testing.T, r *Runner, db *store.Store) int64 {
 	t.Helper()
 	ctx := context.Background()
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":42000000}`),
 	})
 	if err != nil {
@@ -125,7 +125,7 @@ func TestEnqueueRunsTargetAndWritesResult(t *testing.T) {
 	defer cancelSub()
 
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":42000000}`),
 	})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestEnqueueSnapshotOverridesLiveOptions(t *testing.T) {
 	ctx := context.Background()
 
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":1000}`),
 	})
 	if err != nil {
@@ -207,7 +207,7 @@ func TestEnqueueSnapshotOverridesLiveOptions(t *testing.T) {
 	// Simulate the target being edited after the original result was
 	// captured: the snapshot must still win over the new live options.
 	if err := db.UpdateTarget(ctx, &store.Target{
-		ID: tid, Name: "home", Engine: "fake", Enabled: true, Lane: "wan",
+		ID: tid, Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":9999}`),
 	}); err != nil {
 		t.Fatal(err)
@@ -242,7 +242,7 @@ func TestEnqueueFailedTestMarksRunFailed(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	tid, _ := db.CreateTarget(ctx, &store.Target{
-		Name: "broken", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "broken", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"fail":true}`),
 	})
 
@@ -264,7 +264,7 @@ func TestEnqueueUnknownEngineFailsResultNotRun(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	tid, _ := db.CreateTarget(ctx, &store.Target{
-		Name: "nope", Engine: "does-not-exist", Enabled: true, Lane: "wan",
+		Name: "nope", Engine: "does-not-exist", Enabled: true, QueueID: 1,
 	})
 	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
 	if err != nil {
@@ -288,15 +288,15 @@ func TestEnqueueRejectsEmptyAndUnknownTargets(t *testing.T) {
 	}
 }
 
-func TestLanesRunInParallel(t *testing.T) {
+func TestQueuesRunInParallel(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	// Slow the fake engine so serial execution would exceed the deadline.
 	slow := &fake.Engine{Steps: 4, Delay: 60 * time.Millisecond}
 	r.cfg.Registry.Register(slow)
 
-	wan, _ := db.CreateTarget(ctx, &store.Target{Name: "wan", Engine: "fake", Enabled: true, Lane: "wan"})
-	lan, _ := db.CreateTarget(ctx, &store.Target{Name: "lan", Engine: "fake", Enabled: true, Lane: "lan"})
+	wan, _ := db.CreateTarget(ctx, &store.Target{Name: "wan", Engine: "fake", Enabled: true, QueueID: 1})
+	lan, _ := db.CreateTarget(ctx, &store.Target{Name: "lan", Engine: "fake", Enabled: true, QueueID: 2})
 
 	start := time.Now()
 	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{wan, lan}})
@@ -324,7 +324,7 @@ func TestCancelStopsRun(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, QueueID: 1})
 
 	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
 	if err != nil {
@@ -351,7 +351,7 @@ func TestEnqueueDedupesQueuedSchedule(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "s", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "s", Engine: "fake", Enabled: true, QueueID: 1})
 	sched := int64(3)
 
 	first, err := r.Enqueue(ctx, RunRequest{Trigger: "cron", ScheduleID: &sched, TargetIDs: []int64{tid}})
@@ -385,7 +385,7 @@ func TestShutdownMarksInflightCanceled(t *testing.T) {
 	r.Start()
 
 	ctx := context.Background()
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, QueueID: 1})
 	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
 	if err != nil {
 		t.Fatal(err)
@@ -431,7 +431,7 @@ func TestConcurrentEnqueueAndShutdownNoPanic(t *testing.T) {
 	r.Start()
 	ctx := context.Background()
 
-	tid, err := db.CreateTarget(ctx, &store.Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -495,7 +495,7 @@ func TestEnqueueDedupeIsRaceFree(t *testing.T) {
 		t.Fatal(err)
 	}
 	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 20 * time.Millisecond})
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "d", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "d", Engine: "fake", Enabled: true, QueueID: 1})
 	sched := int64(9)
 
 	const n = 10
@@ -540,8 +540,8 @@ func TestCancelQueuedRunNeverStarts(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
-	tidA, _ := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
-	tidB, _ := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	tidA, _ := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
+	tidB, _ := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 1})
 
 	runA, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tidA}})
 	if err != nil {
@@ -574,7 +574,7 @@ func TestCancelQueuedRunNeverStarts(t *testing.T) {
 // TestShutdownClaimNeverOverwritesFinishedRun proves the atomic
 // "delete-to-claim" invariant Shutdown's final loop relies on
 // (claimForForceCancel) directly and deterministically: it drives
-// finishLane (the exact code a lane worker calls on completion) to win the
+// finishQueue (the exact code a lane worker calls on completion) to win the
 // race first — deleting the run from r.runs and persisting "done" — then
 // calls the real claimForForceCancel, the same method Shutdown's loop
 // calls, against that same run id. Because the entry is already gone, the
@@ -582,7 +582,7 @@ func TestCancelQueuedRunNeverStarts(t *testing.T) {
 // ever touching the store again, leaving "done" intact.
 //
 // A real end-to-end reproduction of this race (via a live Shutdown() call
-// racing finishLane on the scheduler's own timing) was tried and found too
+// racing finishQueue on the scheduler's own timing) was tried and found too
 // narrow a window to trigger reliably either with or without the fix — the
 // claim's critical section is only a couple of instructions. Calling the
 // production claimForForceCancel method directly (rather than duplicating
@@ -604,10 +604,10 @@ func TestShutdownClaimNeverOverwritesFinishedRun(t *testing.T) {
 	r.runs[runID] = &runState{ctx: runCtx, cancel: cancel, pending: 1, started: true}
 	r.mu.Unlock()
 
-	// finishLane wins the race: exactly what a lane worker calls when its
+	// finishQueue wins the race: exactly what a lane worker calls when its
 	// last target finishes successfully. It deletes the run from r.runs
 	// and persists "done".
-	r.finishLane(runID, false, false)
+	r.finishQueue(runID, false, false)
 
 	run, err := db.GetRun(ctx, runID)
 	if err != nil {
@@ -619,7 +619,7 @@ func TestShutdownClaimNeverOverwritesFinishedRun(t *testing.T) {
 
 	// The real method Shutdown's final loop calls for each stuck id.
 	if _, _, ok := r.claimForForceCancel(runID); ok {
-		t.Fatal("claimForForceCancel returned true for a run finishLane already claimed")
+		t.Fatal("claimForForceCancel returned true for a run finishQueue already claimed")
 	}
 	// Shutdown's real loop would `continue` here without ever calling
 	// SetRunStatus("canceled", ...); confirm the store still says "done".
@@ -633,23 +633,23 @@ func TestShutdownClaimNeverOverwritesFinishedRun(t *testing.T) {
 	}
 }
 
-// TestClaimForForceCancelIsExclusiveWithFinishLane races the real
+// TestClaimForForceCancelIsExclusiveWithFinishQueue races the real
 // claimForForceCancel (what Shutdown's final loop calls) against the real
-// finishLane (what a lane worker calls on completion) for the same run id,
+// finishQueue (what a lane worker calls on completion) for the same run id,
 // many times, to prove they can never both believe they own the run.
 //
-// finishLane always deletes r.runs[id] under r.mu once it decides the
+// finishQueue always deletes r.runs[id] under r.mu once it decides the
 // run's terminal status; claimForForceCancel must do the same atomically,
 // so that whichever of the two loses the race sees the entry already gone
 // and never acts on it. Before the fix, claimForForceCancel only checked
 // presence without deleting, so it could report "still in flight" (true)
-// even after finishLane had already deleted the entry and wrote "done" —
+// even after finishQueue had already deleted the entry and wrote "done" —
 // letting Shutdown's caller go on to overwrite it with "canceled". This
 // test verifies the exclusivity property directly (rather than hoping a
 // live Shutdown() call happens to interleave the same way), by asserting
-// that whenever claimForForceCancel reports ownership, finishLane's own
+// that whenever claimForForceCancel reports ownership, finishQueue's own
 // write must not have landed.
-func TestClaimForForceCancelIsExclusiveWithFinishLane(t *testing.T) {
+func TestClaimForForceCancelIsExclusiveWithFinishQueue(t *testing.T) {
 	const trials = 60
 	for i := 0; i < trials; i++ {
 		r, db, _ := newTestRunner(t)
@@ -673,7 +673,7 @@ func TestClaimForForceCancelIsExclusiveWithFinishLane(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			r.finishLane(runID, false, false)
+			r.finishQueue(runID, false, false)
 		}()
 		wg.Wait()
 		cancel()
@@ -691,14 +691,14 @@ func TestClaimForForceCancelIsExclusiveWithFinishLane(t *testing.T) {
 		}
 		if claimed {
 			// claimForForceCancel says it deleted the entry itself, which
-			// means finishLane's own guarded delete must have found it
+			// means finishQueue's own guarded delete must have found it
 			// already gone and returned without writing anything.
 			if run.Status == "done" {
-				t.Fatalf("trial %d: claimForForceCancel claimed ownership but finishLane still wrote"+
+				t.Fatalf("trial %d: claimForForceCancel claimed ownership but finishQueue still wrote"+
 					" done — the two are not mutually exclusive", i)
 			}
 		} else {
-			// Lost the claim race: finishLane must be the one that deleted
+			// Lost the claim race: finishQueue must be the one that deleted
 			// the entry, so it must have written "done".
 			if run.Status != "done" {
 				t.Fatalf("trial %d: claim lost the race but status = %q, want done", i, run.Status)
@@ -726,7 +726,7 @@ func TestShutdownGaveUpReturnsCtxErr(t *testing.T) {
 	r.Start()
 
 	ctx := context.Background()
-	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := db.CreateTarget(ctx, &store.Target{Name: "slow", Engine: "fake", Enabled: true, QueueID: 1})
 	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
 	if err != nil {
 		t.Fatal(err)
@@ -735,7 +735,7 @@ func TestShutdownGaveUpReturnsCtxErr(t *testing.T) {
 	// This test is only about the gaveUp/ctx.Err() control flow, not about
 	// racing Enqueue against Shutdown (that's covered by
 	// TestConcurrentEnqueueAndShutdownNoPanic and
-	// TestClaimForForceCancelIsExclusiveWithFinishLane), so wait for the
+	// TestClaimForForceCancelIsExclusiveWithFinishQueue), so wait for the
 	// lane worker to actually reach "running" — and be safely blocked deep
 	// in the slow engine's loop — before forcing shutdown.
 	deadline := time.Now().Add(2 * time.Second)
@@ -798,7 +798,7 @@ func TestExecuteSkipsQueuedRunsAfterShutdownBegins(t *testing.T) {
 	var runIDs []int64
 	for i := 0; i < 3; i++ {
 		tid, err := db.CreateTarget(ctx, &store.Target{
-			Name: "t" + strconv.Itoa(i), Engine: "fake", Enabled: true, Lane: "wan"})
+			Name: "t" + strconv.Itoa(i), Engine: "fake", Enabled: true, QueueID: 1})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -855,7 +855,7 @@ func TestEnqueuePublishesQueuedBeforeRunning(t *testing.T) {
 	events, cancelSub := hub.Subscribe()
 	defer cancelSub()
 
-	tid, err := db.CreateTarget(ctx, &store.Target{Name: "fast", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "fast", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -906,7 +906,7 @@ loop:
 func TestEnqueueSkipsDisabledTargetsExceptManual(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
-	tid, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, Lane: "wan"})
+	tid, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -930,11 +930,11 @@ func TestEnqueueSkipsDisabledTargetsExceptManual(t *testing.T) {
 func TestEnqueueSkipsDisabledTargetInMixedSet(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
-	on, err := db.CreateTarget(ctx, &store.Target{Name: "on", Engine: "fake", Enabled: true, Lane: "wan"})
+	on, err := db.CreateTarget(ctx, &store.Target{Name: "on", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	off, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, Lane: "wan"})
+	off, err := db.CreateTarget(ctx, &store.Target{Name: "off", Engine: "fake", Enabled: false, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -963,11 +963,11 @@ func TestCancelNotStartedNeverDoubleWritesTerminalStatus(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()
 	r.cfg.Registry.Register(&fake.Engine{Steps: 20, Delay: 30 * time.Millisecond})
-	tidA, err := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	tidA, err := db.CreateTarget(ctx, &store.Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
-	tidB, err := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	tidB, err := db.CreateTarget(ctx, &store.Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1029,7 +1029,7 @@ func TestRunEventsCarryTargetStepperCounts(t *testing.T) {
 	ids := []int64{}
 	for _, name := range []string{"one", "two"} {
 		id, err := db.CreateTarget(ctx, &store.Target{
-			Name: name, Engine: "fake", Enabled: true, Lane: "wan",
+			Name: name, Engine: "fake", Enabled: true, QueueID: 1,
 			Options: json.RawMessage(`{}`)})
 		if err != nil {
 			t.Fatal(err)
@@ -1107,7 +1107,7 @@ func TestRunnerCallsSinkAfterPersist(t *testing.T) {
 		if s.id == 0 {
 			t.Fatal("sink got a result with no id: it must run after the row is persisted")
 		}
-		if s.meta.RunID != runID || s.meta.Trigger == "" || s.meta.Lane == "" {
+		if s.meta.RunID != runID || s.meta.Trigger == "" || s.meta.QueueName == "" {
 			t.Fatalf("meta = %+v", s.meta)
 		}
 	case <-time.After(3 * time.Second):
@@ -1127,7 +1127,7 @@ func TestSinksFanOutAndSurviveAPanickingSink(t *testing.T) {
 	}
 }
 
-func TestQueueDepthsReportsPerLane(t *testing.T) {
+func TestQueueDepthsReportsPerQueue(t *testing.T) {
 	rn, _, _ := newTestRunner(t)
 	if d := rn.QueueDepths(); d == nil {
 		t.Fatal("QueueDepths returned nil")

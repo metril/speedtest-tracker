@@ -57,7 +57,7 @@ func TestResultsCSVEscapesFormulaInjection(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	ctx := context.Background()
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "=cmd|' /C calc'!A0", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "=cmd|' /C calc'!A0", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"download_bps":7}`)})
 	if err != nil {
 		t.Fatal(err)

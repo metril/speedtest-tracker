@@ -55,7 +55,7 @@ func insertResultAt(t *testing.T, s *Store, targetID int64, engine, status, star
 
 func TestInsertAndGetResult(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, QueueID: 1})
 	id := insertResultAt(t, s, tid, "ookla", "ok", "2026-09-13T10:00:00.000Z")
 
 	got, err := s.GetResult(ctx, id)
@@ -103,8 +103,8 @@ func TestInsertResultFailedKeepsError(t *testing.T) {
 
 func TestListResultsFiltersAndKeyset(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "ookla", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "lan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "ookla", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 2})
 
 	var ids []int64
 	for i := 0; i < 4; i++ {
@@ -186,8 +186,8 @@ func TestPruneResultsBeforeDeletesInBatches(t *testing.T) {
 
 func TestLatestResults(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "ookla", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "lan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "ookla", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 2})
 	insertResultAt(t, s, a, "ookla", "ok", "2026-09-13T10:00:00.000Z")
 	newestA := insertResultAt(t, s, a, "ookla", "ok", "2026-09-13T11:00:00.000Z")
 	newestB := insertResultAt(t, s, b, "fake", "ok", "2026-09-13T09:00:00.000Z")

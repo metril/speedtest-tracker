@@ -238,9 +238,9 @@ func formatTimes(times []time.Time) []string {
 	return out
 }
 
-// overlapWarnings reports every other enabled schedule that shares a lane
+// overlapWarnings reports every other enabled schedule that shares a queue
 // with sc and fires within 60s of it in the next 24h. Overlapping tests on
-// one lane skew each other's numbers, so the UI shows these on save. A
+// one queue skew each other's numbers, so the UI shows these on save. A
 // disabled schedule cannot collide with anything.
 func (d Deps) overlapWarnings(ctx context.Context, sc store.Schedule) []string {
 	if !sc.Enabled {
@@ -256,25 +256,21 @@ func (d Deps) overlapWarnings(ctx context.Context, sc store.Schedule) []string {
 		d.Logger.Error("overlap check: list targets", "error", err)
 		return []string{}
 	}
-	laneOf := make(map[int64]string, len(targets))
+	queueOf := make(map[int64]string, len(targets))
 	for _, t := range targets {
-		lane := t.Lane
-		if lane == "" {
-			lane = "wan"
-		}
-		laneOf[t.ID] = lane
+		queueOf[t.ID] = t.QueueName
 	}
 	candidate := func(s store.Schedule) scheduler.OverlapCandidate {
 		seen := map[string]bool{}
-		lanes := []string{}
+		queues := []string{}
 		for _, tid := range s.TargetIDs {
-			if lane, ok := laneOf[tid]; ok && !seen[lane] {
-				seen[lane] = true
-				lanes = append(lanes, lane)
+			if queue, ok := queueOf[tid]; ok && !seen[queue] {
+				seen[queue] = true
+				queues = append(queues, queue)
 			}
 		}
 		return scheduler.OverlapCandidate{ID: s.ID, Name: s.Name, Cron: s.Cron,
-			Timezone: s.Timezone, Lanes: lanes}
+			Timezone: s.Timezone, Queues: queues}
 	}
 	others := make([]scheduler.OverlapCandidate, 0, len(all))
 	for _, other := range all {

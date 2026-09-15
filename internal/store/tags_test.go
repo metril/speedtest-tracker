@@ -8,7 +8,7 @@ import (
 
 func TestSetResultTags(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
 	rid := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
 
 	got, err := s.SetResultTags(ctx, rid, []string{"night", "isp-issue", "night"})
@@ -54,7 +54,7 @@ func TestSetResultTags(t *testing.T) {
 
 func TestSetResultTagsCancelledContextNotNotFound(t *testing.T) {
 	s := openTemp(t)
-	tid, _ := s.CreateTarget(context.Background(), &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(context.Background(), &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
 	rid := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
 
 	cancelled, cancel := context.WithCancel(context.Background())
@@ -71,7 +71,7 @@ func TestSetResultTagsCancelledContextNotNotFound(t *testing.T) {
 
 func TestListResultsIncludesTags(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
 	r1 := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T11:00:00.000Z")
 	if _, err := s.SetResultTags(ctx, r1, []string{"tagged"}); err != nil {
@@ -95,7 +95,7 @@ func TestListResultsIncludesTags(t *testing.T) {
 
 func TestRenameAndDeleteTag(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "t", Engine: "fake", Enabled: true, QueueID: 1})
 	rid := insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	if _, err := s.SetResultTags(ctx, rid, []string{"evening", "wifi"}); err != nil {
 		t.Fatal(err)

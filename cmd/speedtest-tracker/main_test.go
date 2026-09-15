@@ -235,7 +235,7 @@ func TestSchedulerRunsScheduleEndToEnd(t *testing.T) {
 	ctx := context.Background()
 
 	tid, err := db.CreateTarget(ctx, &store.Target{
-		Name: "fake-target", Engine: "fake", Enabled: true, Lane: "wan",
+		Name: "fake-target", Engine: "fake", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{}`)})
 	if err != nil {
 		t.Fatal(err)

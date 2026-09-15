@@ -7,7 +7,7 @@ import (
 
 func TestOutagesGroupsConsecutiveFailures(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	// Three failures 15 minutes apart, then a gap, then one more.
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:15:00.000Z")
@@ -40,7 +40,7 @@ func TestOutagesGroupsConsecutiveFailures(t *testing.T) {
 // new incident rather than extending the old one.
 func TestOutagesClosesIncidentOnRecovery(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, tid, "fake", "ok", "2026-09-13T10:05:00.000Z")
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:10:00.000Z")
@@ -64,7 +64,7 @@ func TestOutagesClosesIncidentOnRecovery(t *testing.T) {
 // first and are capped at maxIncidents.
 func TestOutagesSortedDescendingAndCapped(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	times := []string{
 		"2026-09-13T08:00:00.000Z",
 		"2026-09-13T09:00:00.000Z",
@@ -104,7 +104,7 @@ func TestOutagesSortedDescendingAndCapped(t *testing.T) {
 // while gapSeconds+1 apart split into separate incidents.
 func TestOutagesGapBoundary(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, tid, "fake", "failed", "2026-09-13T10:30:00.000Z") // exactly 1800s later: merges
 
@@ -117,7 +117,7 @@ func TestOutagesGapBoundary(t *testing.T) {
 	}
 
 	s2, ctx2 := openTemp(t), context.Background()
-	tid2, _ := s2.CreateTarget(ctx2, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	tid2, _ := s2.CreateTarget(ctx2, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s2, tid2, "fake", "failed", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s2, tid2, "fake", "failed", "2026-09-13T10:30:01.000Z") // 1801s later: splits
 
@@ -132,8 +132,8 @@ func TestOutagesGapBoundary(t *testing.T) {
 
 func TestOutagesSeparatesTargetsAndIncludesSkippedRuns(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, b, "fake", "failed", "2026-09-13T10:01:00.000Z")
 

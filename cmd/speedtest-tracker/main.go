@@ -434,11 +434,11 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	})
 	rn.Start()
 
-	m.AddLabelledGaugeFunc("speedtest_runner_queue_depth", "jobs queued per lane", "lane",
+	m.AddLabelledGaugeFunc("speedtest_runner_queue_depth", "jobs queued per queue", "queue",
 		func() map[string]float64 {
 			out := map[string]float64{}
-			for lane, n := range rn.QueueDepths() {
-				out[lane] = float64(n)
+			for queue, n := range rn.QueueDepths() {
+				out[queue] = float64(n)
 			}
 			return out
 		})

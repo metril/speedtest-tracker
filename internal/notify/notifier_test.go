@@ -67,7 +67,7 @@ func newHarness(t *testing.T, n settings.Notifications) (*Notifier, *store.Store
 func seedTarget(t *testing.T, db *store.Store, thresholds string) int64 {
 	t.Helper()
 	id, err := db.CreateTarget(context.Background(), &store.Target{
-		Name: "Home", Engine: "librespeed", Enabled: true, Lane: "default",
+		Name: "Home", Engine: "librespeed", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{}`), Thresholds: json.RawMessage(thresholds),
 	})
 	if err != nil {
@@ -202,7 +202,7 @@ func TestDisablingMetricClearsStrandedFiringState(t *testing.T) {
 	}
 
 	if err := db.UpdateTarget(ctx, &store.Target{
-		ID: id, Name: "Home", Engine: "librespeed", Enabled: true, Lane: "default",
+		ID: id, Name: "Home", Engine: "librespeed", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{}`), Thresholds: json.RawMessage(`{"ping_ms_max":null}`),
 	}); err != nil {
 		t.Fatalf("disable ping threshold: %v", err)

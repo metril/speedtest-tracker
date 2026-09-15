@@ -8,8 +8,8 @@ import (
 
 func TestEachResultStreamsNewestFirstWithFilters(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
-	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
+	b, _ := s.CreateTarget(ctx, &Target{Name: "b", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T11:00:00.000Z")
 	insertResultAt(t, s, b, "fake", "ok", "2026-09-13T12:00:00.000Z")
@@ -28,7 +28,7 @@ func TestEachResultStreamsNewestFirstWithFilters(t *testing.T) {
 
 func TestEachResultStopsOnCallbackError(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, Lane: "wan"})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "a", Engine: "fake", Enabled: true, QueueID: 1})
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T11:00:00.000Z")
 

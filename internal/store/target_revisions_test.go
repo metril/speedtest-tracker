@@ -11,7 +11,7 @@ func TestCreateTargetWritesCreateRevision(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 
 	id, err := s.CreateTarget(ctx, &Target{
-		Name: "home", Engine: "ookla", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "ookla", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"server_id":1234}`),
 	})
 	if err != nil {
@@ -39,7 +39,7 @@ func TestCreateTargetWritesCreateRevision(t *testing.T) {
 
 func TestUpdateTargetWritesUpdateRevisions(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	id, err := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, Lane: "wan"})
+	id, err := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, QueueID: 1})
 	if err != nil {
 		t.Fatalf("CreateTarget: %v", err)
 	}
@@ -49,7 +49,7 @@ func TestUpdateTargetWritesUpdateRevisions(t *testing.T) {
 	if err := s.UpdateTarget(ctx, got); err != nil {
 		t.Fatalf("UpdateTarget: %v", err)
 	}
-	got.Lane = "lan"
+	got.QueueID = 2
 	if err := s.UpdateTarget(ctx, got); err != nil {
 		t.Fatalf("UpdateTarget 2: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestUpdateTargetWritesUpdateRevisions(t *testing.T) {
 
 func TestUpdateTargetMissingWritesNoRevision(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	err := s.UpdateTarget(ctx, &Target{ID: 999, Name: "x", Engine: "fake", Lane: "wan"})
+	err := s.UpdateTarget(ctx, &Target{ID: 999, Name: "x", Engine: "fake", QueueID: 1})
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("err = %v, want ErrNotFound", err)
 	}
@@ -83,7 +83,7 @@ func TestUpdateTargetMissingWritesNoRevision(t *testing.T) {
 
 func TestDeleteTargetWritesDeleteRevisionWithPreDeleteSnapshot(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, Lane: "wan"})
+	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, QueueID: 1})
 
 	if err := s.DeleteTarget(ctx, id); err != nil {
 		t.Fatalf("DeleteTarget: %v", err)
@@ -108,7 +108,7 @@ func TestDeleteTargetWritesDeleteRevisionWithPreDeleteSnapshot(t *testing.T) {
 
 func TestGetTargetRevision(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, Lane: "wan"})
+	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, QueueID: 1})
 
 	rev, err := s.GetTargetRevision(ctx, id, 1)
 	if err != nil {
@@ -128,15 +128,15 @@ func TestGetTargetRevision(t *testing.T) {
 
 func TestRevisionPruneKeepsLast50(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 
 	got, _ := s.GetTarget(ctx, id)
 	for i := 0; i < 60; i++ {
-		got.Lane = "lan"
-		if got.Lane == "lan" {
-			got.Lane = "wan"
+		got.QueueID = 2
+		if got.QueueID == 2 {
+			got.QueueID = 1
 		} else {
-			got.Lane = "lan"
+			got.QueueID = 2
 		}
 		if err := s.UpdateTarget(ctx, got); err != nil {
 			t.Fatalf("UpdateTarget %d: %v", i, err)
@@ -161,7 +161,7 @@ func TestRevisionPruneKeepsLast50(t *testing.T) {
 func TestListDeletedTargetsAndRestore(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 	id, _ := s.CreateTarget(ctx, &Target{
-		Name: "home", Engine: "ookla", Enabled: true, Lane: "wan",
+		Name: "home", Engine: "ookla", Enabled: true, QueueID: 1,
 		Options: json.RawMessage(`{"server_id":1234}`),
 	})
 	original, err := s.GetTarget(ctx, id)
@@ -215,7 +215,7 @@ func TestListDeletedTargetsAndRestore(t *testing.T) {
 
 func TestRestoreTargetConflictsWithLiveRow(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
-	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	id, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	s.DeleteTarget(ctx, id)
 	snap, err := s.LatestDeletedSnapshot(ctx, id)
 	if err != nil {

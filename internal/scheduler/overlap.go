@@ -14,13 +14,13 @@ const (
 )
 
 // OverlapCandidate is one enabled schedule reduced to what overlap
-// detection needs: when it fires and which lanes it occupies.
+// detection needs: when it fires and which queues it occupies.
 type OverlapCandidate struct {
 	ID       int64
 	Name     string
 	Cron     string
 	Timezone string
-	Lanes    []string
+	Queues   []string
 }
 
 // firesWithin lists the schedule's fire times in [from, from+overlapWindow].
@@ -37,24 +37,24 @@ func (c OverlapCandidate) firesWithin(from time.Time) []time.Time {
 	return out
 }
 
-// sharedLane returns the first lane both candidates occupy, if any.
-func sharedLane(a, b OverlapCandidate) (string, bool) {
-	set := make(map[string]bool, len(a.Lanes))
-	for _, l := range a.Lanes {
-		set[l] = true
+// sharedQueue returns the first queue both candidates occupy, if any.
+func sharedQueue(a, b OverlapCandidate) (string, bool) {
+	set := make(map[string]bool, len(a.Queues))
+	for _, q := range a.Queues {
+		set[q] = true
 	}
-	for _, l := range b.Lanes {
-		if set[l] {
-			return l, true
+	for _, q := range b.Queues {
+		if set[q] {
+			return q, true
 		}
 	}
 	return "", false
 }
 
-// FindOverlaps reports, for each other enabled schedule that shares a lane
-// with subject and fires within 60s of it in the next 24h, a
-// human-readable warning. Overlapping tests on one lane skew each other's
-// results, so the UI surfaces these when a schedule is saved.
+// FindOverlaps reports, for each other enabled schedule that shares a
+// queue with subject and fires within 60s of it in the next 24h, a
+// human-readable warning. Overlapping tests on one queue skew each
+// other's results, so the UI surfaces these when a schedule is saved.
 func FindOverlaps(subject OverlapCandidate, others []OverlapCandidate, from time.Time) []string {
 	mine := subject.firesWithin(from)
 	if len(mine) == 0 {
@@ -65,7 +65,7 @@ func FindOverlaps(subject OverlapCandidate, others []OverlapCandidate, from time
 		if other.ID == subject.ID {
 			continue
 		}
-		lane, ok := sharedLane(subject, other)
+		queue, ok := sharedQueue(subject, other)
 		if !ok {
 			continue
 		}
@@ -75,8 +75,8 @@ func FindOverlaps(subject OverlapCandidate, others []OverlapCandidate, from time
 		}
 		if at, ok := nearestCollision(mine, theirs); ok {
 			warnings = append(warnings, fmt.Sprintf(
-				"overlaps with schedule %q on lane %q around %s; overlapping tests skew each other's results",
-				other.Name, lane, at.UTC().Format(time.RFC3339)))
+				"overlaps with schedule %q on queue %q around %s; overlapping tests skew each other's results",
+				other.Name, queue, at.UTC().Format(time.RFC3339)))
 		}
 	}
 	return warnings

@@ -127,7 +127,7 @@ func TestTargetsCRUDRoutes(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": map[string]any{"download_bps": 1000},
 	})
 	if rec.Code != http.StatusCreated {
@@ -137,7 +137,7 @@ func TestTargetsCRUDRoutes(t *testing.T) {
 	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
 		t.Fatal(err)
 	}
-	if created.ID == 0 || created.Name != "home" || created.Lane != "wan" {
+	if created.ID == 0 || created.Name != "home" || created.QueueID != 1 {
 		t.Fatalf("created = %+v", created)
 	}
 
@@ -150,7 +150,7 @@ func TestTargetsCRUDRoutes(t *testing.T) {
 
 	path := "/api/v1/targets/" + itoa(created.ID)
 	rec = do(t, h, http.MethodPut, path, map[string]any{
-		"name": "renamed", "engine": "fake", "enabled": false, "lane": "lan",
+		"name": "renamed", "engine": "fake", "enabled": false, "queue_id": 2,
 		"options": map[string]any{},
 	})
 	if rec.Code != http.StatusOK {
@@ -159,7 +159,7 @@ func TestTargetsCRUDRoutes(t *testing.T) {
 	rec = do(t, h, http.MethodGet, path, nil)
 	var got store.Target
 	json.NewDecoder(rec.Body).Decode(&got)
-	if got.Name != "renamed" || got.Enabled || got.Lane != "lan" {
+	if got.Name != "renamed" || got.Enabled || got.QueueID != 2 {
 		t.Errorf("after PUT = %+v", got)
 	}
 
@@ -183,7 +183,7 @@ func TestCreateTargetExplicitNullOptionsDefaultsToEmptyObject(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": nil, "thresholds": nil,
 	})
 	if rec.Code != http.StatusCreated {
@@ -202,7 +202,7 @@ func TestCreateTargetExplicitNullOptionsDefaultsToEmptyObject(t *testing.T) {
 
 	path := "/api/v1/targets/" + itoa(created.ID)
 	rec = do(t, h, http.MethodPut, path, map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"options": nil, "thresholds": nil,
 	})
 	if rec.Code != http.StatusOK {
@@ -224,7 +224,7 @@ func TestCreateTargetPerMetricNullThresholdRoundTrips(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"thresholds": map[string]any{"ping_ms_max": nil, "download_mbps_min": 50},
 	})
 	if rec.Code != http.StatusCreated {
@@ -302,14 +302,14 @@ func TestCreateTargetValidation(t *testing.T) {
 func TestUpdateTargetRejectsMalformedThresholds(t *testing.T) {
 	h, _, _ := newTestAPI(t)
 	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 	})
 	var created store.Target
 	json.NewDecoder(rec.Body).Decode(&created)
 
 	path := "/api/v1/targets/" + itoa(created.ID)
 	rec = do(t, h, http.MethodPut, path, map[string]any{
-		"name": "home", "engine": "fake", "enabled": true, "lane": "wan",
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1,
 		"thresholds": map[string]any{"ping_ms_max": "fast"},
 	})
 	if rec.Code != http.StatusBadRequest {
@@ -349,7 +349,7 @@ func TestPostTargetsTestValidatesOptions(t *testing.T) {
 func TestRunTargetEnqueues(t *testing.T) {
 	h, db, run := newTestAPI(t)
 	id, _ := db.CreateTarget(context.Background(), &store.Target{
-		Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+		Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 
 	rec := do(t, h, http.MethodPost, "/api/v1/targets/"+itoa(id)+"/run", nil)
 	if rec.Code != http.StatusAccepted {
@@ -376,7 +376,7 @@ func TestRunTargetEnqueues(t *testing.T) {
 func TestTargetLatest(t *testing.T) {
 	h, db, _ := newTestAPI(t)
 	ctx := context.Background()
-	id, _ := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, Lane: "wan"})
+	id, _ := db.CreateTarget(ctx, &store.Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 
 	if rec := do(t, h, http.MethodGet, "/api/v1/targets/"+itoa(id)+"/latest", nil); rec.Code != http.StatusNotFound {
 		t.Fatalf("no results yet = %d, want 404", rec.Code)

@@ -254,10 +254,25 @@ range, omitted when it only offers a single port), `supports_reverse`,
 column: `-R`, `-u`, `-6`), plus `gbs`, `continent`, `country`, `site` and
 `provider` for display/search.
 
+## Queues
+
+Every target belongs to a queue (`GET/POST /api/v1/queues`,
+`PUT`/`DELETE /api/v1/queues/{id}`). Targets in the same queue run one at a
+time; different queues run in parallel — so putting a WAN test and a LAN
+test in separate queues lets them run together, while two targets that
+would interfere with each other (e.g. sharing the same uplink) belong in
+one queue. New installs are seeded with `wan` and `lan`, but queues are
+just user-managed names: rename, add or remove them from the Queues page.
+Names must be unique, non-empty and at most 64 characters. The last
+remaining queue can't be deleted, and a queue with targets still assigned
+to it answers 409 `queue_in_use` until they're moved elsewhere. A target
+create/update body may omit `queue_id`, which defaults it to the first
+(originally `wan`) queue, so older API clients keep working unchanged.
+
 ## Schedules
 
 A schedule is a name, a cron expression, a timezone and an **ordered** list of
-targets. Targets in a run execute one after another within a lane, so a
+targets. Targets in a run execute one after another within a queue, so a
 schedule's order is the order the tests run in.
 
 | Field | Notes |
@@ -270,11 +285,11 @@ Behaviour:
 
 - A cron fire only **enqueues** a run; the HTTP API and the UI never block on a
   running test.
-- If the schedule's previous run is still queued or running, or the lane queue
+- If the schedule's previous run is still queued or running, or the queue
   is full, the fire is recorded as a `skipped` run row instead of piling up.
 - Missed fires during downtime are never backfilled.
 - Saving a schedule returns `warnings[]` when another enabled schedule sharing a
-  lane fires within 60 seconds of it in the next 24 hours — overlapping tests
+  queue fires within 60 seconds of it in the next 24 hours — overlapping tests
   skew each other's results.
 
 Endpoints:
@@ -404,7 +419,7 @@ Identity and auth endpoints:
 - **`/metrics`** — off by default, toggled by Settings → Integrations →
   *Enable /metrics*, answering 404 while disabled. Exposes
   `speedtest_latest_*` gauges per target, `speedtest_runs_total{status}`,
-  `speedtest_runner_queue_depth{lane}`, `speedtest_summary_cache_hits_total` /
+  `speedtest_runner_queue_depth{queue}`, `speedtest_summary_cache_hits_total` /
   `_misses_total`, and the VM/VL push counters. `/healthz` is always
   available and never gated.
 - **`/api/v1/targets/{id}/latest`** — the stable Home Assistant polling
