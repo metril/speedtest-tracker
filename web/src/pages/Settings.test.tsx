@@ -144,6 +144,15 @@ describe('Settings page', () => {
     expect(await screen.findByLabelText('Timezone')).toBeInTheDocument();
   });
 
+  it('renders the section tabs and marks the active one', async () => {
+    renderSettings({ path: '/settings/engines' });
+    await screen.findByLabelText('iperf3 server list URL');
+    const tabs = screen.getAllByRole('tab');
+    expect(tabs.map((t) => t.textContent)).toEqual(['General', 'Engines', 'Integrations', 'Notifications', 'Auth']);
+    expect(screen.getByRole('tab', { name: 'Engines' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'false');
+  });
+
   it('saves only the edited section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({ put });
@@ -431,13 +440,10 @@ describe('Settings page', () => {
     const tz = await screen.findByLabelText('Timezone');
     await userEvent.selectOptions(tz, 'Asia/Kolkata');
 
-    // Both the md+ column nav and the mobile horizontal-scroll strip render
-    // a same-named link (only one is visible at a time via CSS, which
-    // jsdom doesn't apply) — either navigates to the same route.
-    await userEvent.click(screen.getAllByRole('link', { name: 'Engines' })[0]);
+    await userEvent.click(screen.getByRole('tab', { name: 'Engines' }));
     await screen.findByLabelText('iperf3 server list URL');
 
-    await userEvent.click(screen.getAllByRole('link', { name: 'General' })[0]);
+    await userEvent.click(screen.getByRole('tab', { name: 'General' }));
     expect(await screen.findByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
   });
 });

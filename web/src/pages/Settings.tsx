@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet } from 'react-router';
+import { Outlet, useLocation, useNavigate } from 'react-router';
+import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import type { SectionKey, SettingsOutletContext, TestResult } from '../features/settings/settingsContext';
 import { stripIrrelevantChannelFields } from '../features/settings/channelHelpers';
 import { validateAuthSettings } from '../features/settings/AuthSection';
@@ -50,6 +51,8 @@ function useSavedFlash() {
  * hands all of it down through useOutletContext so switching tabs never
  * loses an in-progress, unsaved edit in another section. */
 export function Settings() {
+  const location = useLocation();
+  const navigate = useNavigate();
   const settings = useSettings();
   const update = useUpdateSettings();
   const test = useTestIntegration();
@@ -192,52 +195,22 @@ export function Settings() {
     auth, setAuth, saveAuth,
   };
 
+  const active = TABS.find((tab) => location.pathname.endsWith(`/${tab.to}`))?.key ?? TABS[0].key;
+
   return (
     <div className="grid gap-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
-      <nav aria-label="Settings sections" className="md:hidden">
-        <ul className="flex w-full gap-1 overflow-x-auto rounded-lg bg-raised p-1">
+      <Tabs value={active} onValueChange={(key) => navigate(`/settings/${key}`)}>
+        <TabsList className="w-full justify-start overflow-x-auto">
           {TABS.map((tab) => (
-            <li key={tab.key} className="shrink-0">
-              <NavLink
-                to={`/settings/${tab.to}`}
-                className={({ isActive }) =>
-                  `block whitespace-nowrap rounded-md px-3 py-1 text-sm font-medium transition-colors ${
-                    isActive ? 'bg-surface text-fg shadow' : 'text-muted hover:text-fg'
-                  }`
-                }
-              >
-                {tab.label}
-              </NavLink>
-            </li>
+            <TabsTrigger key={tab.key} value={tab.key}>{tab.label}</TabsTrigger>
           ))}
-        </ul>
-      </nav>
+        </TabsList>
+      </Tabs>
 
-      <div className="grid gap-6 md:grid-cols-[12rem_1fr]">
-        <nav className="hidden md:block" aria-label="Settings sections">
-          <ul className="grid gap-1">
-            {TABS.map((tab) => (
-              <li key={tab.key}>
-                <NavLink
-                  to={`/settings/${tab.to}`}
-                  className={({ isActive }) =>
-                    `block rounded-md px-3 py-2 text-sm font-medium transition-colors ${
-                      isActive ? 'bg-raised text-accent' : 'text-muted hover:bg-raised hover:text-fg'
-                    }`
-                  }
-                >
-                  {tab.label}
-                </NavLink>
-              </li>
-            ))}
-          </ul>
-        </nav>
-
-        <div className="min-w-0">
-          <Outlet context={context} />
-        </div>
+      <div className="min-w-0">
+        <Outlet context={context} />
       </div>
     </div>
   );
