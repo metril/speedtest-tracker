@@ -52,6 +52,13 @@ describe('LivePanel', () => {
     expect(screen.getByRole('button', { name: /expand live test/i })).toBeInTheDocument();
   });
 
+  it('expands without mistaking the click event for a run id', async () => {
+    const open = vi.fn();
+    renderPanel({ live: live(), expanded: false, open, close: vi.fn() });
+    await userEvent.click(screen.getByRole('button', { name: /expand live test/i }));
+    expect(open).toHaveBeenCalledWith();
+  });
+
   it('renders nothing for a run the user dismissed, even though it is still live', () => {
     const { container } = renderPanel({
       live: live(), expanded: false, hidden: true, open: vi.fn(), close: vi.fn(),

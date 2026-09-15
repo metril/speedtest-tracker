@@ -1,7 +1,9 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { LivePanel } from './LivePanel';
 import { LiveRunProvider, useLivePanel } from './LiveRunProvider';
 
 // FakeEventSource lets the test push SSE events, mirroring useLiveRun.test.ts.
@@ -114,6 +116,27 @@ describe('LiveRunProvider', () => {
 
     act(() => emit('run', { run_id: 2, status: 'running', targets_total: 1, targets_done: 0 }));
     expect(screen.getByTestId('hidden').textContent).toBe('false');
+  });
+
+  it('expanding a scheduled run via the CompactBar, then closing, still shows the CompactBar', async () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <MemoryRouter>
+          <LiveRunProvider><LivePanel /></LiveRunProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    expect(screen.getByRole('button', { name: /expand live test/i })).toBeInTheDocument();
+
+    await userEvent.click(screen.getByRole('button', { name: /expand live test/i }));
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    const [closeButton] = screen.getAllByRole('button', { name: 'Close' });
+    await userEvent.click(closeButton);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(screen.getByRole('button', { name: /expand live test/i })).toBeInTheDocument();
   });
 
   it('invalidates summary, history and outages on a result event', () => {

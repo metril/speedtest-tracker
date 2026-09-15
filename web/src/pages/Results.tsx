@@ -55,7 +55,7 @@ export function Results() {
         <ResultsTable
           rows={rows}
           onDelete={(id) => remove.mutate(id)}
-          onReexecute={(id) => replay.mutate(id, { onSuccess: () => open() })}
+          onReexecute={(id) => replay.mutate(id, { onSuccess: (res) => open(res.run_id) })}
           onTag={(id, tags) => tag.mutate({ id, tags })}
         />
       )}

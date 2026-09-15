@@ -58,7 +58,7 @@ export function LivePanel() {
   if (!live || !visible || hidden) return null;
   return expanded
     ? <ExpandedPanel live={live} onClose={close} onCancel={() => cancel.mutate(live.runId)} canceling={cancel.isPending} />
-    : <CompactBar live={live} onExpand={open} />;
+    : <CompactBar live={live} onExpand={() => open()} />;
 }
 
 function ExpandedPanel({ live, onClose, onCancel, canceling }: {
