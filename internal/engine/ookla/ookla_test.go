@@ -140,6 +140,28 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestParseOptionsServerIDsNormalization(t *testing.T) {
+	o, err := parseOptions(json.RawMessage(`{"server_ids":[111]}`))
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.ServerID != 111 {
+		t.Errorf("ServerID = %d, want 111", o.ServerID)
+	}
+
+	o, err = parseOptions(json.RawMessage(`{"server_ids":[111,222]}`))
+	if err != nil {
+		t.Fatalf("parseOptions with multi-server list: %v", err)
+	}
+	if o.ServerID != 0 || len(o.ServerIDs) != 2 {
+		t.Errorf("o = %+v, want ServerID 0 and 2 ServerIDs", o)
+	}
+
+	if _, err := parseOptions(json.RawMessage(`{"server_ids":[1,-2]}`)); err == nil {
+		t.Error("want error for non-positive server_ids entry")
+	}
+}
+
 func TestName(t *testing.T) {
 	if New("speedtest", Config{}).Name() != "ookla" {
 		t.Error("Name mismatch")

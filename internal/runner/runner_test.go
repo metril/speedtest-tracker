@@ -238,6 +238,156 @@ func TestEnqueueSnapshotOverridesLiveOptions(t *testing.T) {
 	}
 }
 
+// TestConsecutiveRunsRotateThroughHostList covers host rotation: a target
+// with an ordered server_ids list uses a different entry (in order,
+// wrapping) on each consecutive run, and each result's options_snapshot
+// records the single host actually used.
+func TestConsecutiveRunsRotateThroughHostList(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	// Alias the fake engine under "ookla" so rotate() treats this target
+	// as an ookla target (it switches on the engine name) while the run
+	// itself stays a no-I/O fake engine.
+	r.cfg.Registry.Replace(map[string]engine.Engine{"ookla": fake.New()})
+	ctx := context.Background()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "rot", Engine: "ookla", Enabled: true, QueueID: 1,
+		Options: json.RawMessage(`{"server_ids":[111,222,333]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var gotHosts []string
+	for range 4 {
+		runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+		if err != nil {
+			t.Fatalf("Enqueue: %v", err)
+		}
+		run := waitForRun(t, db, runID)
+		if run.Status != "done" {
+			t.Fatalf("run status = %q, want done (err=%v)", run.Status, run.Error)
+		}
+		res, err := db.LatestResultForTarget(ctx, tid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var snap struct {
+			ServerID  int64  `json:"server_id"`
+			ServerIDs []int  `json:"server_ids"`
+		}
+		if err := json.Unmarshal(res.OptionsSnapshot, &snap); err != nil {
+			t.Fatalf("unmarshal snapshot %s: %v", res.OptionsSnapshot, err)
+		}
+		if snap.ServerIDs != nil {
+			t.Errorf("snapshot still carries server_ids: %s", res.OptionsSnapshot)
+		}
+		gotHosts = append(gotHosts, strconv.FormatInt(snap.ServerID, 10))
+	}
+	want := []string{"111", "222", "333", "111"}
+	for i, v := range want {
+		if gotHosts[i] != v {
+			t.Errorf("gotHosts = %v, want %v", gotHosts, want)
+			break
+		}
+	}
+
+	// The live target's server_ids list must be untouched by rotation
+	// (only the cursor moves).
+	live, err := db.GetTarget(ctx, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(live.Options) != `{"server_ids":[111,222,333]}` {
+		t.Errorf("live options = %s, must be unchanged", live.Options)
+	}
+	if live.RotationIndex != 4 {
+		t.Errorf("rotation_index = %d, want 4", live.RotationIndex)
+	}
+}
+
+// TestRotationSkippedOnReexecute covers re-execute: a Snapshots override
+// must bypass rotation entirely (and must not advance the cursor), so
+// replaying a past result reruns the exact single host it recorded.
+func TestRotationSkippedOnReexecute(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	r.cfg.Registry.Replace(map[string]engine.Engine{"ookla": fake.New()})
+	ctx := context.Background()
+
+	tid, err := db.CreateTarget(ctx, &store.Target{
+		Name: "rot", Engine: "ookla", Enabled: true, QueueID: 1,
+		Options: json.RawMessage(`{"server_ids":[111,222,333]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	override := json.RawMessage(`{"server_id":222}`)
+	runID, err := r.Enqueue(ctx, RunRequest{
+		Trigger: "reexec", TargetIDs: []int64{tid},
+		Snapshots: map[int64]json.RawMessage{tid: override},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	waitForRun(t, db, runID)
+
+	res, err := db.LatestResultForTarget(ctx, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(res.OptionsSnapshot) != string(override) {
+		t.Errorf("snapshot = %s, want the override %s unchanged", res.OptionsSnapshot, override)
+	}
+
+	live, err := db.GetTarget(ctx, tid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if live.RotationIndex != 0 {
+		t.Errorf("rotation_index = %d, want 0 (re-execute must not advance the cursor)", live.RotationIndex)
+	}
+}
+
+// TestRotationNoopForSingleHostOrCloudflare covers the two other skip
+// cases: a list with at most one entry, and the cloudflare engine (which
+// has no host/server list at all).
+func TestRotationNoopForSingleHostOrCloudflare(t *testing.T) {
+	r, db, _ := newTestRunner(t)
+	r.cfg.Registry.Replace(map[string]engine.Engine{"ookla": fake.New(), "cloudflare": fake.New()})
+	ctx := context.Background()
+
+	single, err := db.CreateTarget(ctx, &store.Target{
+		Name: "single", Engine: "ookla", Enabled: true, QueueID: 1,
+		Options: json.RawMessage(`{"server_ids":[111]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cf, err := db.CreateTarget(ctx, &store.Target{
+		Name: "cf", Engine: "cloudflare", Enabled: true, QueueID: 1,
+		Options: json.RawMessage(`{}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tid := range []int64{single, cf} {
+		runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		waitForRun(t, db, runID)
+		live, err := db.GetTarget(ctx, tid)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if live.RotationIndex != 0 {
+			t.Errorf("target %d rotation_index = %d, want 0 (no list to rotate)", tid, live.RotationIndex)
+		}
+	}
+}
+
 func TestEnqueueFailedTestMarksRunFailed(t *testing.T) {
 	r, db, _ := newTestRunner(t)
 	ctx := context.Background()

@@ -19,6 +19,13 @@ const stderrTailLimit = 4 << 10 // 4 KiB
 // Options are the Ookla engine's per-target options.
 type Options struct {
 	ServerID int64 `json:"server_id,omitempty"`
+	// ServerIDs is an ordered list of server ids the runner rotates
+	// through, one per run (see internal/runner/rotate.go). Once rotation
+	// has picked one, it rewrites the options to carry ServerID alone
+	// before Run ever sees them; parseOptions still folds a single-entry
+	// list into ServerID itself, so a list that never grew past one entry
+	// (or reached Run outside the runner) behaves the same as ServerID.
+	ServerIDs []int64 `json:"server_ids,omitempty"`
 }
 
 // Config holds the settings-derived consent flags.
@@ -55,6 +62,14 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 	}
 	if o.ServerID < 0 {
 		return Options{}, errors.New("ookla options: server_id must be positive")
+	}
+	for _, id := range o.ServerIDs {
+		if id <= 0 {
+			return Options{}, errors.New("ookla options: server_ids must be positive")
+		}
+	}
+	if o.ServerID == 0 && len(o.ServerIDs) == 1 {
+		o.ServerID = o.ServerIDs[0]
 	}
 	return o, nil
 }

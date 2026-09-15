@@ -78,6 +78,49 @@ func TestParseOptionsValidation(t *testing.T) {
 	}
 }
 
+func TestParseOptionsHostsNormalization(t *testing.T) {
+	// A single-entry hosts list folds into Host, same as it being set
+	// directly.
+	o, err := parseOptions(json.RawMessage(`{"hosts":["a.lan"]}`))
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.Host != "a.lan" {
+		t.Errorf("Host = %q, want a.lan", o.Host)
+	}
+
+	// A multi-entry hosts list is valid on its own (rotation picks one at
+	// run time); Host is left empty.
+	o, err = parseOptions(json.RawMessage(`{"hosts":["a.lan","b.lan"]}`))
+	if err != nil {
+		t.Fatalf("parseOptions with multi-host list: %v", err)
+	}
+	if o.Host != "" || len(o.Hosts) != 2 {
+		t.Errorf("o = %+v, want empty Host and 2 Hosts", o)
+	}
+
+	// Host still wins when both are set.
+	o, err = parseOptions(json.RawMessage(`{"host":"explicit","hosts":["a.lan"]}`))
+	if err != nil {
+		t.Fatalf("parseOptions: %v", err)
+	}
+	if o.Host != "explicit" {
+		t.Errorf("Host = %q, want explicit", o.Host)
+	}
+}
+
+func TestParseOptionsHostsValidation(t *testing.T) {
+	for _, raw := range []string{
+		`{}`,                       // no host, no hosts
+		`{"hosts":[]}`,             // empty list, no host
+		`{"hosts":["a.lan",""]}`,   // blank entry
+	} {
+		if _, err := parseOptions(json.RawMessage(raw)); err == nil {
+			t.Errorf("parseOptions(%s) = nil error, want error", raw)
+		}
+	}
+}
+
 func TestParseOptionsPortRangeEndValid(t *testing.T) {
 	o, err := parseOptions(json.RawMessage(`{"host":"h","port":5201,"port_range_end":5205}`))
 	if err != nil {

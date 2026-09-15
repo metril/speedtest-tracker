@@ -448,6 +448,15 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t sto
 	options := t.Options
 	if len(override) > 0 {
 		options = override
+	} else if rotated, ok := rotate(options, t.Engine, func(n int) int {
+		idx, err := r.cfg.Store.NextRotationIndex(ctx, t.ID, n)
+		if err != nil {
+			r.cfg.Logger.Error("rotation index", "error", err, "target_id", t.ID)
+			return 0
+		}
+		return idx
+	}); ok {
+		options = rotated
 	}
 	snapshot := options
 	if len(snapshot) == 0 {

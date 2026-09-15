@@ -62,6 +62,53 @@ func TestTargetCRUD(t *testing.T) {
 	}
 }
 
+func TestNextRotationIndexCyclesAndPersists(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+
+	id, err := s.CreateTarget(ctx, &Target{
+		Name: "home", Engine: "iperf3", Enabled: true, QueueID: 1,
+		Options: json.RawMessage(`{"hosts":["a","b","c"]}`),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.GetTarget(ctx, id)
+	if err != nil || got.RotationIndex != 0 {
+		t.Fatalf("initial rotation_index = %d, err=%v, want 0", got.RotationIndex, err)
+	}
+
+	var seen []int
+	for range 5 {
+		idx, err := s.NextRotationIndex(ctx, id, 3)
+		if err != nil {
+			t.Fatalf("NextRotationIndex: %v", err)
+		}
+		seen = append(seen, idx)
+	}
+	want := []int{0, 1, 2, 0, 1}
+	for i, v := range want {
+		if seen[i] != v {
+			t.Errorf("seen = %v, want %v", seen, want)
+			break
+		}
+	}
+
+	// The cursor is a plain column, so reopening the DB (simulating a
+	// restart) must pick up where it left off rather than resetting.
+	got, err = s.GetTarget(ctx, id)
+	if err != nil || got.RotationIndex != 5 {
+		t.Fatalf("rotation_index after 5 calls = %d, err=%v, want 5", got.RotationIndex, err)
+	}
+}
+
+func TestNextRotationIndexMissingTarget(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	if _, err := s.NextRotationIndex(ctx, 999, 3); !errors.Is(err, ErrNotFound) {
+		t.Errorf("err = %v, want ErrNotFound", err)
+	}
+}
+
 func TestUpdateTargetMissing(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 	err := s.UpdateTarget(ctx, &Target{ID: 999, Name: "x", Engine: "fake", QueueID: 1})

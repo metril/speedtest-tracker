@@ -11,7 +11,15 @@ import (
 // Options are the iperf3 engine's per-target options.
 type Options struct {
 	Host string `json:"host"`
-	Port int    `json:"port,omitempty"`
+	// Hosts is an ordered list of hosts the runner rotates through, one
+	// per run (see internal/runner/rotate.go), sharing Port and every
+	// other option below. Once rotation has picked one, it rewrites the
+	// options to carry Host alone before Run ever sees them; parseOptions
+	// still folds a single-entry list into Host itself, so a list that
+	// never grew past one entry (or reached Run outside the runner)
+	// behaves the same as Host.
+	Hosts []string `json:"hosts,omitempty"`
+	Port  int      `json:"port,omitempty"`
 	// PortRangeEnd, when greater than Port, makes Run retry on
 	// consecutive ports up to this one (still capped at 5 attempts total)
 	// whenever the server reports it is busy running another test. Zero
@@ -36,7 +44,15 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 			return Options{}, fmt.Errorf("iperf3 options: %w", err)
 		}
 	}
-	if o.Host == "" {
+	for _, h := range o.Hosts {
+		if h == "" {
+			return Options{}, errors.New("iperf3 options: hosts must not contain an empty host")
+		}
+	}
+	if o.Host == "" && len(o.Hosts) == 1 {
+		o.Host = o.Hosts[0]
+	}
+	if o.Host == "" && len(o.Hosts) == 0 {
 		return Options{}, errors.New("iperf3 options: host is required")
 	}
 	if o.Port == 0 {

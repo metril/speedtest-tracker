@@ -21,11 +21,15 @@ type Target struct {
 	QueueName  string          `json:"queue_name"`
 	Options    json.RawMessage `json:"options"`
 	Thresholds json.RawMessage `json:"thresholds"`
-	CreatedAt  string          `json:"created_at"`
-	UpdatedAt  string          `json:"updated_at"`
+	// RotationIndex is read-only: the host/server-id rotation cursor
+	// advanced by NextRotationIndex, exposed so the UI can show which list
+	// entry the next run will use.
+	RotationIndex int64  `json:"rotation_index"`
+	CreatedAt     string `json:"created_at"`
+	UpdatedAt     string `json:"updated_at"`
 }
 
-const targetColumns = `t.id,t.name,t.engine,t.enabled,t.queue_id,q.name,t.options,t.thresholds,t.created_at,t.updated_at`
+const targetColumns = `t.id,t.name,t.engine,t.enabled,t.queue_id,q.name,t.options,t.thresholds,t.rotation_index,t.created_at,t.updated_at`
 const targetFrom = `FROM targets t JOIN queues q ON q.id = t.queue_id`
 
 // rawOrEmpty normalises a nil/empty JSON document to "{}".
@@ -40,7 +44,7 @@ func scanTarget(sc interface{ Scan(...any) error }) (*Target, error) {
 	var t Target
 	var options, thresh string
 	if err := sc.Scan(&t.ID, &t.Name, &t.Engine, &t.Enabled, &t.QueueID, &t.QueueName,
-		&options, &thresh, &t.CreatedAt, &t.UpdatedAt); err != nil {
+		&options, &thresh, &t.RotationIndex, &t.CreatedAt, &t.UpdatedAt); err != nil {
 		return nil, err
 	}
 	t.Options = json.RawMessage(options)
@@ -226,6 +230,29 @@ func (s *Store) DeleteTarget(ctx context.Context, id int64) error {
 	}
 
 	return tx.Commit()
+}
+
+// NextRotationIndex returns the target's rotation_index modulo n (the
+// entry the caller should use next) and advances the persisted cursor by
+// one, in a single UPDATE ... RETURNING so concurrent callers never read
+// the same index twice. It writes no target revision. Returns ErrNotFound
+// if the target does not exist.
+func (s *Store) NextRotationIndex(ctx context.Context, id int64, n int) (int, error) {
+	if n <= 0 {
+		return 0, fmt.Errorf("next rotation index for target %d: n must be positive, got %d", id, n)
+	}
+	var idx int64
+	err := s.Write.QueryRowContext(ctx, `
+		UPDATE targets SET rotation_index = rotation_index + 1
+		WHERE id = ?
+		RETURNING (rotation_index - 1) % ?`, id, n).Scan(&idx)
+	if errors.Is(err, sql.ErrNoRows) {
+		return 0, ErrNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("next rotation index for target %d: %w", id, err)
+	}
+	return int(idx), nil
 }
 
 // requireAffected turns a zero-row Exec into ErrNotFound.
