@@ -59,26 +59,26 @@ func ValidateChannel(ch settings.Channel) error {
 	return nil
 }
 
-// RedactURL returns u with userinfo stripped and every query parameter
-// value replaced with "***", keeping scheme, host and path visible. It is
-// the safe form of an apprise URL for errors, logs and the settings API:
-// apprise targets embed credentials in userinfo, query params, or
-// sometimes the path/host itself (e.g. discord://id/token), so this is a
-// simplest-safe-rule redaction, not a guarantee every secret is stripped.
+// RedactURL returns u with only scheme and host kept ("scheme://host"),
+// userinfo dropped and the entire path and query collapsed to "/***". It
+// is the safe form of an apprise URL for errors, logs and the settings
+// API: apprise targets put credentials in the path (discord://id/token,
+// tgram://token/chat), query string (ntfy://host/topic?token=...) or
+// userinfo, and none of those are safe to echo back.
+//
+// Known limit: some services (Telegram's tgram://<bot_token>/<chat_id>)
+// put the secret in the *host* position itself, which this function
+// necessarily keeps — there is no scheme-generic way to tell a hostname
+// from a credential sitting where a hostname goes. Those targets are not
+// fully redacted by this rule.
+//
 // An unparseable u redacts to "***" wholesale.
 func RedactURL(raw string) string {
 	u, err := url.Parse(raw)
-	if err != nil {
+	if err != nil || u.Host == "" {
 		return "***"
 	}
-	u.User = nil
-	if q := u.Query(); len(q) > 0 {
-		for k := range q {
-			q[k] = []string{"***"}
-		}
-		u.RawQuery = q.Encode()
-	}
-	return u.String()
+	return u.Scheme + "://" + u.Host + "/***"
 }
 
 // redactAppriseErr returns err with every URL in urls substituted by its

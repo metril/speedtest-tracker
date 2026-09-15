@@ -449,9 +449,10 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	ctx := context.Background()
 	const ntfyURL = "ntfy://host/mytopic?token=secret123"
+	const discordURL = "discord://123456/webhook-token-should-not-leak"
 	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
 		{ID: "wh", Type: "webhook", URL: "https://hook", Headers: map[string]string{"Authorization": "secret-header"}},
-		{ID: "ap", Type: "apprise", URL: "https://apprise", URLs: []string{ntfyURL}},
+		{ID: "ap", Type: "apprise", URL: "https://apprise", URLs: []string{ntfyURL, discordURL}},
 	})
 
 	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
@@ -463,14 +464,18 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 		t.Fatalf("header = %+v, want masked", body.Notifications.Channels[0].Headers)
 	}
 	redacted := body.Notifications.Channels[1].URLs[0]
-	if redacted == ntfyURL || strings.Contains(redacted, "secret123") {
-		t.Fatalf("apprise url = %q, want the token redacted", redacted)
+	if redacted == ntfyURL || strings.Contains(redacted, "secret123") || strings.Contains(redacted, "mytopic") {
+		t.Fatalf("apprise url = %q, want the token and path redacted", redacted)
 	}
-	if !strings.Contains(redacted, "host") || !strings.Contains(redacted, "mytopic") {
-		t.Fatalf("apprise url = %q, want host/topic still visible", redacted)
+	if !strings.Contains(redacted, "host") {
+		t.Fatalf("apprise url = %q, want host still visible", redacted)
 	}
 	if redacted != notify.RedactURL(ntfyURL) {
 		t.Fatalf("apprise url = %q, want %q", redacted, notify.RedactURL(ntfyURL))
+	}
+	discordRedacted := body.Notifications.Channels[1].URLs[1]
+	if strings.Contains(discordRedacted, "webhook-token-should-not-leak") {
+		t.Fatalf("discord apprise url = %q, leaks the path token", discordRedacted)
 	}
 
 	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
@@ -478,7 +483,7 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 			{"id": "wh", "type": "webhook", "url": "https://hook",
 				"headers": map[string]string{"Authorization": settings.MaskedSecret}},
 			{"id": "ap", "type": "apprise", "url": "https://apprise",
-				"urls": []string{redacted}},
+				"urls": []string{redacted, discordRedacted}},
 		}},
 	})
 	if rec.Code != http.StatusOK {
@@ -491,6 +496,9 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 	if got.Channels[1].URLs[0] != ntfyURL {
 		t.Fatalf("apprise url not restored: %+v", got.Channels[1].URLs)
 	}
+	if got.Channels[1].URLs[1] != discordURL {
+		t.Fatalf("discord apprise url not restored: %+v", got.Channels[1].URLs)
+	}
 }
 
 // TestPutNotificationsAppriseURLsIdentityMerge is the regression case for
@@ -500,10 +508,16 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 func TestPutNotificationsAppriseURLsIdentityMerge(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	ctx := context.Background()
+	// Distinct hosts, since RedactURL now collapses path+query to "/***":
+	// identity is resolved on scheme+host alone, so same-host entries
+	// would be indistinguishable (and correctly fall back to
+	// submission-order matching, per the "duplicates resolve in order"
+	// rule) — these use different hosts to exercise true identity
+	// resolution independent of position.
 	urls := []string{
-		"ntfy://host/topic-a?token=secret-a",
-		"ntfy://host/topic-b?token=secret-b",
-		"ntfy://host/topic-c?token=secret-c",
+		"ntfy://host-a/topic?token=secret-a",
+		"ntfy://host-b/topic?token=secret-b",
+		"ntfy://host-c/topic?token=secret-c",
 	}
 	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
 		{ID: "ap", Type: "apprise", URLs: urls},

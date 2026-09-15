@@ -93,16 +93,25 @@ func TestDeliverAppriseWrapsTargetError(t *testing.T) {
 	}
 }
 
-// TestRedactURL covers the redaction rule: userinfo stripped, query
-// values replaced, scheme/host/path kept visible.
+// TestRedactURL covers the redaction rule: only scheme://host survives;
+// userinfo, path and query (where most apprise credentials live) all
+// collapse to "/***".
 func TestRedactURL(t *testing.T) {
 	got := notify.RedactURL("ntfy://user:pass@host/topic?token=secret123&priority=high")
-	if strings.Contains(got, "secret123") || strings.Contains(got, "pass") {
-		t.Fatalf("RedactURL = %q, want no secret", got)
+	if strings.Contains(got, "secret123") || strings.Contains(got, "pass") || strings.Contains(got, "topic") {
+		t.Fatalf("RedactURL = %q, want no secret/path", got)
 	}
-	if !strings.Contains(got, "host") || !strings.Contains(got, "topic") {
-		t.Fatalf("RedactURL = %q, want host/topic kept", got)
+	if got != "ntfy://host/***" {
+		t.Fatalf("RedactURL = %q, want ntfy://host/***", got)
 	}
+
+	// discord://webhook_id/webhook_token puts the secret in the path;
+	// it must not survive redaction.
+	got = notify.RedactURL("discord://123456/webhook-token-should-not-leak")
+	if strings.Contains(got, "webhook-token-should-not-leak") {
+		t.Fatalf("RedactURL = %q, leaks the discord webhook token", got)
+	}
+
 	if notify.RedactURL("not a url at all: %zz") == "" {
 		t.Fatal("RedactURL of unparseable input must still return something")
 	}
