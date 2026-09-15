@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -169,10 +170,13 @@ func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// maskChannelTokens replaces every set channel secret — the token, each
-// webhook header value and each apprise URL (which embeds its own
-// credentials) — with settings.MaskedSecret, leaving unset ones as the
-// empty string.
+// maskChannelTokens replaces every set channel secret — the token and each
+// webhook header value — with settings.MaskedSecret, leaving unset ones as
+// the empty string. Apprise URLs are redacted (not blanket-masked) via
+// notify.RedactURL, which keeps the non-secret scheme/host/path visible;
+// mergeChannelSecrets resolves a submitted redacted URL back to the
+// stored one by identity, so deleting or reordering entries doesn't
+// silently resurrect the wrong one.
 func maskChannelTokens(n *settings.Notifications) {
 	for i := range n.Channels {
 		if n.Channels[i].Token != "" {
@@ -185,7 +189,7 @@ func maskChannelTokens(n *settings.Notifications) {
 		}
 		for j, u := range n.Channels[i].URLs {
 			if u != "" {
-				n.Channels[i].URLs[j] = settings.MaskedSecret
+				n.Channels[i].URLs[j] = notify.RedactURL(u)
 			}
 		}
 	}
@@ -808,33 +812,33 @@ func mergeChannelSecrets(incoming []settings.Channel, current []settings.Channel
 	out := make([]settings.Channel, len(incoming))
 	copy(out, incoming)
 	for i := range out {
-		if !channelHasMaskedSecret(out[i]) {
-			continue
-		}
-		old, ok := stored[out[i].ID]
-		if !ok || old.Type != out[i].Type || old.URL != out[i].URL {
-			return nil, fmt.Errorf("channel %s: type or url changed; re-enter the token", out[i].ID)
-		}
-		if out[i].Token == settings.MaskedSecret {
-			out[i].Token = old.Token
-		}
-		if len(out[i].Headers) > 0 {
-			merged := make(map[string]string, len(out[i].Headers))
-			for k, v := range out[i].Headers {
-				if v == settings.MaskedSecret {
-					v = old.Headers[k]
-				}
-				merged[k] = v
+		old, hasOld := stored[out[i].ID]
+		if channelHasMaskedSecret(out[i]) {
+			if !hasOld || old.Type != out[i].Type || old.URL != out[i].URL {
+				return nil, fmt.Errorf("channel %s: type or url changed; re-enter the token", out[i].ID)
 			}
-			out[i].Headers = merged
+			if out[i].Token == settings.MaskedSecret {
+				out[i].Token = old.Token
+			}
+			if len(out[i].Headers) > 0 {
+				merged := make(map[string]string, len(out[i].Headers))
+				for k, v := range out[i].Headers {
+					if v == settings.MaskedSecret {
+						v = old.Headers[k]
+					}
+					merged[k] = v
+				}
+				out[i].Headers = merged
+			}
 		}
 		if len(out[i].URLs) > 0 {
-			merged := make([]string, len(out[i].URLs))
-			for j, u := range out[i].URLs {
-				if u == settings.MaskedSecret && j < len(old.URLs) {
-					u = old.URLs[j]
-				}
-				merged[j] = u
+			var oldURLs []string
+			if hasOld {
+				oldURLs = old.URLs
+			}
+			merged, err := mergeAppriseURLs(out[i].URLs, oldURLs)
+			if err != nil {
+				return nil, fmt.Errorf("channel %s: %w", out[i].ID, err)
 			}
 			out[i].URLs = merged
 		}
@@ -842,19 +846,50 @@ func mergeChannelSecrets(incoming []settings.Channel, current []settings.Channel
 	return out, nil
 }
 
+// mergeAppriseURLs resolves each submitted apprise URL against a
+// channel's stored URLs by identity, not position: a submitted string
+// equal to notify.RedactURL of some not-yet-consumed stored URL *is* that
+// stored URL (secrets and all), consumed in order so duplicates resolve
+// deterministically. This is what lets an editor delete or reorder lines
+// without resurrecting the wrong stored secret by position. Anything else
+// is taken literally as a new URL, unless it still carries the "***" mask
+// marker after failing to match anything — that's stale or mistyped
+// input, reported as an error rather than stored verbatim.
+func mergeAppriseURLs(submitted, stored []string) ([]string, error) {
+	remaining := make([]string, len(stored))
+	copy(remaining, stored)
+	out := make([]string, len(submitted))
+	for i, u := range submitted {
+		matched := false
+		for j, s := range remaining {
+			if s != "" && u == notify.RedactURL(s) {
+				out[i] = s
+				remaining[j] = ""
+				matched = true
+				break
+			}
+		}
+		if matched {
+			continue
+		}
+		if strings.Contains(u, settings.MaskedSecret) {
+			return nil, errors.New("re-enter the Apprise URL")
+		}
+		out[i] = u
+	}
+	return out, nil
+}
+
 // channelHasMaskedSecret reports whether ch carries settings.MaskedSecret
-// in its token, any header value or any apprise url.
+// in its token or any header value. Apprise URLs are handled separately
+// by mergeAppriseURLs, since they're redacted (not blanket-masked) and
+// resolved by identity rather than an exact "***" match.
 func channelHasMaskedSecret(ch settings.Channel) bool {
 	if ch.Token == settings.MaskedSecret {
 		return true
 	}
 	for _, v := range ch.Headers {
 		if v == settings.MaskedSecret {
-			return true
-		}
-	}
-	for _, u := range ch.URLs {
-		if u == settings.MaskedSecret {
 			return true
 		}
 	}

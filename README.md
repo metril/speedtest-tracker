@@ -286,6 +286,9 @@ remaining queue can't be deleted, and a queue with targets still assigned
 to it answers 409 `queue_in_use` until they're moved elsewhere. A target
 create/update body may omit `queue_id`, which defaults it to the first
 (originally `wan`) queue, so older API clients keep working unchanged.
+`queue_id` is preferred; `lane` is accepted as a deprecated alias from
+pre-Queues (v0.6.0) clients and, when `queue_id` is absent, is resolved by
+matching it against a queue's name — an unknown lane name is a 400.
 
 ## Schedules
 
@@ -488,6 +491,11 @@ Identity and auth endpoints:
   > can't be parsed is disabled (not deleted) and a warning is logged.
   > apprise-go is a young library (v0.3.x) — pin issues to it, not this
   > project, if a specific service integration misbehaves.
+  > A pre-existing `apprise` channel from v0.6.0 that pointed `url` at an
+  > external Apprise API server keeps its `urls` list, which is now
+  > delivered directly through the embedded library instead of that
+  > server; its `url` field is ignored. A channel with an empty `urls`
+  > list has nothing to deliver through and must be edited.
 - **Reliability** — evaluation and delivery run on the notifier's own
   goroutine behind a 256-slot queue, so a slow or dead channel never delays a
   test; overflow drops the oldest queued result and increments

@@ -15,9 +15,10 @@ type Options struct {
 	// per run (see internal/runner/rotate.go), sharing Port and every
 	// other option below. Once rotation has picked one, it rewrites the
 	// options to carry Host alone before Run ever sees them; parseOptions
-	// still folds a single-entry list into Host itself, so a list that
-	// never grew past one entry (or reached Run outside the runner)
-	// behaves the same as Host.
+	// still folds Hosts[0] into Host whenever Host is empty and Hosts is
+	// non-empty, so an un-rotated multi-host options doc (or one that
+	// reached Run outside the runner) never runs iperf3 -c "" instead of
+	// erroring or silently picking the first host.
 	Hosts []string `json:"hosts,omitempty"`
 	Port  int      `json:"port,omitempty"`
 	// PortRangeEnd, when greater than Port, makes Run retry on
@@ -49,7 +50,7 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 			return Options{}, errors.New("iperf3 options: hosts must not contain an empty host")
 		}
 	}
-	if o.Host == "" && len(o.Hosts) == 1 {
+	if o.Host == "" && len(o.Hosts) > 0 {
 		o.Host = o.Hosts[0]
 	}
 	if o.Host == "" && len(o.Hosts) == 0 {

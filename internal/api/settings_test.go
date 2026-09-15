@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/auth"
+	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -447,9 +448,10 @@ func TestPutNotificationsRejectsMaskedTokenAfterURLChange(t *testing.T) {
 func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 	h, st := newSettingsAPI(t)
 	ctx := context.Background()
+	const ntfyURL = "ntfy://host/mytopic?token=secret123"
 	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
 		{ID: "wh", Type: "webhook", URL: "https://hook", Headers: map[string]string{"Authorization": "secret-header"}},
-		{ID: "ap", Type: "apprise", URL: "https://apprise", URLs: []string{"tgram://token/chat"}},
+		{ID: "ap", Type: "apprise", URL: "https://apprise", URLs: []string{ntfyURL}},
 	})
 
 	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
@@ -460,8 +462,15 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 	if body.Notifications.Channels[0].Headers["Authorization"] != settings.MaskedSecret {
 		t.Fatalf("header = %+v, want masked", body.Notifications.Channels[0].Headers)
 	}
-	if body.Notifications.Channels[1].URLs[0] != settings.MaskedSecret {
-		t.Fatalf("apprise url = %+v, want masked", body.Notifications.Channels[1].URLs)
+	redacted := body.Notifications.Channels[1].URLs[0]
+	if redacted == ntfyURL || strings.Contains(redacted, "secret123") {
+		t.Fatalf("apprise url = %q, want the token redacted", redacted)
+	}
+	if !strings.Contains(redacted, "host") || !strings.Contains(redacted, "mytopic") {
+		t.Fatalf("apprise url = %q, want host/topic still visible", redacted)
+	}
+	if redacted != notify.RedactURL(ntfyURL) {
+		t.Fatalf("apprise url = %q, want %q", redacted, notify.RedactURL(ntfyURL))
 	}
 
 	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
@@ -469,7 +478,7 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 			{"id": "wh", "type": "webhook", "url": "https://hook",
 				"headers": map[string]string{"Authorization": settings.MaskedSecret}},
 			{"id": "ap", "type": "apprise", "url": "https://apprise",
-				"urls": []string{settings.MaskedSecret}},
+				"urls": []string{redacted}},
 		}},
 	})
 	if rec.Code != http.StatusOK {
@@ -479,8 +488,102 @@ func TestGetSettingsMasksChannelHeadersAndApprisURLs(t *testing.T) {
 	if got.Channels[0].Headers["Authorization"] != "secret-header" {
 		t.Fatalf("header not restored: %+v", got.Channels[0].Headers)
 	}
-	if got.Channels[1].URLs[0] != "tgram://token/chat" {
+	if got.Channels[1].URLs[0] != ntfyURL {
 		t.Fatalf("apprise url not restored: %+v", got.Channels[1].URLs)
+	}
+}
+
+// TestPutNotificationsAppriseURLsIdentityMerge is the regression case for
+// finding 2: masked apprise URLs must be resolved by identity, not
+// position, so deleting or reordering a line in the editor never
+// resurrects the wrong stored secret.
+func TestPutNotificationsAppriseURLsIdentityMerge(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	urls := []string{
+		"ntfy://host/topic-a?token=secret-a",
+		"ntfy://host/topic-b?token=secret-b",
+		"ntfy://host/topic-c?token=secret-c",
+	}
+	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "ap", Type: "apprise", URLs: urls},
+	})
+	redacted := make([]string, len(urls))
+	for i, u := range urls {
+		redacted[i] = notify.RedactURL(u)
+	}
+
+	t.Run("delete middle keeps the right two", func(t *testing.T) {
+		rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+			"notifications": map[string]any{"channels": []map[string]any{
+				{"id": "ap", "type": "apprise", "urls": []string{redacted[0], redacted[2]}},
+			}},
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
+		}
+		got, _ := st.Notifications(ctx)
+		if len(got.Channels[0].URLs) != 2 || got.Channels[0].URLs[0] != urls[0] || got.Channels[0].URLs[1] != urls[2] {
+			t.Fatalf("urls = %+v, want [%q %q]", got.Channels[0].URLs, urls[0], urls[2])
+		}
+		st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{{ID: "ap", Type: "apprise", URLs: urls}})
+	})
+
+	t.Run("reorder keeps identities", func(t *testing.T) {
+		rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+			"notifications": map[string]any{"channels": []map[string]any{
+				{"id": "ap", "type": "apprise", "urls": []string{redacted[2], redacted[0], redacted[1]}},
+			}},
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
+		}
+		got, _ := st.Notifications(ctx)
+		want := []string{urls[2], urls[0], urls[1]}
+		if !slices.Equal(got.Channels[0].URLs, want) {
+			t.Fatalf("urls = %+v, want %+v", got.Channels[0].URLs, want)
+		}
+		st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{{ID: "ap", Type: "apprise", URLs: urls}})
+	})
+
+	t.Run("new url appended alongside masked ones", func(t *testing.T) {
+		const newURL = "discord://id/token-new"
+		rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+			"notifications": map[string]any{"channels": []map[string]any{
+				{"id": "ap", "type": "apprise", "urls": []string{redacted[0], newURL}},
+			}},
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("PUT = %d body=%s", rec.Code, rec.Body)
+		}
+		got, _ := st.Notifications(ctx)
+		want := []string{urls[0], newURL}
+		if !slices.Equal(got.Channels[0].URLs, want) {
+			t.Fatalf("urls = %+v, want %+v", got.Channels[0].URLs, want)
+		}
+	})
+}
+
+// TestPutNotificationsRejectsUnmatchedMaskedApprisURL covers a submitted
+// URL that still contains the "***" mask marker but matches no stored URL
+// (e.g. the channel was renamed or the URL mistyped) — that must be a 400
+// asking the client to re-enter it, not stored verbatim.
+func TestPutNotificationsRejectsUnmatchedMaskedApprisURL(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyNotifyChannels, []settings.Channel{
+		{ID: "ap", Type: "apprise", URLs: []string{"ntfy://host/topic?token=secret"}},
+	})
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"notifications": map[string]any{"channels": []map[string]any{
+			{"id": "ap", "type": "apprise", "urls": []string{"ntfy://otherhost/topic?token=***"}},
+		}},
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d, want 400: %s", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "re-enter") {
+		t.Fatalf("body = %s, want a re-enter message", rec.Body)
 	}
 }
 

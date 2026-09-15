@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
@@ -431,3 +432,53 @@ func TestOoklaServerSearch(t *testing.T) {
 }
 
 func itoa(i int64) string { return strconv.FormatInt(i, 10) }
+
+// TestCreateTargetAcceptsLegacyLaneAlias covers the deprecated "lane"
+// field from v0.6.0 clients: when queue_id is absent, lane is resolved by
+// queue name (migration 0007 seeds "wan" id 1, "lan" id 2).
+func TestCreateTargetAcceptsLegacyLaneAlias(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "lan",
+	})
+	var created store.Target
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if rec.Code != http.StatusCreated && rec.Code != http.StatusOK {
+		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
+	}
+	if created.QueueID != 2 {
+		t.Fatalf("queue_id = %d, want 2 (lan)", created.QueueID)
+	}
+}
+
+// TestCreateTargetUnknownLaneRejected covers an unknown lane name.
+func TestCreateTargetUnknownLaneRejected(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "lane": "nope",
+	})
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body=%s, want 400", rec.Code, rec.Body)
+	}
+	if !strings.Contains(rec.Body.String(), "unknown lane") {
+		t.Fatalf("body = %s, want mention of unknown lane", rec.Body)
+	}
+}
+
+// TestCreateTargetQueueIDWinsOverLane covers queue_id taking precedence
+// when both are present.
+func TestCreateTargetQueueIDWinsOverLane(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/targets", map[string]any{
+		"name": "home", "engine": "fake", "enabled": true, "queue_id": 1, "lane": "lan",
+	})
+	var created store.Target
+	if err := json.NewDecoder(rec.Body).Decode(&created); err != nil {
+		t.Fatal(err)
+	}
+	if created.QueueID != 1 {
+		t.Fatalf("queue_id = %d, want 1 (queue_id wins over lane)", created.QueueID)
+	}
+}

@@ -89,14 +89,17 @@ func TestParseOptionsHostsNormalization(t *testing.T) {
 		t.Errorf("Host = %q, want a.lan", o.Host)
 	}
 
-	// A multi-entry hosts list is valid on its own (rotation picks one at
-	// run time); Host is left empty.
+	// A multi-entry hosts list normally gets rotated to a single Host by
+	// the runner before Run ever sees it (internal/runner/rotate.go). An
+	// un-rotated (or otherwise directly-run) multi-host doc must still
+	// fold Hosts[0] into Host rather than leave it empty — that would
+	// otherwise run "iperf3 -c ''".
 	o, err = parseOptions(json.RawMessage(`{"hosts":["a.lan","b.lan"]}`))
 	if err != nil {
 		t.Fatalf("parseOptions with multi-host list: %v", err)
 	}
-	if o.Host != "" || len(o.Hosts) != 2 {
-		t.Errorf("o = %+v, want empty Host and 2 Hosts", o)
+	if o.Host != "a.lan" || len(o.Hosts) != 2 {
+		t.Errorf("o = %+v, want Host a.lan and 2 Hosts", o)
 	}
 
 	// Host still wins when both are set.

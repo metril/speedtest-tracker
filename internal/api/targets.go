@@ -33,10 +33,15 @@ type Runner interface {
 
 // targetBody is the request payload for target create/update.
 type targetBody struct {
-	Name       string          `json:"name"`
-	Engine     string          `json:"engine"`
-	Enabled    bool            `json:"enabled"`
-	QueueID    int64           `json:"queue_id"`
+	Name    string `json:"name"`
+	Engine  string `json:"engine"`
+	Enabled bool   `json:"enabled"`
+	QueueID int64  `json:"queue_id"`
+	// Lane is a deprecated alias for QueueID from v0.6.0 clients, still
+	// accepted (resolved by queue name) so an old client sending
+	// {"lane":"lan"} isn't rejected by decodeJSON's DisallowUnknownFields.
+	// queue_id, when present, always wins.
+	Lane       string          `json:"lane,omitempty"`
 	Options    json.RawMessage `json:"options"`
 	Thresholds json.RawMessage `json:"thresholds"`
 }
@@ -61,6 +66,18 @@ func (d Deps) validateTarget(ctx context.Context, w http.ResponseWriter, b *targ
 	if b.Name == "" {
 		errBadRequest(w, "name is required")
 		return false
+	}
+	if b.QueueID == 0 && b.Lane != "" {
+		q, err := d.Store.GetQueueByName(ctx, b.Lane)
+		if err != nil {
+			if errors.Is(err, store.ErrNotFound) {
+				errBadRequest(w, "unknown lane")
+				return false
+			}
+			internalError(w, d.Logger, "resolve lane failed", err)
+			return false
+		}
+		b.QueueID = q.ID
 	}
 	if b.QueueID == 0 {
 		id, err := d.Store.DefaultQueueID(ctx)

@@ -93,6 +93,50 @@ func TestDeliverAppriseWrapsTargetError(t *testing.T) {
 	}
 }
 
+// TestRedactURL covers the redaction rule: userinfo stripped, query
+// values replaced, scheme/host/path kept visible.
+func TestRedactURL(t *testing.T) {
+	got := notify.RedactURL("ntfy://user:pass@host/topic?token=secret123&priority=high")
+	if strings.Contains(got, "secret123") || strings.Contains(got, "pass") {
+		t.Fatalf("RedactURL = %q, want no secret", got)
+	}
+	if !strings.Contains(got, "host") || !strings.Contains(got, "topic") {
+		t.Fatalf("RedactURL = %q, want host/topic kept", got)
+	}
+	if notify.RedactURL("not a url at all: %zz") == "" {
+		t.Fatal("RedactURL of unparseable input must still return something")
+	}
+}
+
+// TestDeliverAppriseFailureRedactsToken is the regression case for finding
+// 1: a delivery failure against a bad apprise URL carrying a token must
+// not leak the token in the returned error.
+func TestDeliverAppriseFailureRedactsToken(t *testing.T) {
+	ch := settings.Channel{Type: "apprise", URLs: []string{"json://127.0.0.1:1/x?token=leaktoken123"}}
+	err := notify.Deliver(context.Background(), nil, ch, notify.Message{Title: "t", Body: "b"})
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if strings.Contains(err.Error(), "leaktoken123") {
+		t.Fatalf("err = %v, leaks the token", err)
+	}
+}
+
+// TestValidateChannelRedactsToken is the regression case for finding 1:
+// ValidateChannel's error for a bad apprise URL must not include the raw
+// URL (or its token) verbatim.
+func TestValidateChannelRedactsToken(t *testing.T) {
+	ch := settings.Channel{ID: "c1", Type: "apprise",
+		URLs: []string{"not-a-valid-scheme://leaktoken123"}}
+	err := notify.ValidateChannel(ch)
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if strings.Contains(err.Error(), "leaktoken123") {
+		t.Fatalf("err = %v, leaks the token", err)
+	}
+}
+
 func TestDeliverReportsNon2xx(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "nope", http.StatusForbidden)

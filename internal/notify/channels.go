@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -39,9 +40,9 @@ func ValidateChannel(ch settings.Channel) error {
 			return fmt.Errorf("channel %s: apprise urls must be set", name)
 		}
 		client := apprise.New()
-		for _, u := range ch.URLs {
+		for i, u := range ch.URLs {
 			if err := client.Add(u); err != nil {
-				return fmt.Errorf("channel %s: apprise url %q: %w", name, u, err)
+				return fmt.Errorf("channel %s: apprise url #%d: %w", name, i+1, redactAppriseErr(err, ch.URLs))
 			}
 		}
 	} else {
@@ -56,6 +57,45 @@ func ValidateChannel(ch settings.Channel) error {
 		}
 	}
 	return nil
+}
+
+// RedactURL returns u with userinfo stripped and every query parameter
+// value replaced with "***", keeping scheme, host and path visible. It is
+// the safe form of an apprise URL for errors, logs and the settings API:
+// apprise targets embed credentials in userinfo, query params, or
+// sometimes the path/host itself (e.g. discord://id/token), so this is a
+// simplest-safe-rule redaction, not a guarantee every secret is stripped.
+// An unparseable u redacts to "***" wholesale.
+func RedactURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "***"
+	}
+	u.User = nil
+	if q := u.Query(); len(q) > 0 {
+		for k := range q {
+			q[k] = []string{"***"}
+		}
+		u.RawQuery = q.Encode()
+	}
+	return u.String()
+}
+
+// redactAppriseErr returns err with every URL in urls substituted by its
+// RedactURL form, so a library error that echoes a failing target back
+// verbatim (apprise-go's errors do) never leaks the credential it embeds.
+func redactAppriseErr(err error, urls []string) error {
+	if err == nil {
+		return nil
+	}
+	msg := err.Error()
+	for _, u := range urls {
+		if u == "" {
+			continue
+		}
+		msg = strings.ReplaceAll(msg, u, RedactURL(u))
+	}
+	return errors.New(msg)
 }
 
 func isValidHTTPToken(s string) bool {
@@ -124,8 +164,9 @@ func Deliver(ctx context.Context, client *http.Client, ch settings.Channel, m Me
 // on its own goroutine and the call honours ctx's deadline/cancellation
 // independently; a timeout here leaves the goroutine to finish on its own
 // (the library owns its own HTTP timeouts internally). The returned error
-// is the library's own — it already names the failing target URL — and is
-// returned unwrapped.
+// is the library's own — it already names the failing target URL — with
+// every configured URL redacted via RedactURL so no credential leaks
+// through it.
 func deliverApprise(ctx context.Context, ch settings.Channel, m Message) error {
 	errCh := make(chan error, 1)
 	go func() {
@@ -133,7 +174,7 @@ func deliverApprise(ctx context.Context, ch settings.Channel, m Message) error {
 	}()
 	select {
 	case err := <-errCh:
-		return err
+		return redactAppriseErr(err, ch.URLs)
 	case <-ctx.Done():
 		return ctx.Err()
 	}
