@@ -230,16 +230,22 @@ func TestIntegrationsDefaults(t *testing.T) {
 	if got.VLStreamFields == nil || len(got.VLStreamFields) != 0 {
 		t.Fatalf("vl_stream_fields = %v, want empty non-nil map", got.VLStreamFields)
 	}
+	if got.VMAuthType != ExportAuthNone || got.VLAuthType != ExportAuthNone {
+		t.Fatalf("auth types = vm:%q vl:%q, want none", got.VMAuthType, got.VLAuthType)
+	}
 }
 
 func TestIntegrationsRoundTrip(t *testing.T) {
 	s := newTestStore(t)
 	ctx := context.Background()
 	for key, val := range map[string]any{
-		KeyVMEnabled:     true,
-		KeyVMURL:         "http://vm:8428",
-		KeyVMAuthHeader:  "Bearer tok",
-		KeyVMExtraLabels: map[string]string{"host": "pi4"},
+		KeyVMEnabled:      true,
+		KeyVMURL:          "http://vm:8428",
+		KeyVMAuthHeader:   "Bearer tok",
+		KeyVMExtraLabels:  map[string]string{"host": "pi4"},
+		KeyVMAuthType:     ExportAuthBasic,
+		KeyVMAuthUsername: "admin",
+		KeyVMAuthPassword: "secret",
 	} {
 		if err := s.Set(ctx, key, val); err != nil {
 			t.Fatal(err)
@@ -252,6 +258,9 @@ func TestIntegrationsRoundTrip(t *testing.T) {
 	if !got.VMEnabled || got.VMURL != "http://vm:8428" || got.VMAuthHeader != "Bearer tok" ||
 		got.VMExtraLabels["host"] != "pi4" {
 		t.Fatalf("round trip = %+v", got)
+	}
+	if got.VMAuthType != ExportAuthBasic || got.VMAuthUsername != "admin" || got.VMAuthPassword != "secret" {
+		t.Fatalf("auth round trip = %+v", got)
 	}
 }
 
@@ -406,18 +415,40 @@ func TestAuthDefaults(t *testing.T) {
 	if got.AllowTokens {
 		t.Fatal("allow_tokens defaults to false")
 	}
+	if got.OIDCIssuer != "" || got.OIDCClientID != "" || got.OIDCClientSecret != "" || got.OIDCRedirectBaseURL != "" {
+		t.Fatalf("oidc string defaults = %+v, want all empty", got)
+	}
+	if got.OIDCGroupsClaim != "groups" {
+		t.Fatalf("oidc_groups_claim = %q, want groups", got.OIDCGroupsClaim)
+	}
+	if got.OIDCScopes == nil || len(got.OIDCScopes) != 0 {
+		t.Fatalf("oidc_scopes = %v, want empty non-nil slice", got.OIDCScopes)
+	}
+	if got.OIDCAllowedGroups == nil || len(got.OIDCAllowedGroups) != 0 {
+		t.Fatalf("oidc_allowed_groups = %v, want empty non-nil slice", got.OIDCAllowedGroups)
+	}
+	if got.OIDCAllowedEmails == nil || len(got.OIDCAllowedEmails) != 0 {
+		t.Fatalf("oidc_allowed_emails = %v, want empty non-nil slice", got.OIDCAllowedEmails)
+	}
+	if got.SessionTTLHours != 24 {
+		t.Fatalf("session_ttl_hours = %d, want 24", got.SessionTTLHours)
+	}
 }
 
 func TestAuthRoundTrip(t *testing.T) {
 	st, _ := newTestSettings(t)
 	ctx := context.Background()
 	for key, val := range map[string]any{
-		KeyAuthMode:           AuthModeForward,
-		KeyAuthUserHeader:     "X-Forwarded-User",
-		KeyAuthGroupsHeader:   "X-Forwarded-Groups",
-		KeyAuthTrustedProxies: []string{"10.0.0.0/8", "192.168.1.5/32"},
-		KeyAuthAdminGroup:     "admins",
-		KeyAuthAllowTokens:    true,
+		KeyAuthMode:            AuthModeForward,
+		KeyAuthUserHeader:      "X-Forwarded-User",
+		KeyAuthGroupsHeader:    "X-Forwarded-Groups",
+		KeyAuthTrustedProxies:  []string{"10.0.0.0/8", "192.168.1.5/32"},
+		KeyAuthAdminGroup:      "admins",
+		KeyAuthAllowTokens:     true,
+		KeyAuthOIDCIssuer:      "https://idp.example.com",
+		KeyAuthOIDCClientID:    "client-id",
+		KeyAuthOIDCScopes:      []string{"openid", "email"},
+		KeyAuthSessionTTLHours: 8,
 	} {
 		if err := st.Set(ctx, key, val); err != nil {
 			t.Fatal(err)
@@ -430,5 +461,39 @@ func TestAuthRoundTrip(t *testing.T) {
 	if got.Mode != AuthModeForward || got.UserHeader != "X-Forwarded-User" ||
 		got.AdminGroup != "admins" || !got.AllowTokens || len(got.TrustedProxies) != 2 {
 		t.Fatalf("round trip = %+v", got)
+	}
+	if got.OIDCIssuer != "https://idp.example.com" || got.OIDCClientID != "client-id" ||
+		len(got.OIDCScopes) != 2 || got.SessionTTLHours != 8 {
+		t.Fatalf("oidc round trip = %+v", got)
+	}
+}
+
+func TestSeedFromEnvOIDCIssuer(t *testing.T) {
+	st, _ := newTestSettings(t)
+	ctx := context.Background()
+	if _, err := st.SeedFromEnv(ctx, []string{"ST_AUTH_OIDC_ISSUER=https://idp.example.com"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := st.Auth(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.OIDCIssuer != "https://idp.example.com" {
+		t.Errorf("oidc_issuer = %q, want the env seed to fill a missing key", got.OIDCIssuer)
+	}
+}
+
+func TestSeedFromEnvIntegrationsVMAuthType(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+	if _, err := s.SeedFromEnv(ctx, []string{"ST_INTEGRATIONS_VM_AUTH_TYPE=bearer"}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Integrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.VMAuthType != "bearer" {
+		t.Errorf("vm_auth_type = %q, want the env seed to fill a missing key", got.VMAuthType)
 	}
 }

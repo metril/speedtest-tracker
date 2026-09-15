@@ -74,15 +74,27 @@ var defaults = map[string]any{
 	KeyDefaultIperf3Options:     json.RawMessage(`{}`),
 	KeyIperf3ListURL:            defaultIperf3ListURL,
 
-	KeyVMEnabled:      false,
-	KeyVMURL:          "",
-	KeyVMAuthHeader:   "",
-	KeyVMExtraLabels:  map[string]string{},
-	KeyVLEnabled:      false,
-	KeyVLURL:          "",
-	KeyVLAuthHeader:   "",
-	KeyVLStreamFields: map[string]string{},
-	KeyMetricsEnabled: false,
+	KeyVMEnabled:         false,
+	KeyVMURL:             "",
+	KeyVMAuthHeader:      "",
+	KeyVMAuthType:        ExportAuthNone,
+	KeyVMAuthUsername:    "",
+	KeyVMAuthPassword:    "",
+	KeyVMAuthToken:       "",
+	KeyVMAuthHeaderName:  "",
+	KeyVMAuthHeaderValue: "",
+	KeyVMExtraLabels:     map[string]string{},
+	KeyVLEnabled:         false,
+	KeyVLURL:             "",
+	KeyVLAuthHeader:      "",
+	KeyVLAuthType:        ExportAuthNone,
+	KeyVLAuthUsername:    "",
+	KeyVLAuthPassword:    "",
+	KeyVLAuthToken:       "",
+	KeyVLAuthHeaderName:  "",
+	KeyVLAuthHeaderValue: "",
+	KeyVLStreamFields:    map[string]string{},
+	KeyMetricsEnabled:    false,
 
 	KeyNotifyEnabled:           false,
 	KeyNotifyChannels:          []Channel{},
@@ -99,33 +111,67 @@ var defaults = map[string]any{
 	KeyAuthTrustedProxies:  []string{},
 	KeyAuthAdminGroup:      "",
 	KeyAuthAllowTokens:     false,
+
+	KeyAuthOIDCIssuer:          "",
+	KeyAuthOIDCClientID:        "",
+	KeyAuthOIDCClientSecret:    "",
+	KeyAuthOIDCRedirectBaseURL: "",
+	KeyAuthOIDCScopes:          []string{},
+	KeyAuthOIDCGroupsClaim:     "groups",
+	KeyAuthOIDCAllowedGroups:   []string{},
+	KeyAuthOIDCAllowedEmails:   []string{},
+	KeyAuthSessionTTLHours:     24,
 }
 
 // Integrations is the Integrations settings section: the VictoriaMetrics
 // and VictoriaLogs clients plus the Prometheus /metrics endpoint.
 type Integrations struct {
-	VMEnabled      bool              `json:"vm_enabled"`
-	VMURL          string            `json:"vm_url"`
-	VMAuthHeader   string            `json:"vm_auth_header"`
-	VMExtraLabels  map[string]string `json:"vm_extra_labels"`
-	VLEnabled      bool              `json:"vl_enabled"`
-	VLURL          string            `json:"vl_url"`
-	VLAuthHeader   string            `json:"vl_auth_header"`
-	VLStreamFields map[string]string `json:"vl_stream_fields"`
-	MetricsEnabled bool              `json:"metrics_enabled"`
+	VMEnabled         bool              `json:"vm_enabled"`
+	VMURL             string            `json:"vm_url"`
+	VMAuthHeader      string            `json:"vm_auth_header"`
+	VMAuthType        string            `json:"vm_auth_type"`
+	VMAuthUsername    string            `json:"vm_auth_username"`
+	VMAuthPassword    string            `json:"vm_auth_password"`
+	VMAuthToken       string            `json:"vm_auth_token"`
+	VMAuthHeaderName  string            `json:"vm_auth_header_name"`
+	VMAuthHeaderValue string            `json:"vm_auth_header_value"`
+	VMExtraLabels     map[string]string `json:"vm_extra_labels"`
+	VLEnabled         bool              `json:"vl_enabled"`
+	VLURL             string            `json:"vl_url"`
+	VLAuthHeader      string            `json:"vl_auth_header"`
+	VLAuthType        string            `json:"vl_auth_type"`
+	VLAuthUsername    string            `json:"vl_auth_username"`
+	VLAuthPassword    string            `json:"vl_auth_password"`
+	VLAuthToken       string            `json:"vl_auth_token"`
+	VLAuthHeaderName  string            `json:"vl_auth_header_name"`
+	VLAuthHeaderValue string            `json:"vl_auth_header_value"`
+	VLStreamFields    map[string]string `json:"vl_stream_fields"`
+	MetricsEnabled    bool              `json:"metrics_enabled"`
 }
 
 // Keys of the Integrations section.
 const (
-	KeyVMEnabled      = "integrations.vm_enabled"
-	KeyVMURL          = "integrations.vm_url"
-	KeyVMAuthHeader   = "integrations.vm_auth_header"
-	KeyVMExtraLabels  = "integrations.vm_extra_labels"
-	KeyVLEnabled      = "integrations.vl_enabled"
-	KeyVLURL          = "integrations.vl_url"
-	KeyVLAuthHeader   = "integrations.vl_auth_header"
-	KeyVLStreamFields = "integrations.vl_stream_fields"
-	KeyMetricsEnabled = "integrations.metrics_enabled"
+	KeyVMEnabled         = "integrations.vm_enabled"
+	KeyVMURL             = "integrations.vm_url"
+	KeyVMAuthHeader      = "integrations.vm_auth_header"
+	KeyVMAuthType        = "integrations.vm_auth_type"
+	KeyVMAuthUsername    = "integrations.vm_auth_username"
+	KeyVMAuthPassword    = "integrations.vm_auth_password"
+	KeyVMAuthToken       = "integrations.vm_auth_token"
+	KeyVMAuthHeaderName  = "integrations.vm_auth_header_name"
+	KeyVMAuthHeaderValue = "integrations.vm_auth_header_value"
+	KeyVMExtraLabels     = "integrations.vm_extra_labels"
+	KeyVLEnabled         = "integrations.vl_enabled"
+	KeyVLURL             = "integrations.vl_url"
+	KeyVLAuthHeader      = "integrations.vl_auth_header"
+	KeyVLAuthType        = "integrations.vl_auth_type"
+	KeyVLAuthUsername    = "integrations.vl_auth_username"
+	KeyVLAuthPassword    = "integrations.vl_auth_password"
+	KeyVLAuthToken       = "integrations.vl_auth_token"
+	KeyVLAuthHeaderName  = "integrations.vl_auth_header_name"
+	KeyVLAuthHeaderValue = "integrations.vl_auth_header_value"
+	KeyVLStreamFields    = "integrations.vl_stream_fields"
+	KeyMetricsEnabled    = "integrations.metrics_enabled"
 )
 
 // Engines is the Engines settings section: external binary paths, Ookla
@@ -237,6 +283,22 @@ type Auth struct {
 	TrustedProxies  []string `json:"trusted_proxies"`
 	AdminGroup      string   `json:"admin_group"`
 	AllowTokens     bool     `json:"allow_tokens"`
+
+	// OIDC* configure the oidc auth mode: OpenID Connect login against an
+	// external provider. OIDCScopes/OIDCAllowedGroups/OIDCAllowedEmails
+	// nil-normalise to empty like TrustedProxies.
+	OIDCIssuer          string   `json:"oidc_issuer"`
+	OIDCClientID        string   `json:"oidc_client_id"`
+	OIDCClientSecret    string   `json:"oidc_client_secret"`
+	OIDCRedirectBaseURL string   `json:"oidc_redirect_base_url"`
+	OIDCScopes          []string `json:"oidc_scopes"`
+	OIDCGroupsClaim     string   `json:"oidc_groups_claim"`
+	OIDCAllowedGroups   []string `json:"oidc_allowed_groups"`
+	OIDCAllowedEmails   []string `json:"oidc_allowed_emails"`
+
+	// SessionTTLHours is how long an OIDC-established session lasts before
+	// re-authentication is required.
+	SessionTTLHours int `json:"session_ttl_hours"`
 }
 
 // Auth modes. The values are persisted in the settings table, so do not
@@ -245,6 +307,7 @@ const (
 	AuthModeOpen    = "open"
 	AuthModeForward = "forward_auth"
 	AuthModeToken   = "token"
+	AuthModeOIDC    = "oidc"
 )
 
 // Keys of the Auth section.
@@ -256,6 +319,16 @@ const (
 	KeyAuthTrustedProxies  = "auth.trusted_proxies"
 	KeyAuthAdminGroup      = "auth.admin_group"
 	KeyAuthAllowTokens     = "auth.allow_tokens"
+
+	KeyAuthOIDCIssuer          = "auth.oidc_issuer"
+	KeyAuthOIDCClientID        = "auth.oidc_client_id"
+	KeyAuthOIDCClientSecret    = "auth.oidc_client_secret"
+	KeyAuthOIDCRedirectBaseURL = "auth.oidc_redirect_base_url"
+	KeyAuthOIDCScopes          = "auth.oidc_scopes"
+	KeyAuthOIDCGroupsClaim     = "auth.oidc_groups_claim"
+	KeyAuthOIDCAllowedGroups   = "auth.oidc_allowed_groups"
+	KeyAuthOIDCAllowedEmails   = "auth.oidc_allowed_emails"
+	KeyAuthSessionTTLHours     = "auth.session_ttl_hours"
 )
 
 // Store reads and writes settings and notifies subscribers on change.
@@ -397,10 +470,22 @@ func (s *Store) Integrations(ctx context.Context) (Integrations, error) {
 		{KeyVMEnabled, &i.VMEnabled},
 		{KeyVMURL, &i.VMURL},
 		{KeyVMAuthHeader, &i.VMAuthHeader},
+		{KeyVMAuthType, &i.VMAuthType},
+		{KeyVMAuthUsername, &i.VMAuthUsername},
+		{KeyVMAuthPassword, &i.VMAuthPassword},
+		{KeyVMAuthToken, &i.VMAuthToken},
+		{KeyVMAuthHeaderName, &i.VMAuthHeaderName},
+		{KeyVMAuthHeaderValue, &i.VMAuthHeaderValue},
 		{KeyVMExtraLabels, &i.VMExtraLabels},
 		{KeyVLEnabled, &i.VLEnabled},
 		{KeyVLURL, &i.VLURL},
 		{KeyVLAuthHeader, &i.VLAuthHeader},
+		{KeyVLAuthType, &i.VLAuthType},
+		{KeyVLAuthUsername, &i.VLAuthUsername},
+		{KeyVLAuthPassword, &i.VLAuthPassword},
+		{KeyVLAuthToken, &i.VLAuthToken},
+		{KeyVLAuthHeaderName, &i.VLAuthHeaderName},
+		{KeyVLAuthHeaderValue, &i.VLAuthHeaderValue},
 		{KeyVLStreamFields, &i.VLStreamFields},
 		{KeyMetricsEnabled, &i.MetricsEnabled},
 	} {
@@ -486,6 +571,15 @@ func (s *Store) Auth(ctx context.Context) (Auth, error) {
 		{KeyAuthTrustedProxies, &a.TrustedProxies},
 		{KeyAuthAdminGroup, &a.AdminGroup},
 		{KeyAuthAllowTokens, &a.AllowTokens},
+		{KeyAuthOIDCIssuer, &a.OIDCIssuer},
+		{KeyAuthOIDCClientID, &a.OIDCClientID},
+		{KeyAuthOIDCClientSecret, &a.OIDCClientSecret},
+		{KeyAuthOIDCRedirectBaseURL, &a.OIDCRedirectBaseURL},
+		{KeyAuthOIDCScopes, &a.OIDCScopes},
+		{KeyAuthOIDCGroupsClaim, &a.OIDCGroupsClaim},
+		{KeyAuthOIDCAllowedGroups, &a.OIDCAllowedGroups},
+		{KeyAuthOIDCAllowedEmails, &a.OIDCAllowedEmails},
+		{KeyAuthSessionTTLHours, &a.SessionTTLHours},
 	} {
 		raw, ok, err := s.Get(ctx, f.key)
 		if err != nil {
@@ -504,6 +598,15 @@ func (s *Store) Auth(ctx context.Context) (Auth, error) {
 	}
 	if a.TrustedProxies == nil {
 		a.TrustedProxies = []string{}
+	}
+	if a.OIDCScopes == nil {
+		a.OIDCScopes = []string{}
+	}
+	if a.OIDCAllowedGroups == nil {
+		a.OIDCAllowedGroups = []string{}
+	}
+	if a.OIDCAllowedEmails == nil {
+		a.OIDCAllowedEmails = []string{}
 	}
 	if a.GroupsSeparator == "" {
 		a.GroupsSeparator = ","

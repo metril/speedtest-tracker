@@ -414,14 +414,28 @@ export interface EngineSettings {
   iperf3_list_url: string;
 }
 
+export type ExportAuthType = 'none' | 'basic' | 'bearer' | 'custom';
+
 export interface IntegrationSettings {
   vm_enabled: boolean;
   vm_url: string;
   vm_auth_header: string;
+  vm_auth_type: ExportAuthType;
+  vm_auth_username: string;
+  vm_auth_password: string;
+  vm_auth_token: string;
+  vm_auth_header_name: string;
+  vm_auth_header_value: string;
   vm_extra_labels: Record<string, string>;
   vl_enabled: boolean;
   vl_url: string;
   vl_auth_header: string;
+  vl_auth_type: ExportAuthType;
+  vl_auth_username: string;
+  vl_auth_password: string;
+  vl_auth_token: string;
+  vl_auth_header_name: string;
+  vl_auth_header_value: string;
   vl_stream_fields: Record<string, string>;
   metrics_enabled: boolean;
 }
@@ -482,6 +496,15 @@ export interface AuthSettings {
   trusted_proxies: string[];
   admin_group: string;
   allow_tokens: boolean;
+  oidc_issuer: string;
+  oidc_client_id: string;
+  oidc_client_secret: string;
+  oidc_redirect_base_url: string;
+  oidc_scopes: string[];
+  oidc_groups_claim: string;
+  oidc_allowed_groups: string[];
+  oidc_allowed_emails: string[];
+  session_ttl_hours: number;
 }
 
 export interface Settings {
