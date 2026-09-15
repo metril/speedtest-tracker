@@ -1,6 +1,9 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { SwitchField } from '../../components/SwitchField';
+import { testOIDC } from '../../lib/api';
 import type { AuthMode, AuthSettings } from '../../lib/api';
 import { LockedBadge } from './LockedBadge';
 import { inputClass } from './styles';
@@ -15,7 +18,17 @@ const MODE_HELP: Record<AuthMode, string> = {
   open: 'No authentication. Anyone who can reach this instance can change settings and run tests.',
   forward_auth: 'Trusts identity headers set by a reverse proxy. Requires the trusted proxy CIDRs below.',
   token: 'Requires an API token in the Authorization header for every request.',
+  oidc: 'Users sign in through your OpenID Connect provider; admin decided by the admin group.',
 };
+
+/** splitList/joinList convert between a string[] setting and the
+ * comma/space-separated text a single input edits. */
+function splitList(text: string): string[] {
+  return text.split(/[,\s]+/).map((s) => s.trim()).filter(Boolean);
+}
+function joinList(values: string[]): string {
+  return values.join(', ');
+}
 
 /** A CIDR line must look like "<ip>/<bits>" -- no spaces, one slash. This
  * is a client-side sanity check; the server remains the authority. */
@@ -25,6 +38,11 @@ const CIDR_RE = /^\S+\/\d{1,3}$/;
  * useless (and dangerous -- it would trust nobody, or everybody) without
  * at least one well-formed trusted proxy CIDR. */
 export function validateAuthSettings(auth: AuthSettings): string | undefined {
+  if (auth.mode === 'oidc') {
+    if (!auth.oidc_issuer.trim()) return 'oidc requires an issuer URL.';
+    if (!auth.oidc_client_id.trim()) return 'oidc requires a client ID.';
+    return undefined;
+  }
   if (auth.mode !== 'forward_auth') return undefined;
   const lines = auth.trusted_proxies.map((l) => l.trim()).filter(Boolean);
   if (lines.length === 0) {
@@ -61,6 +79,7 @@ export function AuthSection({ value, locked, onChange }: Props) {
           <option value="open">open</option>
           <option value="forward_auth">forward_auth</option>
           <option value="token">token</option>
+          <option value="oidc">oidc</option>
         </select>
         <p className="text-sm text-faint">{MODE_HELP[value.mode]}</p>
       </div>
@@ -104,7 +123,9 @@ export function AuthSection({ value, locked, onChange }: Props) {
         </p>
       </div>
 
-      {value.mode === 'forward_auth' && (
+      {value.mode === 'oidc' && <OidcFields value={value} locked={locked} onChange={onChange} />}
+
+      {(value.mode === 'forward_auth' || value.mode === 'oidc') && (
         <div className="flex items-center gap-2">
           <div className="flex-1">
             <SwitchField
@@ -117,6 +138,116 @@ export function AuthSection({ value, locked, onChange }: Props) {
           {isLocked('auth.allow_tokens') && <LockedBadge />}
         </div>
       )}
+    </>
+  );
+}
+
+/** OidcFields is the mode==='oidc' fieldset: provider config plus a
+ * "Test OIDC discovery" action that hits the server's discovery-test
+ * endpoint with the values currently in the form (not the saved ones). */
+function OidcFields({ value, locked, onChange }: Props) {
+  const isLocked = (key: string) => locked.includes(key);
+  const [testing, setTesting] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const runTest = async () => {
+    setTesting(true);
+    setResult(null);
+    try {
+      const res = await testOIDC({
+        issuer: value.oidc_issuer,
+        client_id: value.oidc_client_id,
+        client_secret: value.oidc_client_secret,
+      });
+      setResult({
+        ok: res.ok,
+        message: res.ok ? `Discovery OK (${res.latency_ms ?? 0} ms)` : (res.error ?? 'Discovery failed.'),
+      });
+    } catch (err) {
+      setResult({ ok: false, message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-issuer" text="Issuer" lockKey="auth.oidc_issuer" locked={locked} />
+        <Input id="auth-oidc-issuer" value={value.oidc_issuer}
+          disabled={isLocked('auth.oidc_issuer')}
+          onChange={(e) => onChange({ ...value, oidc_issuer: e.target.value })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-client-id" text="Client ID" lockKey="auth.oidc_client_id" locked={locked} />
+        <Input id="auth-oidc-client-id" value={value.oidc_client_id}
+          disabled={isLocked('auth.oidc_client_id')}
+          onChange={(e) => onChange({ ...value, oidc_client_id: e.target.value })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-client-secret" text="Client secret" lockKey="auth.oidc_client_secret" locked={locked} />
+        <Input id="auth-oidc-client-secret" type="password" placeholder="leave unchanged"
+          value={value.oidc_client_secret}
+          disabled={isLocked('auth.oidc_client_secret')}
+          onChange={(e) => onChange({ ...value, oidc_client_secret: e.target.value })} />
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button type="button" variant="outline" disabled={testing} onClick={runTest}>
+          Test OIDC discovery
+        </Button>
+        {result && (
+          <p className={result.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{result.message}</p>
+        )}
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-redirect-base-url" text="Redirect base URL" lockKey="auth.oidc_redirect_base_url" locked={locked} />
+        <Input id="auth-oidc-redirect-base-url" value={value.oidc_redirect_base_url}
+          disabled={isLocked('auth.oidc_redirect_base_url')}
+          onChange={(e) => onChange({ ...value, oidc_redirect_base_url: e.target.value })} />
+        <p className="text-sm text-faint">
+          Leave empty to derive from the request. The callback path is /auth/oidc/callback.
+        </p>
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-scopes" text="Extra scopes" lockKey="auth.oidc_scopes" locked={locked} />
+        <Input id="auth-oidc-scopes" value={joinList(value.oidc_scopes)}
+          disabled={isLocked('auth.oidc_scopes')}
+          onChange={(e) => onChange({ ...value, oidc_scopes: splitList(e.target.value) })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-groups-claim" text="Groups claim" lockKey="auth.oidc_groups_claim" locked={locked} />
+        <Input id="auth-oidc-groups-claim" value={value.oidc_groups_claim}
+          placeholder="groups"
+          disabled={isLocked('auth.oidc_groups_claim')}
+          onChange={(e) => onChange({ ...value, oidc_groups_claim: e.target.value })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-allowed-groups" text="Allowed groups" lockKey="auth.oidc_allowed_groups" locked={locked} />
+        <Input id="auth-oidc-allowed-groups" value={joinList(value.oidc_allowed_groups)}
+          disabled={isLocked('auth.oidc_allowed_groups')}
+          onChange={(e) => onChange({ ...value, oidc_allowed_groups: splitList(e.target.value) })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-allowed-emails" text="Allowed emails" lockKey="auth.oidc_allowed_emails" locked={locked} />
+        <Input id="auth-oidc-allowed-emails" value={joinList(value.oidc_allowed_emails)}
+          disabled={isLocked('auth.oidc_allowed_emails')}
+          onChange={(e) => onChange({ ...value, oidc_allowed_emails: splitList(e.target.value) })} />
+      </div>
+
+      <div className="grid gap-1">
+        <FieldLabel htmlFor="auth-oidc-session-ttl" text="Session TTL (hours)" lockKey="auth.session_ttl_hours" locked={locked} />
+        <Input id="auth-oidc-session-ttl" type="number" value={value.session_ttl_hours}
+          disabled={isLocked('auth.session_ttl_hours')}
+          onChange={(e) => onChange({ ...value, session_ttl_hours: Number(e.target.value) })} />
+      </div>
     </>
   );
 }

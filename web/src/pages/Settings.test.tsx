@@ -442,6 +442,42 @@ describe('Settings page', () => {
     expect(screen.getByRole('alert')).toHaveTextContent(/at least one trusted proxy/i);
   });
 
+  it('saves the oidc mode settings', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put, path: '/settings/auth' });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
+    await userEvent.type(screen.getByLabelText('Issuer'), 'https://idp.example.com');
+    await userEvent.type(screen.getByLabelText('Client ID'), 'client-1');
+    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
+      .getByRole('button', { name: 'Save Auth' }));
+    expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
+      mode: 'oidc', oidc_issuer: 'https://idp.example.com', oidc_client_id: 'client-1',
+    }) });
+  });
+
+  it('blocks saving oidc mode with no issuer or client id', async () => {
+    const put = vi.fn();
+    renderSettings({ put, path: '/settings/auth' });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
+    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    expect(put).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toHaveTextContent(/issuer/i);
+  });
+
+  it('tests OIDC discovery with the in-progress form values', async () => {
+    const testOIDC = vi.fn().mockResolvedValue({ ok: true, latency_ms: 42 });
+    vi.spyOn(api, 'testOIDC').mockImplementation(testOIDC);
+    renderSettings({ path: '/settings/auth' });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
+    await userEvent.type(screen.getByLabelText('Issuer'), 'https://idp.example.com');
+    await userEvent.type(screen.getByLabelText('Client ID'), 'client-1');
+    await userEvent.click(screen.getByRole('button', { name: 'Test OIDC discovery' }));
+    expect(testOIDC).toHaveBeenCalledWith({
+      issuer: 'https://idp.example.com', client_id: 'client-1', client_secret: '',
+    });
+    expect(await screen.findByText(/Discovery OK/)).toBeInTheDocument();
+  });
+
   it('shows the server lockout-guard message', async () => {
     const put = vi.fn().mockRejectedValue(
       new ApiError(400, 'invalid_request', 'this request does not carry the Remote-User header from a trusted proxy'),

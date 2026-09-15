@@ -486,7 +486,7 @@ export interface NotificationSettings {
   notify_recovery: boolean;
 }
 
-export type AuthMode = 'open' | 'forward_auth' | 'token';
+export type AuthMode = 'open' | 'forward_auth' | 'token' | 'oidc';
 
 export interface AuthSettings {
   mode: AuthMode;
@@ -536,6 +536,8 @@ export const updateSettings = (patch: SettingsPatch) =>
   request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) });
 export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth_header?: string }) =>
   request<ConnectionTest>(`/settings/test/${target}`, { method: 'POST', body: JSON.stringify(body) });
+export const testOIDC = (body: { issuer: string; client_id: string; client_secret: string }) =>
+  request<ConnectionTest>('/settings/test/oidc', { method: 'POST', body: JSON.stringify(body) });
 export const testNotifyChannel = (channelId: string) =>
   request<ConnectionTest>(`/settings/test/notify/${encodeURIComponent(channelId)}`, { method: 'POST' });
 
