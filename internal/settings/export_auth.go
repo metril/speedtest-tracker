@@ -22,13 +22,20 @@ type ExportAuth struct {
 }
 
 // Apply sets the auth-related header(s) on req according to a.Type. It is a
-// no-op for ExportAuthNone, an empty Type, or a custom header with no name.
+// no-op for ExportAuthNone, an empty Type, a custom header with no name,
+// basic with both username and password empty, or bearer with an empty
+// token — each of those means "no credential configured", not "send an
+// empty/placeholder credential".
 func (a ExportAuth) Apply(req *http.Request) {
 	switch a.Type {
 	case ExportAuthBasic:
-		req.SetBasicAuth(a.Username, a.Password)
+		if a.Username != "" || a.Password != "" {
+			req.SetBasicAuth(a.Username, a.Password)
+		}
 	case ExportAuthBearer:
-		req.Header.Set("Authorization", "Bearer "+a.Token)
+		if a.Token != "" {
+			req.Header.Set("Authorization", "Bearer "+a.Token)
+		}
 	case ExportAuthCustom:
 		if a.HeaderName != "" {
 			req.Header.Set(a.HeaderName, a.HeaderValue)

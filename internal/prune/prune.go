@@ -1,7 +1,8 @@
 // Package prune deletes results and runs older than the configured
-// retention windows. It runs on its own goroutine, in small batches so a
-// large backlog never holds the single write connection for long, and
-// re-reads its schedule whenever the retention settings change.
+// retention windows, and expired OIDC sessions. It runs on its own
+// goroutine, in small batches so a large backlog never holds the single
+// write connection for long, and re-reads its schedule whenever the
+// retention settings change.
 package prune
 
 import (
@@ -20,10 +21,11 @@ const timeFormat = "2006-01-02T15:04:05.000Z"
 
 // Stats is the outcome of one pruning pass.
 type Stats struct {
-	At      time.Time `json:"at"`
-	Results int64     `json:"results"`
-	Runs    int64     `json:"runs"`
-	Err     string    `json:"error,omitempty"`
+	At       time.Time `json:"at"`
+	Results  int64     `json:"results"`
+	Runs     int64     `json:"runs"`
+	Sessions int64     `json:"sessions"`
+	Err      string    `json:"error,omitempty"`
 }
 
 // Config configures a Job.
@@ -98,6 +100,16 @@ func (j *Job) Once(ctx context.Context) (Stats, error) {
 		}
 	}
 
+	// Expired OIDC sessions are unconditional (unlike results/runs, there
+	// is no retention-days setting to gate this on) and piggyback on the
+	// same ticker cadence as the rest of pruning rather than running their
+	// own goroutine/ticker.
+	n, err := j.cfg.Store.DeleteExpiredSessions(ctx, now)
+	st.Sessions = n
+	if err != nil {
+		errs = append(errs, err)
+	}
+
 	var retErr error
 	if len(errs) > 0 {
 		retErr = errors.Join(errs...)
@@ -163,10 +175,10 @@ func (j *Job) Run(ctx context.Context) {
 	if ctx.Err() == nil {
 		if st, err := j.Once(ctx); err != nil {
 			j.cfg.Logger.Error("prune: pass failed", "error", err,
-				"results", st.Results, "runs", st.Runs)
+				"results", st.Results, "runs", st.Runs, "sessions", st.Sessions)
 		} else {
 			j.cfg.Logger.Info("prune: pass complete",
-				"results", st.Results, "runs", st.Runs)
+				"results", st.Results, "runs", st.Runs, "sessions", st.Sessions)
 		}
 	}
 
@@ -181,10 +193,10 @@ func (j *Job) Run(ctx context.Context) {
 			st, err := j.Once(ctx)
 			if err != nil {
 				j.cfg.Logger.Error("prune: pass failed", "error", err,
-					"results", st.Results, "runs", st.Runs)
+					"results", st.Results, "runs", st.Runs, "sessions", st.Sessions)
 			} else {
 				j.cfg.Logger.Info("prune: pass complete",
-					"results", st.Results, "runs", st.Runs)
+					"results", st.Results, "runs", st.Runs, "sessions", st.Sessions)
 			}
 		case key, ok := <-changes:
 			if !ok {

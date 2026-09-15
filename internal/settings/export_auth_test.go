@@ -41,6 +41,22 @@ func TestExportAuthApply(t *testing.T) {
 			t.Errorf("headers = %v, want none", req.Header)
 		}
 	})
+
+	t.Run("bearer with empty token is no-op", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
+		ExportAuth{Type: ExportAuthBearer}.Apply(req)
+		if len(req.Header) != 0 {
+			t.Errorf("headers = %v, want none", req.Header)
+		}
+	})
+
+	t.Run("basic with empty username and password is no-op", func(t *testing.T) {
+		req, _ := http.NewRequest(http.MethodGet, "http://example.com", nil)
+		ExportAuth{Type: ExportAuthBasic}.Apply(req)
+		if len(req.Header) != 0 {
+			t.Errorf("headers = %v, want none", req.Header)
+		}
+	})
 }
 
 func TestExportAuthEmpty(t *testing.T) {

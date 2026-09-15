@@ -10,7 +10,9 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"reflect"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,6 +25,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/iperf3list"
 	"github.com/metril/speedtest-tracker/internal/metrics"
 	"github.com/metril/speedtest-tracker/internal/notify"
+	"github.com/metril/speedtest-tracker/internal/oidcauth"
 	"github.com/metril/speedtest-tracker/internal/ooklaweb"
 	"github.com/metril/speedtest-tracker/internal/prune"
 	"github.com/metril/speedtest-tracker/internal/runner"
@@ -106,6 +109,105 @@ func (s storeTokens) TouchToken(ctx context.Context, id int64) error {
 	return s.db.TouchAPIToken(ctx, id)
 }
 
+// storeSessions adapts *store.Store's session lookup to auth.SessionLookup,
+// whose SessionInfo return type differs from store.Session (and lives in
+// internal/auth precisely so that package never imports internal/store).
+type storeSessions struct{ db *store.Store }
+
+func (s storeSessions) LookupSession(ctx context.Context, hashedID string, now time.Time) (auth.SessionInfo, bool, error) {
+	sess, ok, err := s.db.LookupSession(ctx, hashedID, now)
+	if err != nil || !ok {
+		return auth.SessionInfo{}, ok, err
+	}
+	return auth.SessionInfo{
+		Subject: sess.Subject,
+		Email:   sess.Email,
+		Name:    sess.Name,
+		Groups:  sess.Groups,
+		IsAdmin: sess.IsAdmin,
+	}, true, nil
+}
+
+// oidcDiscoverTimeout bounds building/rebuilding the OIDC provider, which
+// performs a live discovery request against the configured issuer.
+const oidcDiscoverTimeout = 10 * time.Second
+
+// oidcConfigFromAuth extracts the oidcauth.Config a builds an OIDC provider
+// from settings.Auth. AdminGroup is shared with forward_auth (settings.Auth
+// has one AdminGroup field, not a separate oidc-only one).
+func oidcConfigFromAuth(a settings.Auth) oidcauth.Config {
+	return oidcauth.Config{
+		Issuer:          a.OIDCIssuer,
+		ClientID:        a.OIDCClientID,
+		ClientSecret:    a.OIDCClientSecret,
+		RedirectBaseURL: a.OIDCRedirectBaseURL,
+		Scopes:          a.OIDCScopes,
+		GroupsClaim:     a.OIDCGroupsClaim,
+		AdminGroup:      a.AdminGroup,
+		AllowedGroups:   a.OIDCAllowedGroups,
+		AllowedEmails:   a.OIDCAllowedEmails,
+		SessionTTL:      time.Duration(a.SessionTTLHours) * time.Hour,
+	}
+}
+
+// oidcProviderHolder holds the currently active OIDC provider (nil when
+// auth mode is not oidc, or the last build attempt failed), rebuilt only
+// when the oidc-relevant settings fields actually change — so that, say,
+// narrowing trusted_proxies for forward_auth (an unrelated auth.* change)
+// never triggers a fresh discovery request against the oidc issuer.
+type oidcProviderHolder struct {
+	ptr atomic.Pointer[oidcauth.Provider]
+
+	mu      sync.Mutex
+	applied oidcauth.Config
+	built   bool
+}
+
+// Load returns the currently active provider, or nil. It is Deps.OIDC.
+func (h *oidcProviderHolder) Load() *oidcauth.Provider { return h.ptr.Load() }
+
+// apply rebuilds the provider from a when a.Mode is oidc and the resulting
+// oidcauth.Config differs from the one last successfully applied; it is a
+// no-op otherwise. When a.Mode is not oidc, any existing provider is
+// cleared. A discovery failure clears the provider (rather than leaving a
+// stale one in place) and returns the error for the caller to log.
+func (h *oidcProviderHolder) apply(ctx context.Context, a settings.Auth) error {
+	if a.Mode != settings.AuthModeOIDC {
+		h.mu.Lock()
+		h.built = false
+		h.mu.Unlock()
+		h.ptr.Store(nil)
+		return nil
+	}
+
+	cfg := oidcConfigFromAuth(a)
+
+	h.mu.Lock()
+	unchanged := h.built && reflect.DeepEqual(h.applied, cfg)
+	h.mu.Unlock()
+	if unchanged {
+		return nil
+	}
+
+	discoverCtx, cancel := context.WithTimeout(ctx, oidcDiscoverTimeout)
+	defer cancel()
+	p, err := oidcauth.New(discoverCtx, cfg, nil)
+	if err != nil {
+		h.mu.Lock()
+		h.built = false
+		h.mu.Unlock()
+		h.ptr.Store(nil)
+		return fmt.Errorf("build oidc provider: %w", err)
+	}
+
+	h.mu.Lock()
+	h.applied = cfg
+	h.built = true
+	h.mu.Unlock()
+	h.ptr.Store(p)
+	return nil
+}
+
 // authConfigurer is the subset of *auth.Middleware that applyAuth needs.
 // It exists so authAdapter (below) can also satisfy it: *auth.Middleware
 // has no way to report its own configured mode, so production code routes
@@ -144,18 +246,27 @@ func (a *authAdapter) Configure(cfg settings.Auth) error {
 	return nil
 }
 
-// applyAuth pushes the stored Auth section into the live auth middleware.
-// It mirrors applyIntegrations/applyNotifications: called once at startup
-// and again on every auth.* settings change. On a bad CIDR, m.Configure
-// leaves the previously applied configuration in place and this returns
-// the wrapped error, so the caller decides whether that is fatal.
-func applyAuth(ctx context.Context, st *settings.Store, m authConfigurer, logger *slog.Logger) error {
+// applyAuth pushes the stored Auth section into the live auth middleware
+// and, when oidc is non-nil, the live OIDC provider. It mirrors
+// applyIntegrations/applyNotifications: called once at startup and again
+// on every auth.* settings change. On a bad CIDR, m.Configure leaves the
+// previously applied configuration in place and this returns the wrapped
+// error, so the caller decides whether that is fatal. A failure building
+// the OIDC provider is logged but never returned: it must not abort
+// startup or the auth-settings watcher, since login simply shows
+// oidc_not_configured until the issuer is reachable/fixed.
+func applyAuth(ctx context.Context, st *settings.Store, m authConfigurer, oidc *oidcProviderHolder, logger *slog.Logger) error {
 	a, err := st.Auth(ctx)
 	if err != nil {
 		return err
 	}
 	if err := m.Configure(a); err != nil {
 		return fmt.Errorf("configure auth: %w", err)
+	}
+	if oidc != nil {
+		if err := oidc.apply(ctx, a); err != nil {
+			logger.Error("build oidc provider", "error", err)
+		}
 	}
 	logger.Debug("auth applied", "mode", a.Mode)
 	return nil
@@ -190,7 +301,7 @@ func parseLevel(s string) slog.Level {
 // never race the notification past a subscriber that isn't listening yet.
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
-	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, metricsEnabled *atomic.Bool,
+	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, oidcHolder *oidcProviderHolder, metricsEnabled *atomic.Bool,
 	ir *iperf3list.Refresher, logger *slog.Logger) {
 	for {
 		select {
@@ -249,7 +360,7 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 				}
 				logger.Info("integrations reloaded", "changed_key", key)
 			case strings.HasPrefix(key, "auth."):
-				if err := applyAuth(ctx, st, am, logger); err != nil {
+				if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
 					logger.Error("reload auth", "error", err)
 					continue
 				}
@@ -394,7 +505,13 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	}
 
 	authMW := auth.New(logger, storeTokens{db}, time.Now)
+	authMW.SetSessions(storeSessions{db})
 	am := newAuthAdapter(authMW)
+	oidcHolder := &oidcProviderHolder{}
+	stateCodec, err := oidcauth.NewStateCodec()
+	if err != nil {
+		return fmt.Errorf("create oidc state codec: %w", err)
+	}
 	// Apply the stored auth config once at boot, but log and continue on
 	// error rather than aborting: a bad stored CIDR (e.g. hand-edited in
 	// the DB) must not make the instance unbootable. authAdapter starts
@@ -402,7 +519,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	// stored config was never successfully applied yet; once applyAuth
 	// has succeeded at least once, a later failure (from watchSettings)
 	// instead keeps whatever config was last successfully applied.
-	if err := applyAuth(ctx, st, am, logger); err != nil {
+	if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
 		logger.Error("apply auth settings", "error", err)
 	}
 
@@ -490,7 +607,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
-		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, &metricsEnabled, iperf3Refresher, logger)
+		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, oidcHolder, &metricsEnabled, iperf3Refresher, logger)
 	}()
 	go pj.Run(watchCtx)
 	go iperf3Refresher.Run(watchCtx)
@@ -517,6 +634,10 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 			MetricsHandler:  m.Handler(),
 			MetricsEnabled:  metricsEnabled.Load,
 			Auth:            am,
+			OIDC:            oidcHolder.Load,
+			Sessions:        db,
+			StateCodec:      stateCodec,
+			Now:             time.Now,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}

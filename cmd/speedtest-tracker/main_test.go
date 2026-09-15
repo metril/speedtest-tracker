@@ -19,6 +19,7 @@ import (
 	"github.com/metril/speedtest-tracker/internal/engine/ookla"
 	"github.com/metril/speedtest-tracker/internal/iperf3list"
 	"github.com/metril/speedtest-tracker/internal/notify"
+	"github.com/metril/speedtest-tracker/internal/oidcauth/oidctest"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/scheduler"
 	"github.com/metril/speedtest-tracker/internal/settings"
@@ -190,7 +191,7 @@ func TestWatchSettingsAppliesLogLevelAndRebuildsEngines(t *testing.T) {
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger)
 
 	if err := st.Set(ctx, settings.KeyLogLevel, "debug"); err != nil {
 		t.Fatal(err)
@@ -344,7 +345,7 @@ func TestApplyAuthReadsTheSettingsSection(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := auth.New(slog.Default(), noTokens{}, time.Now)
-	if err := applyAuth(ctx, st, m, slog.Default()); err != nil {
+	if err := applyAuth(ctx, st, m, nil, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 
@@ -365,19 +366,121 @@ func TestApplyAuthKeepsPreviousConfigOnBadCIDR(t *testing.T) {
 	st := newTestSettings(t)
 	ctx := context.Background()
 	m := auth.New(slog.Default(), noTokens{}, time.Now)
-	if err := applyAuth(ctx, st, m, slog.Default()); err != nil {
+	if err := applyAuth(ctx, st, m, nil, slog.Default()); err != nil {
 		t.Fatal(err)
 	}
 	if err := st.Set(ctx, settings.KeyAuthTrustedProxies, []string{"garbage"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := applyAuth(ctx, st, m, slog.Default()); err == nil {
+	if err := applyAuth(ctx, st, m, nil, slog.Default()); err == nil {
 		t.Fatal("want an error for an unparseable CIDR")
 	}
 
 	id, err := m.Identify(httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil))
 	if err != nil || id.Mode != settings.AuthModeOpen || !id.IsAdmin {
 		t.Fatalf("identify = %+v, %v; want the instance to keep serving under the previous (open) config", id, err)
+	}
+}
+
+// TestStoreSessionsAdaptsToAuthSessionInfo is a regression test for the
+// storeSessions adapter: auth.SessionLookup's SessionInfo return type
+// differs from store.Session, so the field-by-field copy must round-trip
+// correctly and an expired/missing session must resolve to ok=false, not
+// an error.
+func TestStoreSessionsAdaptsToAuthSessionInfo(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "sessions.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now()
+
+	sess := store.Session{
+		ID: auth.HashSession("plain"), Subject: "sub", Email: "a@example.com", Name: "Alice",
+		Groups: []string{"admins"}, IsAdmin: true, CreatedAt: now, ExpiresAt: now.Add(time.Hour),
+	}
+	if err := db.CreateSession(ctx, sess); err != nil {
+		t.Fatal(err)
+	}
+
+	adapter := storeSessions{db: db}
+	info, ok, err := adapter.LookupSession(ctx, sess.ID, now)
+	if err != nil || !ok {
+		t.Fatalf("LookupSession = %+v, %v, %v", info, ok, err)
+	}
+	if info.Subject != "sub" || info.Email != "a@example.com" || info.Name != "Alice" ||
+		len(info.Groups) != 1 || info.Groups[0] != "admins" || !info.IsAdmin {
+		t.Fatalf("info = %+v", info)
+	}
+
+	if _, ok, err := adapter.LookupSession(ctx, "unknown", now); err != nil || ok {
+		t.Fatalf("unknown session = %v, %v, want ok=false, err=nil", ok, err)
+	}
+	if _, ok, err := adapter.LookupSession(ctx, sess.ID, now.Add(2*time.Hour)); err != nil || ok {
+		t.Fatalf("expired session = %v, %v, want ok=false, err=nil", ok, err)
+	}
+}
+
+// TestOIDCProviderHolderRebuildsOnlyOnRelevantChange exercises
+// oidcProviderHolder.apply: it builds on a first oidc-mode config, skips
+// rediscovery when reapplied unchanged, clears when the mode moves away
+// from oidc, and clears (rather than keeping a stale provider) on a
+// discovery failure.
+func TestOIDCProviderHolderRebuildsOnlyOnRelevantChange(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	ctx := context.Background()
+	h := &oidcProviderHolder{}
+
+	cfg := settings.Auth{
+		Mode: settings.AuthModeOIDC, OIDCIssuer: idp.URL, OIDCClientID: "client",
+		OIDCClientSecret: "secret", OIDCGroupsClaim: "groups",
+	}
+	if err := h.apply(ctx, cfg); err != nil {
+		t.Fatalf("first apply: %v", err)
+	}
+	built := h.Load()
+	if built == nil {
+		t.Fatal("apply did not build a provider")
+	}
+
+	// Reapplying the identical config must not rebuild: the same
+	// *oidcauth.Provider pointer is still installed.
+	if err := h.apply(ctx, cfg); err != nil {
+		t.Fatalf("reapply unchanged: %v", err)
+	}
+	if h.Load() != built {
+		t.Fatal("reapplying an unchanged oidc config rebuilt the provider")
+	}
+
+	// Switching mode away from oidc must clear the provider.
+	away := cfg
+	away.Mode = settings.AuthModeOpen
+	if err := h.apply(ctx, away); err != nil {
+		t.Fatalf("apply mode=open: %v", err)
+	}
+	if h.Load() != nil {
+		t.Fatal("switching mode away from oidc must clear the provider")
+	}
+
+	// A discovery failure clears the provider rather than leaving a stale
+	// one in place.
+	if err := h.apply(ctx, cfg); err != nil {
+		t.Fatalf("rebuild after switching back: %v", err)
+	}
+	if h.Load() == nil {
+		t.Fatal("switching back to oidc did not rebuild")
+	}
+	unreachable := httptest.NewServer(http.NotFoundHandler())
+	badIssuer := unreachable.URL
+	unreachable.Close()
+	badCfg := cfg
+	badCfg.OIDCIssuer = badIssuer
+	if err := h.apply(ctx, badCfg); err == nil {
+		t.Fatal("want an error for an unreachable issuer")
+	}
+	if h.Load() != nil {
+		t.Fatal("a failed rebuild must clear the provider, not keep the previous one")
 	}
 }
 
@@ -416,7 +519,7 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger)
 
 	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeToken); err != nil {
 		t.Fatal(err)
@@ -467,7 +570,7 @@ func TestWatchSettingsStopsOnContextCancel(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, &metricsEnabled, ir, logger)
+		watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger)
 	}()
 
 	cancel()
