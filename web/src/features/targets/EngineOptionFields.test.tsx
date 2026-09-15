@@ -9,7 +9,9 @@ import {
   afterEach, beforeEach, describe, expect, it, vi,
 } from 'vitest';
 import type { Iperf3Server, OoklaServer } from '../../lib/api';
-import { EngineOptionFields, Iperf3ResultsList, OoklaResultsList } from './EngineOptionFields';
+import {
+  EngineOptionFields, Iperf3ResultsList, OoklaResultsList, validateEngineOptions,
+} from './EngineOptionFields';
 
 // Rendering Radix's real PopoverContent (its floating-ui Popper positioning)
 // with open=true hangs jsdom for ~25-30s regardless of how `open` became
@@ -690,5 +692,98 @@ describe('Iperf3ResultsList (tested directly, no Popover)', () => {
   it('shows an error state', () => {
     render(<Iperf3ResultsList servers={[]} isFetching={false} isError onSelect={vi.fn()} />);
     expect(screen.getByText(/Server list unavailable/)).toBeInTheDocument();
+  });
+});
+
+describe('OoklaFields: server rotation', () => {
+  it('opens in rotation mode when server_ids is already set, listing every entry', () => {
+    wrap(<EngineOptionFields engine="ookla" options={{ server_ids: [111, 222] }} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('Rotate through multiple servers')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByLabelText('Ookla server ID')).not.toBeInTheDocument();
+    const list = within(screen.getByTestId('ookla-rotation-list'));
+    expect(list.getByText('Server 111')).toBeInTheDocument();
+    expect(list.getByText('Server 222')).toBeInTheDocument();
+  });
+
+  it('adds, reorders and removes server ids', () => {
+    const onChange = vi.fn();
+    function Controlled() {
+      const [options, setOptions] = useState<Record<string, unknown>>({ server_ids: [111, 222] });
+      return <EngineOptionFields engine="ookla" options={options} onChange={(n) => { setOptions(n); onChange(n); }} />;
+    }
+    wrap(<Controlled />);
+
+    fireEvent.change(screen.getByLabelText('Add server ID'), { target: { value: '333' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(onChange).toHaveBeenLastCalledWith({ server_ids: [111, 222, 333] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move Server 222 up' }));
+    expect(onChange).toHaveBeenLastCalledWith({ server_ids: [222, 111, 333] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove Server 111' }));
+    expect(onChange).toHaveBeenLastCalledWith({ server_ids: [222, 333] });
+  });
+
+  it('switching rotation off keeps the first id as the plain server_id', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="ookla" options={{ server_ids: [111, 222] }} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('Rotate through multiple servers'));
+    expect(onChange).toHaveBeenCalledWith({ server_id: 111 });
+  });
+
+  it('switching rotation on from a single server_id seeds the list with it', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="ookla" options={{ server_id: 1234 }} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('Rotate through multiple servers'));
+    expect(onChange).toHaveBeenCalledWith({ server_ids: [1234] });
+  });
+});
+
+describe('Iperf3Fields: host rotation', () => {
+  it('opens in rotation mode when hosts is already set, listing every entry', () => {
+    wrap(<EngineOptionFields engine="iperf3" options={{ hosts: ['a.lan', 'b.lan'] }} onChange={vi.fn()} />);
+    // Custom starts on for a rotating target (hasCustomIperf3Options treats
+    // any advanced-looking option as hand-configured); force it via the
+    // toggle regardless in case that heuristic doesn't cover hosts yet.
+    expect(screen.getByLabelText('Rotate through multiple hosts')).toHaveAttribute('aria-checked', 'true');
+    expect(screen.queryByLabelText('Host')).not.toBeInTheDocument();
+    const list = within(screen.getByTestId('iperf3-rotation-list'));
+    expect(list.getByText('a.lan')).toBeInTheDocument();
+    expect(list.getByText('b.lan')).toBeInTheDocument();
+  });
+
+  it('adds, reorders and removes hosts', () => {
+    const onChange = vi.fn();
+    function Controlled() {
+      const [options, setOptions] = useState<Record<string, unknown>>({ hosts: ['a.lan', 'b.lan'] });
+      return <EngineOptionFields engine="iperf3" options={options} onChange={(n) => { setOptions(n); onChange(n); }} />;
+    }
+    wrap(<Controlled />);
+
+    fireEvent.change(screen.getByLabelText('Add host'), { target: { value: 'c.lan' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add' }));
+    expect(onChange).toHaveBeenLastCalledWith({ hosts: ['a.lan', 'b.lan', 'c.lan'] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Move b.lan up' }));
+    expect(onChange).toHaveBeenLastCalledWith({ hosts: ['b.lan', 'a.lan', 'c.lan'] });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Remove a.lan' }));
+    expect(onChange).toHaveBeenLastCalledWith({ hosts: ['b.lan', 'c.lan'] });
+  });
+
+  it('switching rotation off keeps the first host as the plain host', () => {
+    const onChange = vi.fn();
+    wrap(<EngineOptionFields engine="iperf3" options={{ hosts: ['a.lan', 'b.lan'] }} onChange={onChange} />);
+    fireEvent.click(screen.getByLabelText('Rotate through multiple hosts'));
+    expect(onChange).toHaveBeenCalledWith({ host: 'a.lan' });
+  });
+});
+
+describe('validateEngineOptions: iperf3 host requirement', () => {
+  it('requires at least one host', () => {
+    expect(validateEngineOptions('iperf3', {})).toBe('At least one host is required');
+    expect(validateEngineOptions('iperf3', { host: 'a.lan' })).toBeUndefined();
+    expect(validateEngineOptions('iperf3', { hosts: ['a.lan'] })).toBeUndefined();
+    expect(validateEngineOptions('iperf3', { hosts: [] })).toBe('At least one host is required');
   });
 });

@@ -286,3 +286,55 @@ describe('Targets page schedules column', () => {
     expect(officeRow?.textContent).toContain('—');
   });
 });
+
+describe('Targets page hosts column', () => {
+  it('shows a dash for a target with zero or one configured host', async () => {
+    const targets = [
+      target({ id: 1, name: 'home', engine: 'ookla', options: {} }),
+      target({ id: 2, name: 'single', engine: 'ookla', options: { server_id: 111 } }),
+    ];
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/targets')) return jsonResponse(targets);
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+
+    const rows = screen.getAllByRole('row');
+    for (const name of ['home', 'single']) {
+      const row = rows.find((r) => r.textContent?.includes(name));
+      expect(row?.textContent).toContain('—');
+    }
+  });
+
+  it('shows the list size and the entry rotation_index points to next', async () => {
+    const targets = [
+      target({
+        id: 1, name: 'rot-ookla', engine: 'ookla', rotation_index: 1,
+        options: { server_ids: [111, 222, 333] },
+      }),
+      target({
+        id: 2, name: 'rot-iperf3', engine: 'iperf3', rotation_index: 2,
+        options: { hosts: ['a.lan', 'b.lan'] },
+      }),
+    ];
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith('/targets')) return jsonResponse(targets);
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('rot-ookla');
+
+    expect(screen.getByText('3 hosts, next: 222')).toBeInTheDocument();
+    // rotation_index 2 % 2 hosts = 0 -> "a.lan"
+    expect(screen.getByText('2 hosts, next: a.lan')).toBeInTheDocument();
+  });
+});

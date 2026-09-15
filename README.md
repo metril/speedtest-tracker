@@ -188,14 +188,32 @@ restart to switch back.
 
 | Engine | How it runs | Options |
 | --- | --- | --- |
-| `ookla` | `speedtest -f jsonl --progress=yes --accept-license --accept-gdpr [-s ID]`; server list from `speedtest -L -f json`, cached | `server_id` |
+| `ookla` | `speedtest -f jsonl --progress=yes --accept-license --accept-gdpr [-s ID]`; server list from `speedtest -L -f json`, cached | `server_id` (or `server_ids`, see below) |
 | `cloudflare` | native Go against `speed.cloudflare.com` (`/cdn-cgi/trace`, `/__down`, `/__up`), p90 of per-transfer throughput | `download_sizes`, `upload_sizes`, `latency_samples`, `base_url` |
-| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host`, `port`, `port_range_end`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
+| `iperf3` | `iperf3 -c host -p port -J` (or `--json-stream` on 3.17+) | `host` (or `hosts`, see below), `port`, `port_range_end`, `protocol`, `reverse`, `bidir`, `parallel`, `duration_s`, `udp_bitrate`, `bind`, `username`, `password`, `rsa_public_key_path` |
 | `fake` | deterministic, no I/O; used by tests | `fail`, `download_bps`, `upload_bps` |
 
 Binary paths and the Ookla consent flags live in the Engines settings section
 (`engines.speedtest_bin`, `engines.iperf3_bin`, `engines.ookla_accept_license`,
 `engines.ookla_accept_gdpr`, `engines.server_list_ttl_seconds`).
+
+### Host rotation
+
+An `ookla` target's options may carry `server_ids` (an ordered `[]int64`)
+instead of a single `server_id`, and an `iperf3` target's options may carry
+`hosts` (an ordered `[]string`, sharing `port` and every other option)
+instead of a single `host`. Each run of a target with more than one entry
+uses the next entry in the list, wrapping back to the start — the target's
+`rotation_index` field (read-only in the API) is the persisted cursor,
+advanced once per run and surviving restarts. Rotation picks the host
+before the run's `options_snapshot` is captured, so the snapshot (and a
+re-execute of that result) always records the exact single host that ran,
+never the whole list; re-execute, a list of at most one entry, and the
+`cloudflare` engine (which has no such list) never rotate. The Targets page
+shows the list size and which entry is next in its Hosts column, and both
+the Ookla server picker and the iperf3 host field can be switched into this
+ordered "Rotate through multiple servers/hosts" mode from the target form.
+A target with a plain `server_id`/`host` is unaffected either way.
 
 Run one test by hand (requires the corresponding binary to be installed):
 

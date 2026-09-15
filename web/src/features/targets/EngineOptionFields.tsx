@@ -47,6 +47,9 @@ function numberOr(value: string): number | '' {
 /** validateEngineOptions returns a blocking error message for the current options, if any. */
 export function validateEngineOptions(engine: string, options: Options): string | undefined {
   if (engine !== 'iperf3') return undefined;
+  if (iperf3HostList(options).length === 0) {
+    return 'At least one host is required';
+  }
   const password = options.password;
   if (typeof password === 'string' && password !== '') {
     if (!options.username || !options.rsa_public_key_path) {
@@ -54,6 +57,34 @@ export function validateEngineOptions(engine: string, options: Options): string 
     }
   }
   return undefined;
+}
+
+/** iperf3HostList reads the ordered host list from options, falling back
+ * to the legacy single `host` field (as a one-element list) so an
+ * existing single-host target still validates and edits cleanly. */
+function iperf3HostList(options: Options): string[] {
+  const hosts = options.hosts;
+  if (Array.isArray(hosts) && hosts.every((h) => typeof h === 'string')) return hosts as string[];
+  return typeof options.host === 'string' && options.host !== '' ? [options.host] : [];
+}
+
+/** ooklaServerIDList reads the ordered server-id list from options,
+ * falling back to the legacy single `server_id` field. */
+function ooklaServerIDList(options: Options): number[] {
+  const ids = options.server_ids;
+  if (Array.isArray(ids) && ids.every((n) => typeof n === 'number')) return ids as number[];
+  return typeof options.server_id === 'number' ? [options.server_id] : [];
+}
+
+/** writeOrderedList stores `next` under `listKey`, dropping `singleKey`
+ * entirely so the two never coexist: empty means "unset" (drop both),
+ * one-or-more always writes the list — the backend folds a one-element
+ * list back into the singular field itself, so this round-trips a
+ * never-edited single-host/server target with no behavior change. */
+function writeOrderedList(options: Options, listKey: string, singleKey: string, next: (string | number)[]): Options {
+  let out = setOption(options, singleKey, '');
+  out = setOption(out, listKey, next.length > 0 ? next : '');
+  return out;
 }
 
 const DEBOUNCE_MS = 300;
@@ -90,6 +121,10 @@ const COMMON_COUNTRIES: readonly [string, string][] = [
  * is set, so a target created purely by picking (host/port/reverse) opens
  * with Custom off and a hand-configured one opens with it on. */
 function hasCustomIperf3Options(options: Options): boolean {
+  // A rotating (multi-host) target only makes sense as a hand-configured
+  // one — the public-list picker never writes `hosts` itself — so it
+  // always opens with Custom on, same as any other advanced option below.
+  if (Array.isArray(options.hosts)) return true;
   return IPERF3_ADVANCED_KEYS.some((k) => {
     if ((PICK_WRITTEN_KEYS as readonly string[]).includes(k)) return false;
     const v = options[k];
@@ -125,6 +160,49 @@ export function EngineOptionFields({ engine, options, onChange, forceOpenAdvance
     <p className="text-sm text-muted">
       The <span className="font-mono">{engine}</span> engine takes no configuration.
     </p>
+  );
+}
+
+/** RotationListEditor shows an ordered list of hosts/server ids with
+ * ↑/↓/× per row — the markup mirrors SortableTargetList's Row (schedules'
+ * target-order editor) minus the drag handle and dnd-kit, since this list
+ * is always short enough that buttons alone are enough. */
+function RotationListEditor({ idPrefix, items, onMove, onRemove }: {
+  idPrefix: string;
+  items: (string | number)[];
+  onMove: (index: number, delta: number) => void;
+  onRemove: (index: number) => void;
+}) {
+  if (items.length === 0) {
+    return <p className="text-xs text-faint">No entries yet — add at least one below.</p>;
+  }
+  return (
+    <ol className="grid gap-1" data-testid={`${idPrefix}-rotation-list`}>
+      {items.map((item, i) => (
+        <li
+          key={`${idPrefix}-${i}`}
+          className="flex items-center gap-2 rounded border border-line bg-app px-2 py-1 text-sm"
+        >
+          <span className="w-5 text-right font-mono text-xs text-faint">{i + 1}</span>
+          <span className="flex-1 truncate font-mono text-fg">{item}</span>
+          <button
+            type="button" aria-label={`Move ${item} up`} disabled={i === 0}
+            className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
+            onClick={() => onMove(i, -1)}
+          >↑</button>
+          <button
+            type="button" aria-label={`Move ${item} down`} disabled={i === items.length - 1}
+            className="rounded border border-line px-1.5 text-xs text-muted disabled:opacity-40"
+            onClick={() => onMove(i, 1)}
+          >↓</button>
+          <button
+            type="button" aria-label={`Remove ${item}`}
+            className="rounded border border-line px-1.5 text-xs text-muted"
+            onClick={() => onRemove(i)}
+          >×</button>
+        </li>
+      ))}
+    </ol>
   );
 }
 
@@ -190,6 +268,12 @@ function initialCountry(): { select: string; other: string } {
 }
 
 function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
+  // Rotation mode starts on iff the target already carries a server_ids
+  // list (however long) so an existing rotating target reopens the way it
+  // was saved; a plain server_id target opens in the original single-value
+  // form untouched, satisfying "must load and save without change".
+  const [rotating, setRotating] = useState(() => Array.isArray(options.server_ids));
+  const [addValue, setAddValue] = useState('');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   // The popover only opens while the field is focused, never merely because
@@ -221,24 +305,95 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
   const servers = useOoklaServers(debouncedSearch, country, enabled);
   const serverId = options.server_id === undefined ? '' : String(options.server_id);
   const open = focused && enabled;
+  const ids = ooklaServerIDList(options);
+
+  const addID = (id: number) => {
+    if (!Number.isFinite(id) || id <= 0 || ids.includes(id)) return;
+    onChange(writeOrderedList(options, 'server_ids', 'server_id', [...ids, id]));
+  };
 
   const handleSelect = (s: OoklaServer) => {
-    onChange(setOption(options, 'server_id', Number(s.id)));
+    if (rotating) {
+      addID(Number(s.id));
+    } else {
+      onChange(setOption(options, 'server_id', Number(s.id)));
+    }
     setSearch(s.sponsor ? `${s.sponsor} — ${s.location}` : s.name);
     setFocused(false);
   };
 
+  const handleRotatingChange = (next: boolean) => {
+    if (next) {
+      onChange(writeOrderedList(options, 'server_ids', 'server_id', ids));
+    } else {
+      let out = setOption(options, 'server_ids', '');
+      out = setOption(out, 'server_id', ids[0] ?? '');
+      onChange(out);
+    }
+    setRotating(next);
+  };
+
   return (
     <div className="grid gap-3">
-      <FormField id="ookla-server-id" label="Ookla server ID">
-        <input
-          id="ookla-server-id"
-          className={inputClass}
-          value={serverId}
-          placeholder="auto (nearest server)"
-          onChange={(e) => onChange(setOption(options, 'server_id', numberOr(e.target.value)))}
-        />
-      </FormField>
+      <SwitchField
+        id="ookla-rotate" label="Rotate through multiple servers" checked={rotating}
+        onCheckedChange={handleRotatingChange}
+        hint="Each run uses the next server in the list, in order"
+      />
+
+      {!rotating && (
+        <FormField id="ookla-server-id" label="Ookla server ID">
+          <input
+            id="ookla-server-id"
+            className={inputClass}
+            value={serverId}
+            placeholder="auto (nearest server)"
+            onChange={(e) => onChange(setOption(options, 'server_id', numberOr(e.target.value)))}
+          />
+        </FormField>
+      )}
+
+      {rotating && (
+        <div className="grid gap-2">
+          <RotationListEditor
+            idPrefix="ookla"
+            items={ids.map((id) => `Server ${id}`)}
+            onMove={(i, delta) => {
+              const to = i + delta;
+              if (to < 0 || to >= ids.length) return;
+              const next = [...ids];
+              [next[i], next[to]] = [next[to], next[i]];
+              onChange(writeOrderedList(options, 'server_ids', 'server_id', next));
+            }}
+            onRemove={(i) => onChange(
+              writeOrderedList(options, 'server_ids', 'server_id', ids.filter((_, idx) => idx !== i)),
+            )}
+          />
+          <div className="flex gap-2">
+            <input
+              aria-label="Add server ID"
+              className={inputClass}
+              value={addValue}
+              placeholder="server ID"
+              onChange={(e) => setAddValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== 'Enter') return;
+                e.preventDefault();
+                addID(Number(addValue));
+                setAddValue('');
+              }}
+            />
+            <button
+              type="button"
+              className="shrink-0 rounded border border-line px-3 text-sm text-muted hover:bg-raised"
+              onClick={() => { addID(Number(addValue)); setAddValue(''); }}
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex gap-2">
         <div className="flex-1">
           <FormField id="ookla-server-search" label="Search servers">
@@ -677,6 +832,12 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
   // hand-set advanced option — see hasCustomIperf3Options.
   const [custom, setCustom] = useState(() => hasCustomIperf3Options(options));
 
+  // Rotation mode starts on iff the target already carries a hosts list
+  // (however long), same reasoning as OoklaFields' `rotating` — a plain
+  // single-host target opens in the original Host-input form untouched.
+  const [rotating, setRotating] = useState(() => Array.isArray(options.hosts));
+  const [addHostValue, setAddHostValue] = useState('');
+
   // A failed submit blocked by validateEngineOptions (e.g. a password with
   // no username/RSA key) bumps this signal from the parent form; force
   // Custom on so the error isn't hidden behind a field Custom-off hides.
@@ -701,16 +862,50 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
   const publicServers = useIperf3Servers(debouncedSearch, enabled);
   const open = focused;
 
+  const hosts = iperf3HostList(options);
+
+  const addHost = (host: string) => {
+    const h = host.trim();
+    if (h === '' || hosts.includes(h)) return;
+    onChange(writeOrderedList(options, 'hosts', 'host', [...hosts, h]));
+  };
+
+  const handleRotatingChange = (next: boolean) => {
+    if (next) {
+      onChange(writeOrderedList(options, 'hosts', 'host', hosts));
+    } else {
+      let out = setOption(options, 'hosts', '');
+      out = setOption(out, 'host', hosts[0] ?? '');
+      onChange(out);
+    }
+    setRotating(next);
+  };
+
   const handlePick = (s: Iperf3Server) => {
-    let next = setOption(options, 'host', s.host);
-    next = setOption(next, 'port', s.port);
-    // Every pick fully replaces these two fields (not just sets them when
-    // true) so switching from a server that supports -R / a wide port
-    // range to one that doesn't clears the stale values instead of
-    // leaving them stuck on from the previous pick.
-    next = setOption(next, 'reverse', s.supports_reverse);
-    next = setOption(next, 'port_range_end', s.port_end && s.port_end > s.port ? s.port_end : '');
-    onChange(next);
+    if (rotating) {
+      if (!hosts.includes(s.host)) {
+        let next = writeOrderedList(options, 'hosts', 'host', [...hosts, s.host]);
+        // Port and the -R/port-range flags are shared across every host in
+        // the list, so only the first pick sets them; later picks just add
+        // the host without disturbing what's already configured.
+        if (hosts.length === 0) {
+          next = setOption(next, 'port', s.port);
+          next = setOption(next, 'reverse', s.supports_reverse);
+          next = setOption(next, 'port_range_end', s.port_end && s.port_end > s.port ? s.port_end : '');
+        }
+        onChange(next);
+      }
+    } else {
+      let next = setOption(options, 'host', s.host);
+      next = setOption(next, 'port', s.port);
+      // Every pick fully replaces these two fields (not just sets them when
+      // true) so switching from a server that supports -R / a wide port
+      // range to one that doesn't clears the stale values instead of
+      // leaving them stuck on from the previous pick.
+      next = setOption(next, 'reverse', s.supports_reverse);
+      next = setOption(next, 'port_range_end', s.port_end && s.port_end > s.port ? s.port_end : '');
+      onChange(next);
+    }
     setSearch(`${s.host}:${s.port}`);
     setFocused(false);
   };
@@ -728,11 +923,60 @@ function Iperf3Fields({ options, onChange, forceOpenAdvancedSignal }: Omit<Props
       </div>
 
       {custom && (
-        <div className="sm:col-span-2">
-          <FormField id="iperf-host" label="Host">
-            <input id="iperf-host" className={inputClass} value={text('host')}
-              onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
-          </FormField>
+        <div className="sm:col-span-2 grid gap-2">
+          <SwitchField
+            id="iperf-rotate" label="Rotate through multiple hosts" checked={rotating}
+            onCheckedChange={handleRotatingChange}
+            hint="Each run uses the next host in the list, in order"
+          />
+
+          {!rotating && (
+            <FormField id="iperf-host" label="Host">
+              <input id="iperf-host" className={inputClass} value={text('host')}
+                onChange={(e) => onChange(setOption(options, 'host', e.target.value))} />
+            </FormField>
+          )}
+
+          {rotating && (
+            <div className="grid gap-2">
+              <RotationListEditor
+                idPrefix="iperf3"
+                items={hosts}
+                onMove={(i, delta) => {
+                  const to = i + delta;
+                  if (to < 0 || to >= hosts.length) return;
+                  const next = [...hosts];
+                  [next[i], next[to]] = [next[to], next[i]];
+                  onChange(writeOrderedList(options, 'hosts', 'host', next));
+                }}
+                onRemove={(i) => onChange(
+                  writeOrderedList(options, 'hosts', 'host', hosts.filter((_, idx) => idx !== i)),
+                )}
+              />
+              <div className="flex gap-2">
+                <input
+                  aria-label="Add host"
+                  className={inputClass}
+                  value={addHostValue}
+                  placeholder="host"
+                  onChange={(e) => setAddHostValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key !== 'Enter') return;
+                    e.preventDefault();
+                    addHost(addHostValue);
+                    setAddHostValue('');
+                  }}
+                />
+                <button
+                  type="button"
+                  className="shrink-0 rounded border border-line px-3 text-sm text-muted hover:bg-raised"
+                  onClick={() => { addHost(addHostValue); setAddHostValue(''); }}
+                >
+                  Add
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

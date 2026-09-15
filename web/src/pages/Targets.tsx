@@ -84,6 +84,22 @@ function RecentlyDeleted() {
 
 type Editing = { mode: 'none' } | { mode: 'new' } | { mode: 'edit'; target: Target };
 
+/** rotationSummary renders the Hosts column: "—" for a target with zero or
+ * one configured host/server (nothing to rotate through), otherwise the
+ * list length and which entry the next run will use, per rotation_index. */
+function rotationSummary(t: Target): string {
+  const opts = t.options;
+  let list: (string | number)[] = [];
+  if (t.engine === 'ookla' && Array.isArray(opts.server_ids)) {
+    list = opts.server_ids as number[];
+  } else if (t.engine === 'iperf3' && Array.isArray(opts.hosts)) {
+    list = opts.hosts as string[];
+  }
+  if (list.length <= 1) return '—';
+  const next = list[(t.rotation_index ?? 0) % list.length];
+  return `${list.length} hosts, next: ${next}`;
+}
+
 /** Targets lists every target and hosts the create/edit form. */
 export function Targets() {
   const targets = useTargets();
@@ -161,6 +177,7 @@ export function Targets() {
                 <TableHead>Name</TableHead>
                 <TableHead>Engine</TableHead>
                 <TableHead>Queue</TableHead>
+                <TableHead>Hosts</TableHead>
                 <TableHead>State</TableHead>
                 <TableHead>Schedules</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
@@ -174,6 +191,7 @@ export function Targets() {
                     <Badge variant="outline" className="font-mono uppercase">{t.engine}</Badge>
                   </TableCell>
                   <TableCell className="text-muted">{t.queue_name}</TableCell>
+                  <TableCell className="text-muted">{rotationSummary(t)}</TableCell>
                   <TableCell>
                     <span className={t.enabled ? 'text-ok' : 'text-faint'}>
                       {t.enabled ? 'enabled' : 'disabled'}

@@ -9,6 +9,10 @@ export interface Target {
   queue_name: string;
   options: Record<string, unknown>;
   thresholds: Record<string, unknown>;
+  // rotation_index is read-only: the host/server-id rotation cursor the
+  // runner advances on each run. Optional here since it's only set by the
+  // live API response, not by test fixtures that build a Target by hand.
+  rotation_index?: number;
   created_at: string;
   updated_at: string;
 }
