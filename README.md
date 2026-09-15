@@ -514,6 +514,11 @@ docker run -d --name speedtest-tracker \
   ghcr.io/metril/speedtest-tracker:latest
 ```
 
+The process runs as uid/gid `1000:1000`. A bind-mounted `/data` must be
+writable by that user, or override it with `--user` / compose `user:`.
+Volumes created by images before v0.8.0 (which ran as uid 10001) need a
+one-time `chown -R 1000:1000` on the volume's contents.
+
 Or with `compose.yaml`:
 
 ```bash

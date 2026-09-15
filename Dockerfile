@@ -54,7 +54,10 @@ RUN set -eux; \
     speedtest --version; \
     iperf3 --version
 
-RUN useradd --system --uid 10001 --home-dir /data --shell /usr/sbin/nologin app \
+# uid/gid 1000 match the first regular user on most Linux hosts, so a
+# bind-mounted /data owned by that user is writable without a chown.
+RUN groupadd --gid 1000 app \
+ && useradd --uid 1000 --gid app --home-dir /data --shell /usr/sbin/nologin app \
  && mkdir -p /data && chown app:app /data
 
 COPY --from=build /out/speedtest-tracker /usr/local/bin/speedtest-tracker
