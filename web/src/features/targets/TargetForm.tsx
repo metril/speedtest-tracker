@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { inputClass } from '@/features/settings/styles';
@@ -47,6 +47,16 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
   // submit for that window so queue_id: 0 is never sent.
   const selectedQueueId = queueId || queues.data?.[0]?.id || 0;
   const queueUnresolved = selectedQueueId === 0;
+
+  // A queue can be deleted (via the Manage queues dialog) while this form
+  // is open with it selected. Once the list no longer contains it, drop
+  // back to 0 so the fallback-to-first-queue logic above takes over
+  // instead of silently submitting a stale, now-nonexistent queue_id.
+  useEffect(() => {
+    if (queueId !== 0 && queues.data && !queues.data.some((q) => q.id === queueId)) {
+      setQueueId(0);
+    }
+  }, [queueId, queues.data]);
 
   return (
     <Card>

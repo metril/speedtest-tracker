@@ -59,6 +59,26 @@ afterEach(() => {
 });
 
 describe('TargetForm', () => {
+  it('resets a stale queue selection to 0 when the selected queue is deleted from the list', async () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />
+      </QueryClientProvider>,
+    );
+
+    const select = await screen.findByLabelText('Queue') as HTMLSelectElement;
+    await waitFor(() => expect(select.value).toBe('1'));
+    fireEvent.change(select, { target: { value: '2' } });
+    expect(select.value).toBe('2');
+
+    // Simulate the queue being deleted elsewhere (e.g. via the Manage
+    // queues dialog): the queues list no longer contains id 2.
+    act(() => { qc.setQueryData(['queues'], [queues[0]]); });
+
+    await waitFor(() => expect(select.value).toBe('1'));
+  });
+
   it('shows the iperf3 option fields when iperf3 is chosen and Custom is switched on', () => {
     wrap(<TargetForm onSubmit={vi.fn()} onCancel={vi.fn()} submitting={false} />);
 

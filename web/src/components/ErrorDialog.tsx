@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle,
@@ -16,12 +16,21 @@ export function ErrorDialog({
   error: string;
 }) {
   const [copied, setCopied] = useState(false);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+
+  useEffect(() => () => clearTimeout(timer.current), []);
+
+  const canCopy = typeof navigator !== 'undefined' && !!navigator.clipboard?.writeText;
 
   const copy = () => {
-    if (!navigator.clipboard?.writeText) return;
-    navigator.clipboard.writeText(error);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+    if (!canCopy) return;
+    navigator.clipboard.writeText(error)
+      .then(() => {
+        setCopied(true);
+        clearTimeout(timer.current);
+        timer.current = setTimeout(() => setCopied(false), 1500);
+      })
+      .catch(() => {});
   };
 
   return (
@@ -34,7 +43,9 @@ export function ErrorDialog({
           {error}
         </pre>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+          {canCopy && (
+            <Button type="button" variant="outline" onClick={copy}>{copied ? 'Copied' : 'Copy'}</Button>
+          )}
           <Button type="button" onClick={() => onOpenChange(false)}>Close</Button>
         </DialogFooter>
       </DialogContent>

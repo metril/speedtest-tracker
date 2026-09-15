@@ -201,10 +201,10 @@ export function Settings() {
     <div className="grid gap-4">
       <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
-      <Tabs value={active} onValueChange={(key) => navigate(`/settings/${key}`)}>
+      <Tabs value={active} onValueChange={(key) => navigate(`/settings/${key}`, { replace: true })}>
         <TabsList className="w-full justify-start overflow-x-auto">
           {TABS.map((tab) => (
-            <TabsTrigger key={tab.key} value={tab.key}>{tab.label}</TabsTrigger>
+            <TabsTrigger key={tab.key} value={tab.key} aria-controls={undefined}>{tab.label}</TabsTrigger>
           ))}
         </TabsList>
       </Tabs>
