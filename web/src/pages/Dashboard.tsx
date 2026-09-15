@@ -13,7 +13,7 @@ import { SummaryTiles, type DashboardSpark } from '../features/dashboard/Summary
 import { TargetCard } from '../features/dashboard/TargetCard';
 import { useLivePanel } from '../features/live/LiveRunProvider';
 import * as api from '../lib/api';
-import type { HistoryPoint, Range, TargetSummary, ThresholdSet } from '../lib/api';
+import type { History, HistoryPoint, Range, TargetSummary, ThresholdSet } from '../lib/api';
 import { SERIES } from '../lib/chart';
 import { formatBps, formatMs } from '../lib/format';
 import {
@@ -64,29 +64,48 @@ function useAllTargetHistories(
   });
 }
 
-/** mergePrevByIndex overlays a previous-period history onto rows already
- * merged onto the current window's x-axis (mergeByBucket): the previous
- * window's timestamps are different, so alignment is positional -- the
- * n-th previous point for a target lands on that *same target's* n-th
- * current point. That's each target's own running cursor over the rows
- * where it actually has data, not the merged row's overall index: a
- * target missing a bucket another target has must not shift its own
- * alignment against its previous-period series. */
-function mergePrevByIndex(
+/** slotOf places a bucket at its position within its own history's window:
+ * round((bucket_start - from) / bucket_seconds). The previous window is
+ * fetched via `offset: 1` (see useAllTargetHistories), which the backend
+ * shifts back by exactly the range's own span, so a current bucket and
+ * the previous bucket at the same slot cover the same position within
+ * their respective (equal-length) windows -- "24h ago at 3pm" lines up
+ * with "today at 3pm" regardless of gaps or how many buckets either
+ * window actually has data for. */
+function slotOf(bucketStart: string, from: string, bucketSeconds: number): number {
+  return Math.round((Date.parse(bucketStart) - Date.parse(from)) / (bucketSeconds * 1000));
+}
+
+/** mergePrevByOffset overlays a previous-period history onto rows already
+ * merged onto the current window's x-axis (mergeByBucket), joining each
+ * target's current and previous points by slot (see slotOf) rather than
+ * position in the array. That means a gap in either window's data is
+ * just a missing slot -- it does not shift any later point's alignment,
+ * and targets with different point counts each align independently. */
+export function mergePrevByOffset(
   rows: Record<string, number | string>[],
-  prevHistories: Map<number, HistoryPoint[]>,
+  currentHistories: Map<number, History>,
+  prevHistories: Map<number, History>,
   targetIds: number[],
   keys: (keyof HistoryPoint)[],
 ): Record<string, number | string>[] {
-  const cursor = new Map<number, number>();
+  const prevBySlot = new Map<number, Map<number, HistoryPoint>>();
+  for (const id of targetIds) {
+    const h = prevHistories.get(id);
+    if (!h) continue;
+    const bySlot = new Map<number, HistoryPoint>();
+    for (const p of h.points) bySlot.set(slotOf(p.bucket_start, h.from, h.bucket_seconds), p);
+    prevBySlot.set(id, bySlot);
+  }
   return rows.map((row) => {
     const next = { ...row };
     for (const id of targetIds) {
       const hasCurrent = keys.some((key) => `${key}_${id}` in row);
       if (!hasCurrent) continue;
-      const i = cursor.get(id) ?? 0;
-      cursor.set(id, i + 1);
-      const p = (prevHistories.get(id) ?? [])[i];
+      const h = currentHistories.get(id);
+      if (!h) continue;
+      const slot = slotOf(String(row.bucket_start), h.from, h.bucket_seconds);
+      const p = prevBySlot.get(id)?.get(slot);
       if (!p) continue;
       for (const key of keys) next[`${key}_${id}_prev`] = Number(p[key]);
     }
@@ -133,8 +152,16 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
 
   const histories = new Map<number, HistoryPoint[]>();
   targets.forEach((t, i) => histories.set(t.target_id, historyQueries[i].data?.points ?? []));
-  const prevHistories = new Map<number, HistoryPoint[]>();
-  targets.forEach((t, i) => prevHistories.set(t.target_id, prevHistoryQueries[i].data?.points ?? []));
+  const historyByTarget = new Map<number, History>();
+  targets.forEach((t, i) => {
+    const h = historyQueries[i].data;
+    if (h) historyByTarget.set(t.target_id, h);
+  });
+  const prevHistoryByTarget = new Map<number, History>();
+  targets.forEach((t, i) => {
+    const h = prevHistoryQueries[i].data;
+    if (h) prevHistoryByTarget.set(t.target_id, h);
+  });
 
   const visibleTargets = targets.filter((t) => visible.has(t.target_id));
   const visibleIds = visibleTargets.map((t) => t.target_id);
@@ -150,8 +177,12 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
   let throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
   let latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
   if (compare) {
-    throughputPoints = mergePrevByIndex(throughputPoints, prevHistories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
-    latencyPoints = mergePrevByIndex(latencyPoints, prevHistories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
+    throughputPoints = mergePrevByOffset(
+      throughputPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_download_bps', 'avg_upload_bps'],
+    );
+    latencyPoints = mergePrevByOffset(
+      latencyPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_ping_ms', 'avg_jitter_ms'],
+    );
   }
 
   const throughputSeries: Series[] = visibleTargets.flatMap((t, i) => {
@@ -228,6 +259,7 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
             <SwitchField
               id="compare-previous-period" label="Compare with previous period"
               checked={compare} onCheckedChange={setCompare}
+              hint="Overlays the same range shifted back by its own span (24h → the preceding 24h), aligned by position within the range."
             />
           </div>
           <Tabs defaultValue="throughput">

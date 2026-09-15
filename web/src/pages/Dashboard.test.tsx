@@ -2,8 +2,24 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
-import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { Dashboard } from './Dashboard';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { History, HistoryPoint } from '../lib/api';
+import { Dashboard, mergePrevByOffset } from './Dashboard';
+
+/** point builds a minimal HistoryPoint for mergePrevByOffset tests -- only
+ * bucket_start and the one metric under test matter. */
+function point(bucketStart: string, download: number): HistoryPoint {
+  return {
+    bucket_start: bucketStart, count: 1, fail_count: 0,
+    avg_download_bps: download, min_download_bps: download, max_download_bps: download,
+    avg_upload_bps: 0, min_upload_bps: 0, max_upload_bps: 0,
+    avg_ping_ms: 0, min_ping_ms: 0, max_ping_ms: 0, avg_jitter_ms: 0,
+  };
+}
+
+function historyOf(from: string, bucketSeconds: number, points: HistoryPoint[]): History {
+  return { target_id: 1, from, to: '', bucket_seconds: bucketSeconds, points };
+}
 
 /** jsonResponse builds a fetch Response-shaped stub the same way the rest
  * of this codebase's tests do (see Targets.test.tsx). */
@@ -90,4 +106,65 @@ it('does not fetch a previous-period history until "Compare with previous period
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   const urlsAfterToggle = fetchMock.mock.calls.map(([input]) => String(input));
   expect(urlsAfterToggle.some((u) => u.includes('/targets/1/history') && u.includes('offset=1'))).toBe(true);
+});
+
+describe('mergePrevByOffset', () => {
+  const bucketSeconds = 3600;
+  const currentFrom = '2026-09-13T00:00:00.000Z';
+
+  it('a gap in the previous window does not shift later points', () => {
+    // Current has slots 0, 1, 2. Previous is missing slot 1 (a gap) but
+    // has slots 0 and 2 -- the same offset (one hour before current, per
+    // useAllTargetHistories' offset: 1) shifted back by the window span.
+    const rows = [
+      { bucket_start: '2026-09-13T00:00:00.000Z', avg_download_bps_1: 10 },
+      { bucket_start: '2026-09-13T01:00:00.000Z', avg_download_bps_1: 20 },
+      { bucket_start: '2026-09-13T02:00:00.000Z', avg_download_bps_1: 30 },
+    ];
+    const currentHistories = new Map([[1, historyOf(currentFrom, bucketSeconds, [])]]);
+    const prevFrom = '2026-09-12T00:00:00.000Z';
+    const prevHistories = new Map([[1, historyOf(prevFrom, bucketSeconds, [
+      point('2026-09-12T00:00:00.000Z', 100), // slot 0
+      // slot 1 missing: a gap
+      point('2026-09-12T02:00:00.000Z', 300), // slot 2
+    ])]]);
+
+    const merged = mergePrevByOffset(rows, currentHistories, prevHistories, [1], ['avg_download_bps']);
+
+    expect(merged[0].avg_download_bps_1_prev).toBe(100);
+    expect(merged[1].avg_download_bps_1_prev).toBeUndefined();
+    // The gap must not shift slot 2's previous point onto slot 1's row.
+    expect(merged[2].avg_download_bps_1_prev).toBe(300);
+  });
+
+  it('targets with differing point counts each align by their own slot', () => {
+    // Target 1 has 3 current slots; target 2 only has slot 2 (e.g. it
+    // joined later). Each target's previous overlay must use its own
+    // slot, not the other target's count or the merged row's position.
+    const rows: Record<string, number | string>[] = [
+      { bucket_start: '2026-09-13T00:00:00.000Z', avg_download_bps_1: 10 },
+      { bucket_start: '2026-09-13T01:00:00.000Z', avg_download_bps_1: 20 },
+      { bucket_start: '2026-09-13T02:00:00.000Z', avg_download_bps_1: 30, avg_download_bps_2: 5 },
+    ];
+    const currentHistories = new Map([
+      [1, historyOf(currentFrom, bucketSeconds, [])],
+      [2, historyOf(currentFrom, bucketSeconds, [])],
+    ]);
+    const prevFrom = '2026-09-12T00:00:00.000Z';
+    const prevHistories = new Map([
+      [1, historyOf(prevFrom, bucketSeconds, [
+        point('2026-09-12T00:00:00.000Z', 100),
+        point('2026-09-12T01:00:00.000Z', 200),
+        point('2026-09-12T02:00:00.000Z', 300),
+      ])],
+      [2, historyOf(prevFrom, bucketSeconds, [
+        point('2026-09-12T02:00:00.000Z', 50), // only slot 2 has data
+      ])],
+    ]);
+
+    const merged = mergePrevByOffset(rows, currentHistories, prevHistories, [1, 2], ['avg_download_bps']);
+
+    expect(merged[2].avg_download_bps_1_prev).toBe(300);
+    expect(merged[2].avg_download_bps_2_prev).toBe(50);
+  });
 });
