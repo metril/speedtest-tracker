@@ -144,6 +144,10 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
           resultId: result.id,
           isp: result.isp ?? prev.isp,
           serverName: result.server_name || prev.serverName,
+          // The run-level SSE error is only set for shutdown/queue-full
+          // cases; an ordinary engine failure's message lives on the
+          // Result itself, so it must be picked up here too.
+          error: result.error || prev.error,
         };
       });
     };
@@ -194,7 +198,10 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
           finished: TERMINAL.has(r.status),
           targetsTotal: r.targets_total ?? prev.targetsTotal,
           targetsDone: r.targets_done ?? prev.targetsDone,
-          error: r.error ?? prev.error,
+          // Not `??`: the run-level error is empty for an ordinary engine
+          // failure (only shutdown/queue-full set it), and must not clobber
+          // an error already picked up from the `result` event.
+          error: r.error || prev.error,
         };
       });
     };

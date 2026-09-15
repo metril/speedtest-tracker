@@ -202,6 +202,14 @@ describe('useLiveRun', () => {
     expect(result.current?.error).toBe('connection refused');
   });
 
+  it('picks up the engine error from the result event when the run event carries none', () => {
+    const { result } = renderHook(() => useLiveRun());
+    act(() => emit('progress', { run_id: 1, target_id: 2, engine: 'fake', phase: 'download', progress: 0.5, bps: 10e6, ping_ms: 9 }));
+    act(() => emit('result', { id: 1, target_id: 2, status: 'failed', error: 'iperf3: connect failed' }));
+    act(() => emit('run', { run_id: 1, status: 'failed', error: '', targets_total: 1, targets_done: 1 }));
+    expect(result.current?.error).toBe('iperf3: connect failed');
+  });
+
   it('does not go stale once the run already finished normally', () => {
     vi.useFakeTimers();
     try {
