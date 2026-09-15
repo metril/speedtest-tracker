@@ -111,9 +111,9 @@ func TestParseOptionsHostsNormalization(t *testing.T) {
 
 func TestParseOptionsHostsValidation(t *testing.T) {
 	for _, raw := range []string{
-		`{}`,                       // no host, no hosts
-		`{"hosts":[]}`,             // empty list, no host
-		`{"hosts":["a.lan",""]}`,   // blank entry
+		`{}`,                     // no host, no hosts
+		`{"hosts":[]}`,           // empty list, no host
+		`{"hosts":["a.lan",""]}`, // blank entry
 	} {
 		if _, err := parseOptions(json.RawMessage(raw)); err == nil {
 			t.Errorf("parseOptions(%s) = nil error, want error", raw)

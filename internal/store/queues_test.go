@@ -123,70 +123,83 @@ func itoa64(n int64) string {
 	return string(b)
 }
 
-// TestMigrationBackfillsQueueIDFromLane applies migrations 0001-0006 by
-// hand (the pre-queues schema), inserts targets against the old lane
-// column directly -- including a lane other than wan/lan, to prove that
-// case is seeded too -- then applies the rest (0007+) and checks queues
-// were seeded and every target's queue_id matches its original lane.
+// TestMigrationBackfillsQueueIDFromLane simulates upgrading a v0.6.0-shaped
+// database (created before queues existed) to the current binary: it
+// hand-applies migrations 0001-0006 (the pre-queues schema) on a bare
+// connection, inserts targets against the old lane column directly --
+// including a lane other than wan/lan, to prove that case is seeded too --
+// then closes that connection and reopens the same file through the real
+// store.Open path, which applies 0007+ under the production pragmas
+// (crucially foreign_keys=ON). A prior version of 0007 passed this test
+// when it hand-applied migrate() over a bare, pragma-less connection but
+// failed in production with foreign_keys=ON ("Cannot add a REFERENCES
+// column with non-NULL default value"); going through store.Open is what
+// would have caught that.
 func TestMigrationBackfillsQueueIDFromLane(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/legacy.db"
-	db, err := sql.Open("sqlite", path)
-	if err != nil {
-		t.Fatalf("open raw db: %v", err)
-	}
-	defer db.Close()
 	ctx := context.Background()
 
-	if _, err := db.ExecContext(ctx, `
-		CREATE TABLE IF NOT EXISTS schema_migrations (
-			version    TEXT PRIMARY KEY,
-			applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-		)`); err != nil {
-		t.Fatalf("create schema_migrations: %v", err)
-	}
-	for _, name := range []string{
-		"0001_init.sql", "0002_result_id_indexes.sql", "0003_api_tokens.sql",
-		"0004_iperf3_servers.sql", "0005_target_revisions.sql", "0006_iperf3_port_end.sql",
-	} {
-		body, err := migrationsFS.ReadFile("migrations/" + name)
+	func() {
+		db, err := sql.Open("sqlite", path)
 		if err != nil {
-			t.Fatalf("read %s: %v", name, err)
+			t.Fatalf("open raw db: %v", err)
 		}
-		if _, err := db.ExecContext(ctx, string(body)); err != nil {
-			t.Fatalf("apply %s: %v", name, err)
-		}
-		version := name[:len(name)-len(".sql")]
-		if _, err := db.ExecContext(ctx,
-			`INSERT INTO schema_migrations(version) VALUES(?)`, version); err != nil {
-			t.Fatalf("record %s: %v", name, err)
-		}
-	}
+		defer db.Close()
 
-	for _, tc := range []struct{ name, lane string }{
-		{"office", "wan"}, {"nas", "lan"}, {"branch", "dmz"},
-	} {
-		if _, err := db.ExecContext(ctx,
-			`INSERT INTO targets(name,engine,lane) VALUES(?,?,?)`, tc.name, "fake", tc.lane); err != nil {
-			t.Fatalf("insert %s: %v", tc.name, err)
+		if _, err := db.ExecContext(ctx, `
+			CREATE TABLE IF NOT EXISTS schema_migrations (
+				version    TEXT PRIMARY KEY,
+				applied_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+			)`); err != nil {
+			t.Fatalf("create schema_migrations: %v", err)
 		}
-	}
+		for _, name := range []string{
+			"0001_init.sql", "0002_result_id_indexes.sql", "0003_api_tokens.sql",
+			"0004_iperf3_servers.sql", "0005_target_revisions.sql", "0006_iperf3_port_end.sql",
+		} {
+			body, err := migrationsFS.ReadFile("migrations/" + name)
+			if err != nil {
+				t.Fatalf("read %s: %v", name, err)
+			}
+			if _, err := db.ExecContext(ctx, string(body)); err != nil {
+				t.Fatalf("apply %s: %v", name, err)
+			}
+			version := name[:len(name)-len(".sql")]
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO schema_migrations(version) VALUES(?)`, version); err != nil {
+				t.Fatalf("record %s: %v", name, err)
+			}
+		}
 
-	if err := migrate(ctx, db); err != nil {
-		t.Fatalf("migrate: %v", err)
-	}
+		for _, tc := range []struct{ name, lane string }{
+			{"office", "wan"}, {"nas", "lan"}, {"branch", "dmz"},
+		} {
+			if _, err := db.ExecContext(ctx,
+				`INSERT INTO targets(name,engine,lane) VALUES(?,?,?)`, tc.name, "fake", tc.lane); err != nil {
+				t.Fatalf("insert %s: %v", tc.name, err)
+			}
+		}
+	}()
 
-	queueNames := map[string]bool{}
-	rows, err := db.QueryContext(ctx, `SELECT name FROM queues`)
+	// Reopen through the real path: this is what applies 0007+ under the
+	// production pragmas (foreign_keys=ON included), rather than a bare
+	// connection that would silently accept a migration SQLite rejects
+	// once FK enforcement is on.
+	s, err := Open(path)
 	if err != nil {
-		t.Fatalf("list queues: %v", err)
+		t.Fatalf("Open (applies 0007+): %v", err)
 	}
-	for rows.Next() {
-		var n string
-		rows.Scan(&n)
-		queueNames[n] = true
+	defer s.Close()
+
+	queues, err := s.ListQueues(ctx)
+	if err != nil {
+		t.Fatalf("ListQueues: %v", err)
 	}
-	rows.Close()
+	queueNames := map[string]bool{}
+	for _, q := range queues {
+		queueNames[q.Name] = true
+	}
 	for _, want := range []string{"wan", "lan", "dmz"} {
 		if !queueNames[want] {
 			t.Errorf("queues missing %q, got %v", want, queueNames)
@@ -197,7 +210,7 @@ func TestMigrationBackfillsQueueIDFromLane(t *testing.T) {
 		{"office", "wan"}, {"nas", "lan"}, {"branch", "dmz"},
 	} {
 		var queueName string
-		if err := db.QueryRowContext(ctx,
+		if err := s.Read.QueryRowContext(ctx,
 			`SELECT q.name FROM targets t JOIN queues q ON q.id=t.queue_id WHERE t.name=?`, tc.name,
 		).Scan(&queueName); err != nil {
 			t.Fatalf("scan %s: %v", tc.name, err)

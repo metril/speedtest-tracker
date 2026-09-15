@@ -273,8 +273,8 @@ func TestConsecutiveRunsRotateThroughHostList(t *testing.T) {
 			t.Fatal(err)
 		}
 		var snap struct {
-			ServerID  int64  `json:"server_id"`
-			ServerIDs []int  `json:"server_ids"`
+			ServerID  int64 `json:"server_id"`
+			ServerIDs []int `json:"server_ids"`
 		}
 		if err := json.Unmarshal(res.OptionsSnapshot, &snap); err != nil {
 			t.Fatalf("unmarshal snapshot %s: %v", res.OptionsSnapshot, err)

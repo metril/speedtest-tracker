@@ -20,6 +20,14 @@ INSERT INTO queues(name)
 -- The lane column is kept (old target_revisions snapshots reference it by
 -- name) but is no longer written by the application; queue_id is now the
 -- live source of truth.
-ALTER TABLE targets ADD COLUMN queue_id INTEGER NOT NULL DEFAULT 1 REFERENCES queues(id);
+--
+-- No REFERENCES clause here: with foreign_keys=ON (see store.go), SQLite
+-- refuses "ALTER TABLE ... ADD COLUMN ... NOT NULL DEFAULT <n> REFERENCES
+-- ..." outright ("Cannot add a REFERENCES column with non-NULL default
+-- value") -- it can't backfill an FK-checked default into existing rows.
+-- Referential integrity is instead enforced in application code:
+-- DeleteQueue refuses to remove a queue any target still references
+-- (ErrQueueInUse), and validateTarget rejects an unknown queue_id with 400.
+ALTER TABLE targets ADD COLUMN queue_id INTEGER NOT NULL DEFAULT 1;
 
 UPDATE targets SET queue_id = (SELECT id FROM queues WHERE queues.name = targets.lane);
