@@ -134,6 +134,54 @@ func TestMeReportsIdentity(t *testing.T) {
 	}
 }
 
+// TestWriteGuardRejectsNonAdminMutations is a regression test: previously
+// only the auth settings, tokens and iperf3 endpoints checked IsAdmin
+// individually, so a forward_auth viewer identity outside the configured
+// admin group could still mutate targets/results/etc. via any other
+// /api/v1 route.
+func TestWriteGuardRejectsNonAdminMutations(t *testing.T) {
+	h, _ := newAuthedAPI(t, settings.Auth{Mode: settings.AuthModeForward,
+		UserHeader: "Remote-User", GroupsHeader: "Remote-Groups", GroupsSeparator: ",",
+		AdminGroup: "admins", TrustedProxies: []string{"192.0.2.0/24"}})
+
+	viewer := func(req *http.Request) {
+		req.RemoteAddr = "192.0.2.1:1"
+		req.Header.Set("Remote-User", "alice")
+		req.Header.Set("Remote-Groups", "users")
+	}
+	admin := func(req *http.Request) {
+		req.RemoteAddr = "192.0.2.1:1"
+		req.Header.Set("Remote-User", "bob")
+		req.Header.Set("Remote-Groups", "admins")
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	viewer(getReq)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, getReq)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("non-admin GET /targets = %d, want 200", rec.Code)
+	}
+
+	postReq := httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{}`))
+	postReq.Header.Set("Content-Type", "application/json")
+	viewer(postReq)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, postReq)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("non-admin POST /targets = %d %s, want 403", rec.Code, rec.Body)
+	}
+
+	adminReq := httptest.NewRequest(http.MethodPost, "/api/v1/targets", strings.NewReader(`{}`))
+	adminReq.Header.Set("Content-Type", "application/json")
+	admin(adminReq)
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, adminReq)
+	if rec.Code == http.StatusForbidden {
+		t.Fatalf("admin POST /targets = %d %s, want it to reach the handler (not 403)", rec.Code, rec.Body)
+	}
+}
+
 func TestNoAuthDepsMeansOpen(t *testing.T) {
 	h := newAPI(t)
 	if rec := do(t, h, http.MethodGet, "/api/v1/me", nil); rec.Code != http.StatusOK ||

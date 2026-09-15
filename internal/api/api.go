@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/oidcauth"
 	"github.com/metril/speedtest-tracker/internal/settings"
@@ -191,6 +192,7 @@ func New(deps Deps) http.Handler {
 	r.Route("/api/v1", func(v1 chi.Router) {
 		v1.Use(middleware.Timeout(requestTimeout))
 		v1.Use(authMW)
+		v1.Use(writeGuard)
 		// /me must work even on a store-less router (e.g. the `run
 		// --engine` CLI path), since the SPA always calls it first to
 		// decide what to render.
@@ -285,6 +287,31 @@ func New(deps Deps) http.Handler {
 		r.NotFound(deps.UI.ServeHTTP)
 	}
 	return r
+}
+
+// writeGuard rejects a mutating request (any method but GET/HEAD/OPTIONS)
+// from a non-admin identity with 403. Previously only the auth settings,
+// tokens and iperf3 endpoints checked IsAdmin individually; this closes the
+// gap for every other /api/v1 route (targets, schedules, runs, ...), where
+// a forward_auth viewer identity (outside the configured admin group)
+// could otherwise still mutate data. A zero-value identity (Mode == "",
+// meaning no auth middleware is mounted) is treated as admin, matching
+// requestIsAdmin's open-access convention, so this is a no-op for the
+// existing handler tests and the `run --engine` CLI path.
+func writeGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet, http.MethodHead, http.MethodOptions:
+			next.ServeHTTP(w, r)
+			return
+		}
+		id := auth.FromContext(r.Context())
+		if id.Mode != "" && !id.IsAdmin {
+			errForbidden(w, "admin group required")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func setRequestIDHeader(next http.Handler) http.Handler {
