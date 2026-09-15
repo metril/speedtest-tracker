@@ -2,12 +2,17 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useState } from 'react';
 import { describe, expect, it } from 'vitest';
+import { SettingsFormProvider } from '@/components/settings';
 import type { ExportAuth } from '../../lib/api';
 import { ExportAuthFields } from './ExportAuthFields';
 
 function Harness({ initial }: { initial: ExportAuth }) {
   const [value, setValue] = useState(initial);
-  return <ExportAuthFields idPrefix="vm" label="VictoriaMetrics auth" value={value} onChange={setValue} />;
+  return (
+    <SettingsFormProvider>
+      <ExportAuthFields idPrefix="vm" label="VictoriaMetrics auth" value={value} onChange={setValue} />
+    </SettingsFormProvider>
+  );
 }
 
 describe('ExportAuthFields', () => {
@@ -47,13 +52,28 @@ describe('ExportAuthFields', () => {
 
   it('disables the type select and every field when readOnly', () => {
     render(
-      <ExportAuthFields
-        idPrefix="vm" label="VictoriaMetrics auth" readOnly
-        value={{ type: 'basic', username: 'u' }} onChange={() => {}}
-      />,
+      <SettingsFormProvider>
+        <ExportAuthFields
+          idPrefix="vm" label="VictoriaMetrics auth" readOnly
+          value={{ type: 'basic', username: 'u' }} onChange={() => {}}
+        />
+      </SettingsFormProvider>,
     );
     expect(screen.getByLabelText('VictoriaMetrics auth')).toBeDisabled();
     expect(screen.getByLabelText('VictoriaMetrics auth username')).toBeDisabled();
     expect(screen.getByLabelText('VictoriaMetrics auth password')).toBeDisabled();
+  });
+
+  it('shows a locked badge and disables the field when locked', () => {
+    render(
+      <SettingsFormProvider>
+        <ExportAuthFields
+          idPrefix="vm" label="VictoriaMetrics auth"
+          locked={(key) => key === 'vm_auth_type'}
+          value={{ type: 'none' }} onChange={() => {}}
+        />
+      </SettingsFormProvider>,
+    );
+    expect(screen.getByLabelText(/^VictoriaMetrics auth/)).toBeDisabled();
   });
 });

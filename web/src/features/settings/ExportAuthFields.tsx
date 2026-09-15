@@ -1,8 +1,6 @@
-import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import { SettingsFormProvider, SettingsRow, useSettingsRowField } from '@/components/settings';
 import type { ExportAuth } from '../../lib/api';
-import { LockedBadge } from './LockedBadge';
 import { inputClass } from './styles';
 
 interface Props {
@@ -19,84 +17,86 @@ interface Props {
   readOnly?: boolean;
 }
 
+const AUTH_KEYS = ['auth_type', 'auth_username', 'auth_password', 'auth_token', 'auth_header_name', 'auth_header_value'] as const;
+
+function AuthTypeField({ value, onChange }: { value: ExportAuth['type']; onChange: (v: ExportAuth['type']) => void }) {
+  const props = useSettingsRowField();
+  return (
+    <select
+      {...props} className={inputClass} value={value}
+      onChange={(e) => onChange(e.target.value as ExportAuth['type'])}
+    >
+      <option value="none">None</option>
+      <option value="basic">Basic</option>
+      <option value="bearer">Bearer</option>
+      <option value="custom">Custom header</option>
+    </select>
+  );
+}
+
+function TextField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const props = useSettingsRowField();
+  return <Input {...props} value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
+function SecretField({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const props = useSettingsRowField();
+  return <Input {...props} type="password" placeholder="leave unchanged" value={value} onChange={(e) => onChange(e.target.value)} />;
+}
+
 /** ExportAuthFields is the auth block shared by the VictoriaMetrics and
  * VictoriaLogs integrations: a type select (None/Basic/Bearer/Custom
  * header) that swaps in only the fields that type uses. Secrets
  * (password, token, header value) are never echoed back by the server,
  * so they use the same "leave unchanged" placeholder convention as every
- * other masked secret field. */
+ * other masked secret field.
+ *
+ * Renders a flat list of SettingsRows (a Fragment, not a wrapping div)
+ * so it drops straight into a SettingsCard's divide-y body alongside the
+ * caller's other rows. It carries its own SettingsFormProvider, fed by
+ * its `locked`/`readOnly` props translated into real settings keys
+ * (`integrations.vm_auth_type`, ...), so its rows disable correctly
+ * independent of whatever ambient form context the caller sits in. */
 export function ExportAuthFields({ idPrefix, label, value, onChange, locked, readOnly }: Props) {
-  const isLocked = (key: string) => locked?.(`${idPrefix}_${key}`) ?? false;
-  const isDisabled = (key: string) => isLocked(key) || (readOnly ?? false);
-  const typeId = `${idPrefix}-auth-type`;
+  const lockedKeys = AUTH_KEYS
+    .filter((key) => locked?.(`${idPrefix}_${key}`) ?? false)
+    .map((key) => `integrations.${idPrefix}_${key}`);
+  const keyFor = (key: string) => `integrations.${idPrefix}_${key}`;
+  const idFor = (key: string) => `${idPrefix}-${key.replace(/_/g, '-')}`;
 
   return (
-    <div className="grid gap-2">
-      <div className="flex items-center gap-2">
-        <Label htmlFor={typeId}>{label}</Label>
-        {isLocked('auth_type') && <LockedBadge />}
-      </div>
-      <select
-        id={typeId} className={inputClass} value={value.type}
-        disabled={isDisabled('auth_type')}
-        onChange={(e) => onChange({ ...value, type: e.target.value as ExportAuth['type'] })}
-      >
-        <option value="none">None</option>
-        <option value="basic">Basic</option>
-        <option value="bearer">Bearer</option>
-        <option value="custom">Custom header</option>
-      </select>
+    <SettingsFormProvider readOnly={readOnly ?? false} locked={lockedKeys}>
+      <SettingsRow label={label} htmlFor={idFor('auth_type')} lockKey={keyFor('auth_type')} size="sm">
+        <AuthTypeField value={value.type} onChange={(type) => onChange({ ...value, type })} />
+      </SettingsRow>
 
       {value.type === 'basic' && (
         <>
-          <FormField id={`${idPrefix}-auth-username`} label={`${label} username`}>
-            <Input
-              id={`${idPrefix}-auth-username`} value={value.username ?? ''}
-              disabled={isDisabled('auth_username')}
-              onChange={(e) => onChange({ ...value, username: e.target.value })}
-            />
-          </FormField>
-          <FormField id={`${idPrefix}-auth-password`} label={`${label} password`}>
-            <Input
-              id={`${idPrefix}-auth-password`} type="password" placeholder="leave unchanged"
-              value={value.password ?? ''}
-              disabled={isDisabled('auth_password')}
-              onChange={(e) => onChange({ ...value, password: e.target.value })}
-            />
-          </FormField>
+          <SettingsRow label={`${label} username`} htmlFor={idFor('auth_username')} lockKey={keyFor('auth_username')}>
+            <TextField value={value.username ?? ''} onChange={(v) => onChange({ ...value, username: v })} />
+          </SettingsRow>
+          <SettingsRow label={`${label} password`} htmlFor={idFor('auth_password')} lockKey={keyFor('auth_password')}>
+            <SecretField value={value.password ?? ''} onChange={(v) => onChange({ ...value, password: v })} />
+          </SettingsRow>
         </>
       )}
 
       {value.type === 'bearer' && (
-        <FormField id={`${idPrefix}-auth-token`} label={`${label} token`}>
-          <Input
-            id={`${idPrefix}-auth-token`} type="password" placeholder="leave unchanged"
-            value={value.token ?? ''}
-            disabled={isDisabled('auth_token')}
-            onChange={(e) => onChange({ ...value, token: e.target.value })}
-          />
-        </FormField>
+        <SettingsRow label={`${label} token`} htmlFor={idFor('auth_token')} lockKey={keyFor('auth_token')}>
+          <SecretField value={value.token ?? ''} onChange={(v) => onChange({ ...value, token: v })} />
+        </SettingsRow>
       )}
 
       {value.type === 'custom' && (
         <>
-          <FormField id={`${idPrefix}-auth-header-name`} label={`${label} header name`}>
-            <Input
-              id={`${idPrefix}-auth-header-name`} value={value.header_name ?? ''}
-              disabled={isDisabled('auth_header_name')}
-              onChange={(e) => onChange({ ...value, header_name: e.target.value })}
-            />
-          </FormField>
-          <FormField id={`${idPrefix}-auth-header-value`} label={`${label} header value`}>
-            <Input
-              id={`${idPrefix}-auth-header-value`} type="password" placeholder="leave unchanged"
-              value={value.header_value ?? ''}
-              disabled={isDisabled('auth_header_value')}
-              onChange={(e) => onChange({ ...value, header_value: e.target.value })}
-            />
-          </FormField>
+          <SettingsRow label={`${label} header name`} htmlFor={idFor('auth_header_name')} lockKey={keyFor('auth_header_name')}>
+            <TextField value={value.header_name ?? ''} onChange={(v) => onChange({ ...value, header_name: v })} />
+          </SettingsRow>
+          <SettingsRow label={`${label} header value`} htmlFor={idFor('auth_header_value')} lockKey={keyFor('auth_header_value')}>
+            <SecretField value={value.header_value ?? ''} onChange={(v) => onChange({ ...value, header_value: v })} />
+          </SettingsRow>
         </>
       )}
-    </div>
+    </SettingsFormProvider>
   );
 }
