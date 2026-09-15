@@ -34,12 +34,14 @@ afterEach(() => {
 });
 
 function Probe() {
-  const { live, expanded, open, close } = useLivePanel();
+  const { live, expanded, hidden, open, close } = useLivePanel();
   return (
     <div>
       <span data-testid="expanded">{String(expanded)}</span>
+      <span data-testid="hidden">{String(hidden)}</span>
       <span data-testid="status">{live?.status ?? 'none'}</span>
-      <button onClick={open}>open</button>
+      <button onClick={() => open()}>open</button>
+      <button onClick={() => open(1)}>open-manual</button>
       <button onClick={close}>close</button>
     </div>
   );
@@ -84,6 +86,34 @@ describe('LiveRunProvider', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('hides a manually-started run after close, but keeps it visible until then', () => {
+    wrap();
+    act(() => { fireEvent.click(screen.getByText('open-manual')); });
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    expect(screen.getByTestId('hidden').textContent).toBe('false');
+
+    act(() => { fireEvent.click(screen.getByText('close')); });
+    expect(screen.getByTestId('hidden').textContent).toBe('true');
+  });
+
+  it('does not hide a run the user never opened themselves (e.g. a scheduled run)', () => {
+    wrap();
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    act(() => { fireEvent.click(screen.getByText('close')); });
+    expect(screen.getByTestId('hidden').textContent).toBe('false');
+  });
+
+  it('un-hides once a later run starts (a scheduled run after a hidden manual one)', () => {
+    wrap();
+    act(() => { fireEvent.click(screen.getByText('open-manual')); });
+    act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
+    act(() => { fireEvent.click(screen.getByText('close')); });
+    expect(screen.getByTestId('hidden').textContent).toBe('true');
+
+    act(() => emit('run', { run_id: 2, status: 'running', targets_total: 1, targets_done: 0 }));
+    expect(screen.getByTestId('hidden').textContent).toBe('false');
   });
 
   it('invalidates summary, history and outages on a result event', () => {

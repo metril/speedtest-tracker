@@ -328,7 +328,7 @@ export function Dashboard() {
   );
 
   const handleRun = (id: number) => {
-    run.mutate(id, { onSuccess: () => open() });
+    run.mutate(id, { onSuccess: (res) => open(res.run_id) });
   };
 
   return (

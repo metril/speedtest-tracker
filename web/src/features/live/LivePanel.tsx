@@ -40,7 +40,7 @@ function Stepper({ total, done }: { total: number; done: number }) {
 /** LivePanel is the live run view: an expanded slide-over for runs the user
  * started, a compact bar for everything else (scheduled runs). */
 export function LivePanel() {
-  const { live, expanded, open, close } = useLivePanel();
+  const { live, expanded, hidden, open, close } = useLivePanel();
   const cancel = useCancelRun();
   const [visible, setVisible] = useState(false);
 
@@ -55,7 +55,7 @@ export function LivePanel() {
     return () => clearTimeout(timer);
   }, [live, expanded]);
 
-  if (!live || !visible) return null;
+  if (!live || !visible || hidden) return null;
   return expanded
     ? <ExpandedPanel live={live} onClose={close} onCancel={() => cancel.mutate(live.runId)} canceling={cancel.isPending} />
     : <CompactBar live={live} onExpand={open} />;

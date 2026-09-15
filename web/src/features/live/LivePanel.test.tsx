@@ -17,12 +17,14 @@ function live(overrides: Partial<LiveRun> = {}): LiveRun {
   };
 }
 
-function renderPanel(value: Parameters<typeof LivePanelContext.Provider>[0]['value']) {
+function renderPanel(
+  value: Omit<Parameters<typeof LivePanelContext.Provider>[0]['value'], 'hidden'> & { hidden?: boolean },
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <MemoryRouter>
       <QueryClientProvider client={qc}>
-        <LivePanelContext.Provider value={value}>
+        <LivePanelContext.Provider value={{ hidden: false, ...value }}>
           <LivePanel />
         </LivePanelContext.Provider>
       </QueryClientProvider>
@@ -48,6 +50,13 @@ describe('LivePanel', () => {
     renderPanel({ live: live(), expanded: false, open: vi.fn(), close: vi.fn() });
     expect(screen.queryByRole('dialog')).toBeNull();
     expect(screen.getByRole('button', { name: /expand live test/i })).toBeInTheDocument();
+  });
+
+  it('renders nothing for a run the user dismissed, even though it is still live', () => {
+    const { container } = renderPanel({
+      live: live(), expanded: false, hidden: true, open: vi.fn(), close: vi.fn(),
+    });
+    expect(container).toBeEmptyDOMElement();
   });
 
   it('scopes the live region to the phase text, not the throughput readout', () => {

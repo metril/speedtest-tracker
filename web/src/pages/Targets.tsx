@@ -94,7 +94,6 @@ export function Targets() {
   const run = useRunTarget();
   const { open } = useLivePanel();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
-  const [notice, setNotice] = useState('');
   const [confirmDelete, setConfirmDelete] = useState<Target | null>(null);
   // Reverse map: target id -> names of schedules that include it, built
   // from the schedules' own target_ids rather than a per-target fetch.
@@ -132,8 +131,6 @@ export function Targets() {
           <Button type="button" onClick={() => setEditing({ mode: 'new' })}>New target</Button>
         )}
       </header>
-
-      {notice && <p className="text-sm text-accent">{notice}</p>}
 
       {editing.mode !== 'none' && (
         <TargetForm
@@ -192,7 +189,7 @@ export function Targets() {
                         disabled={runningTargetID === t.id}
                         onClick={() =>
                           run.mutate(t.id, {
-                            onSuccess: (res) => { setNotice(`Queued run #${res.run_id} for ${t.name}`); open(); },
+                            onSuccess: (res) => open(res.run_id),
                           })
                         }
                       >

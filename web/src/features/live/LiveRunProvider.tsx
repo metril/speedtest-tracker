@@ -7,12 +7,20 @@ import { HIDE_DELAY_MS } from './constants';
 export interface LivePanelValue {
   live: LiveRun | null;
   expanded: boolean;
-  open: () => void;
+  /** hidden is true once the user has closed a run they started themselves
+   * (via `open(runId)`); LivePanel renders nothing for that run at all,
+   * rather than collapsing it into the compact bar. */
+  hidden: boolean;
+  /** Pass the run's id when opening for a run the caller just started (a
+   * "Run now" click) so `close()` can dismiss it entirely. Call with no
+   * argument to merely expand an already-visible run (e.g. the compact
+   * bar's "Expand live test" button) without marking it as user-started. */
+  open: (runId?: number) => void;
   close: () => void;
 }
 
 export const LivePanelContext = createContext<LivePanelValue>({
-  live: null, expanded: false, open: () => {}, close: () => {},
+  live: null, expanded: false, hidden: false, open: () => {}, close: () => {},
 });
 
 /** useLivePanel gives pages the live run and the slide-over controls, so a
@@ -30,6 +38,12 @@ export function useLivePanel(): LivePanelValue {
 export function LiveRunProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient();
   const [expanded, setExpanded] = useState(false);
+  // The run id the user themselves started (via open(runId)), and the run
+  // id they subsequently closed — tracked separately from `expanded` so a
+  // dismissed manual run can disappear entirely instead of collapsing into
+  // the compact bar the way a scheduled run does.
+  const [startedRunId, setStartedRunId] = useState<number | null>(null);
+  const [hiddenRunId, setHiddenRunId] = useState<number | null>(null);
 
   const onEvent = useCallback((event: LiveRunEvent) => {
     if (event.type === 'result') {
@@ -63,12 +77,39 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
     return () => clearTimeout(timer);
   }, [live?.finished, live?.runId]);
 
+  // Once a new run id appears, any prior started/hidden bookkeeping no
+  // longer applies to it unless open(runId) already claimed this very run
+  // (it runs synchronously in the mutation's onSuccess, ahead of the SSE
+  // event that updates live.runId).
+  useEffect(() => {
+    const id = live?.runId;
+    if (id === undefined) return;
+    setStartedRunId((prev) => (prev === id ? prev : null));
+    setHiddenRunId((prev) => (prev === id ? prev : null));
+  }, [live?.runId]);
+
+  const open = useCallback((runId?: number) => {
+    if (runId !== undefined) setStartedRunId(runId);
+    setExpanded(true);
+  }, []);
+
+  const close = useCallback(() => {
+    setExpanded(false);
+    setHiddenRunId((prev) => {
+      if (live && live.runId === startedRunId) return live.runId;
+      return prev;
+    });
+  }, [live, startedRunId]);
+
+  const hidden = live !== null && live.runId === hiddenRunId;
+
   const value = useMemo<LivePanelValue>(() => ({
     live,
     expanded,
-    open: () => setExpanded(true),
-    close: () => setExpanded(false),
-  }), [live, expanded]);
+    hidden,
+    open,
+    close,
+  }), [live, expanded, hidden, open, close]);
 
   return <LivePanelContext.Provider value={value}>{children}</LivePanelContext.Provider>;
 }

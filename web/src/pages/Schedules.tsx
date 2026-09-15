@@ -146,7 +146,7 @@ export function Schedules() {
                         <Button
                           type="button" variant="outline" size="sm"
                           disabled={run.isPending && run.variables === s.id}
-                          onClick={() => run.mutate(s.id, { onSuccess: () => open() })}>
+                          onClick={() => run.mutate(s.id, { onSuccess: (res) => open(res.run_id) })}>
                           Run now
                         </Button>
                         <Button type="button" variant="outline" size="sm"

@@ -253,6 +253,7 @@ describe('Targets page per-row run pending state', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Running…' })).not.toBeInTheDocument();
     });
+    expect(screen.queryByText(/Queued run/)).not.toBeInTheDocument();
   });
 });
 
