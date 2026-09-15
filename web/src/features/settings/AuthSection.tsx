@@ -85,26 +85,30 @@ export function AuthSection({ value, locked, onChange, readOnly }: Props) {
         <p className="text-sm text-faint">{MODE_HELP[value.mode]}</p>
       </div>
 
-      <div className="grid gap-1">
-        <FieldLabel htmlFor="auth-user-header" text="User header" lockKey="auth.user_header" locked={locked} />
-        <Input id="auth-user-header" value={value.user_header}
-          disabled={isLocked('auth.user_header')}
-          onChange={(e) => onChange({ ...value, user_header: e.target.value })} />
-      </div>
+      {value.mode === 'forward_auth' && (
+        <>
+          <div className="grid gap-1">
+            <FieldLabel htmlFor="auth-user-header" text="User header" lockKey="auth.user_header" locked={locked} />
+            <Input id="auth-user-header" value={value.user_header}
+              disabled={isLocked('auth.user_header')}
+              onChange={(e) => onChange({ ...value, user_header: e.target.value })} />
+          </div>
 
-      <div className="grid gap-1">
-        <FieldLabel htmlFor="auth-groups-header" text="Groups header" lockKey="auth.groups_header" locked={locked} />
-        <Input id="auth-groups-header" value={value.groups_header}
-          disabled={isLocked('auth.groups_header')}
-          onChange={(e) => onChange({ ...value, groups_header: e.target.value })} />
-      </div>
+          <div className="grid gap-1">
+            <FieldLabel htmlFor="auth-groups-header" text="Groups header" lockKey="auth.groups_header" locked={locked} />
+            <Input id="auth-groups-header" value={value.groups_header}
+              disabled={isLocked('auth.groups_header')}
+              onChange={(e) => onChange({ ...value, groups_header: e.target.value })} />
+          </div>
 
-      <div className="grid gap-1">
-        <FieldLabel htmlFor="auth-groups-separator" text="Groups separator" lockKey="auth.groups_separator" locked={locked} />
-        <Input id="auth-groups-separator" value={value.groups_separator}
-          disabled={isLocked('auth.groups_separator')}
-          onChange={(e) => onChange({ ...value, groups_separator: e.target.value })} />
-      </div>
+          <div className="grid gap-1">
+            <FieldLabel htmlFor="auth-groups-separator" text="Groups separator" lockKey="auth.groups_separator" locked={locked} />
+            <Input id="auth-groups-separator" value={value.groups_separator}
+              disabled={isLocked('auth.groups_separator')}
+              onChange={(e) => onChange({ ...value, groups_separator: e.target.value })} />
+          </div>
+        </>
+      )}
 
       <div className="grid gap-1">
         <FieldLabel htmlFor="auth-admin-group" text="Admin group" lockKey="auth.admin_group" locked={locked} />
@@ -113,16 +117,18 @@ export function AuthSection({ value, locked, onChange, readOnly }: Props) {
           onChange={(e) => onChange({ ...value, admin_group: e.target.value })} />
       </div>
 
-      <div className="grid gap-1">
-        <FieldLabel htmlFor="auth-trusted-proxies" text="Trusted proxy CIDRs" lockKey="auth.trusted_proxies" locked={locked} />
-        <textarea id="auth-trusted-proxies" className={inputClass} rows={3}
-          disabled={isLocked('auth.trusted_proxies')}
-          value={value.trusted_proxies.join('\n')}
-          onChange={(e) => onChange({ ...value, trusted_proxies: e.target.value.split('\n') })} />
-        <p className="text-sm text-faint">
-          Required. Identity headers are ignored unless the connecting peer is inside one of these ranges.
-        </p>
-      </div>
+      {value.mode === 'forward_auth' && (
+        <div className="grid gap-1">
+          <FieldLabel htmlFor="auth-trusted-proxies" text="Trusted proxy CIDRs" lockKey="auth.trusted_proxies" locked={locked} />
+          <textarea id="auth-trusted-proxies" className={inputClass} rows={3}
+            disabled={isLocked('auth.trusted_proxies')}
+            value={value.trusted_proxies.join('\n')}
+            onChange={(e) => onChange({ ...value, trusted_proxies: e.target.value.split('\n') })} />
+          <p className="text-sm text-faint">
+            Required. Identity headers are ignored unless the connecting peer is inside one of these ranges.
+          </p>
+        </div>
+      )}
 
       {value.mode === 'oidc' && (
         <OidcFields value={value} locked={locked} onChange={onChange} readOnly={readOnly} />
