@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.7.1](https://github.com/metril/speedtest-tracker/compare/v0.7.0...v0.7.1) (2026-09-15)
+
+
+### Features
+
+* **web:** view run errors in a dialog ([5b33f95](https://github.com/metril/speedtest-tracker/commit/5b33f95940c594298a1d7b02fe2f071e5b025a83))
+
+
+### Bug Fixes
+
+* **web:** settings tab a11y/history, error dialog copy, stale queue id ([e4a0636](https://github.com/metril/speedtest-tracker/commit/e4a063638e9187d2716d166e043d93b86baf29d2))
+
 ## [0.7.0](https://github.com/metril/speedtest-tracker/compare/v0.6.0...v0.7.0) (2026-09-15)
 
 
