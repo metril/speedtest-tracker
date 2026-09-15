@@ -546,9 +546,19 @@ export interface Me {
   user: string;
   groups: string[];
   is_admin: boolean;
+  source?: string;
+  email?: string;
+  name?: string;
 }
 
 export const getMe = () => request<Me>('/me');
+
+/** logout ends the current session. Unlike every other call here it hits
+ * /auth/logout, not an /api/v1 path, so it bypasses request()/BASE and
+ * calls fetch directly; the server answers 204 either way. */
+export const logout = async () => {
+  await fetch('/auth/logout', { method: 'POST' });
+};
 
 /** ApiTokenInfo never carries the token itself -- only CreatedToken does,
  * and only in the response to the request that created it. */

@@ -1,18 +1,45 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter } from 'react-router';
-import { describe, expect, it } from 'vitest';
+import { MemoryRouter, Route, Routes } from 'react-router';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { Me } from '../lib/api';
 import { ThemeProvider } from '../lib/theme';
 import { Layout } from './Layout';
 
-function renderLayout(path = '/') {
-  const client = new QueryClient();
+function jsonResponse(body: unknown, status = 200): Response {
+  return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
+}
+
+const OPEN_ME: Me = { mode: 'open', user: '', groups: [], is_admin: true };
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith('/api/v1/me')) return jsonResponse(OPEN_ME);
+    throw new Error(`unexpected fetch: ${url}`);
+  }));
+});
+afterEach(() => vi.unstubAllGlobals());
+
+function renderLayout(path = '/', me: Me = OPEN_ME) {
+  if (me !== OPEN_ME) {
+    vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/v1/me')) return jsonResponse(me);
+      if (url.startsWith('/auth/logout')) return jsonResponse(undefined, 204);
+      throw new Error(`unexpected fetch: ${url}`);
+    }));
+  }
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <ThemeProvider>
       <QueryClientProvider client={client}>
         <MemoryRouter initialEntries={[path]}>
-          <Layout />
+          <Routes>
+            <Route path="/login" element={<div>Login page marker</div>} />
+            <Route path="/*" element={<Layout />} />
+          </Routes>
         </MemoryRouter>
       </QueryClientProvider>
     </ThemeProvider>,
@@ -53,5 +80,24 @@ describe('Layout', () => {
     // header's radiogroup is unaffected.
     expect(screen.getAllByRole('radiogroup', { name: /theme/i })).toHaveLength(1);
     expect(screen.getByRole('button', { name: /^Theme: /i })).toBeInTheDocument();
+  });
+
+  it('shows no user chip or sign out button outside oidc mode', async () => {
+    renderLayout();
+    await screen.findByRole('link', { name: 'Dashboard' });
+    expect(screen.queryByRole('button', { name: 'Sign out' })).not.toBeInTheDocument();
+  });
+
+  it('shows the signed-in user and a sign out button under oidc mode', async () => {
+    renderLayout('/', { mode: 'oidc', user: 'alice', groups: [], is_admin: true, name: 'Alice' });
+    expect(await screen.findAllByText('Alice')).not.toHaveLength(0);
+    expect(screen.getAllByRole('button', { name: 'Sign out' }).length).toBeGreaterThan(0);
+  });
+
+  it('signs out, clears the query cache and navigates to /login', async () => {
+    renderLayout('/', { mode: 'oidc', user: 'alice', groups: [], is_admin: true, email: 'alice@example.com' });
+    const [signOut] = await screen.findAllByRole('button', { name: 'Sign out' });
+    await userEvent.click(signOut);
+    expect(await screen.findByText('Login page marker')).toBeInTheDocument();
   });
 });

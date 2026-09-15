@@ -1,12 +1,14 @@
 import {
-  CalendarClock, ChevronsLeft, ChevronsRight, Gauge, ListChecks, Menu, Settings as SettingsIcon, Target,
+  CalendarClock, ChevronsLeft, ChevronsRight, Gauge, ListChecks, LogOut, Menu, Settings as SettingsIcon, Target,
 } from 'lucide-react';
 import { useState, type ComponentType } from 'react';
-import { NavLink, Outlet } from 'react-router';
+import { useQueryClient } from '@tanstack/react-query';
+import { NavLink, Outlet, useNavigate } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { LivePanel } from '../features/live/LivePanel';
 import { LiveRunProvider } from '../features/live/LiveRunProvider';
+import { useLogout, useMe } from '../lib/queries';
 import { OpenModeBanner } from './OpenModeBanner';
 import { ThemeToggle } from './ThemeToggle';
 
@@ -42,6 +44,47 @@ function NavLinks({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
   );
 }
 
+/** UserChip shows who is signed in and a Sign out action, only under oidc
+ * mode (open/forward_auth/token have no session to end). Collapses to an
+ * icon-only Sign out button, same treatment as ThemeToggle. */
+function UserChip({ collapsed }: { collapsed?: boolean }) {
+  const me = useMe();
+  const logout = useLogout();
+  const qc = useQueryClient();
+  const navigate = useNavigate();
+
+  if (me.data?.mode !== 'oidc') return null;
+  const label = me.data.name || me.data.email || me.data.user;
+
+  const signOut = () => {
+    logout.mutate(undefined, {
+      onSuccess: () => {
+        qc.clear();
+        navigate('/login');
+      },
+    });
+  };
+
+  return (
+    <div className={`flex items-center gap-2 ${collapsed ? 'flex-col' : ''}`}>
+      {!collapsed && label && (
+        <span className="truncate text-sm text-muted" title={label}>{label}</span>
+      )}
+      <Button
+        type="button"
+        variant="ghost"
+        size={collapsed ? 'icon' : 'sm'}
+        aria-label="Sign out"
+        disabled={logout.isPending}
+        onClick={signOut}
+      >
+        <LogOut className="h-4 w-4" />
+        {!collapsed && 'Sign out'}
+      </Button>
+    </div>
+  );
+}
+
 /** Layout is the app shell: a collapsible icon+label sidebar on md and up,
  * a top bar with a Sheet-based nav drawer below that, both wrapping the
  * routed page content. OpenModeBanner, LivePanel and ThemeToggle stay
@@ -69,6 +112,7 @@ export function Layout() {
               <NavLinks collapsed={collapsed} />
             </div>
             <div className={`flex items-center gap-2 border-t border-line p-2 ${collapsed ? 'flex-col' : 'justify-between'}`}>
+              <UserChip collapsed={collapsed} />
               <ThemeToggle collapsed={collapsed} />
               <Button
                 type="button"
@@ -102,7 +146,10 @@ export function Layout() {
                 </SheetContent>
               </Sheet>
               <span className="font-semibold tracking-tight">speedtest-tracker</span>
-              <div className="ml-auto"><ThemeToggle /></div>
+              <div className="ml-auto flex items-center gap-2">
+                <UserChip collapsed />
+                <ThemeToggle />
+              </div>
             </header>
 
             <LivePanel />

@@ -14,7 +14,7 @@ function toRaw(v: number | undefined): string {
 }
 
 export function GeneralSection() {
-  const { general, setGeneral, saving, error, saved, save } = useSettingsSection('general');
+  const { general, setGeneral, saving, error, saved, save, readOnly } = useSettingsSection('general');
 
   // Local raw-string mirror of the two SLA fields, same pattern as
   // ThresholdFields: `general.sla_*_mbps` alone can't represent "the user
@@ -40,7 +40,7 @@ export function GeneralSection() {
   return (
     <Section
       id="general-heading" title="General" saving={saving}
-      error={error} saved={saved}
+      error={error} saved={saved} readOnly={readOnly}
       onSave={() => save('general', { general })}
     >
       <FormField id="general-base-url" label="Base URL">

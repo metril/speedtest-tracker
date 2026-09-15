@@ -12,6 +12,7 @@ interface Props {
   value: AuthSettings;
   locked: string[];
   onChange: (next: AuthSettings) => void;
+  readOnly?: boolean;
 }
 
 const MODE_HELP: Record<AuthMode, string> = {
@@ -67,7 +68,7 @@ function FieldLabel({
 /** AuthSection edits AuthSettings. Every control is disabled when its key
  * is present in `locked` (set by an ST_ environment variable while
  * ST_LOCK_ENV is on), with a LockedBadge next to its label explaining why. */
-export function AuthSection({ value, locked, onChange }: Props) {
+export function AuthSection({ value, locked, onChange, readOnly }: Props) {
   const isLocked = (key: string) => locked.includes(key);
 
   return (
@@ -123,7 +124,9 @@ export function AuthSection({ value, locked, onChange }: Props) {
         </p>
       </div>
 
-      {value.mode === 'oidc' && <OidcFields value={value} locked={locked} onChange={onChange} />}
+      {value.mode === 'oidc' && (
+        <OidcFields value={value} locked={locked} onChange={onChange} readOnly={readOnly} />
+      )}
 
       {(value.mode === 'forward_auth' || value.mode === 'oidc') && (
         <div className="flex items-center gap-2">
@@ -145,7 +148,7 @@ export function AuthSection({ value, locked, onChange }: Props) {
 /** OidcFields is the mode==='oidc' fieldset: provider config plus a
  * "Test OIDC discovery" action that hits the server's discovery-test
  * endpoint with the values currently in the form (not the saved ones). */
-function OidcFields({ value, locked, onChange }: Props) {
+function OidcFields({ value, locked, onChange, readOnly }: Props) {
   const isLocked = (key: string) => locked.includes(key);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
@@ -195,9 +198,10 @@ function OidcFields({ value, locked, onChange }: Props) {
       </div>
 
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={testing} onClick={runTest}>
+        <Button type="button" variant="outline" disabled={testing || readOnly} onClick={runTest}>
           Test OIDC discovery
         </Button>
+        {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
         {result && (
           <p className={result.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{result.message}</p>
         )}

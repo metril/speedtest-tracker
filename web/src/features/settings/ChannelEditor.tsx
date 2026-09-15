@@ -17,6 +17,7 @@ interface Props {
   /** True when this channel has unsaved edits (or is not yet saved), so
    * testing it would test stale/nonexistent server state. */
   unsaved?: boolean;
+  readOnly?: boolean;
 }
 
 /** ChannelEditor edits one notification channel. Changing Type keeps all
@@ -27,7 +28,7 @@ interface Props {
  * option, so it would be inert; the field still exists on the model
  * because ntfy-channel migration reads it from legacy stored data. */
 export function ChannelEditor({
-  value, onChange, onRemove, onTest, testResult, testPending, unsaved,
+  value, onChange, onRemove, onTest, testResult, testPending, unsaved, readOnly,
 }: Props) {
   const { id } = value;
 
@@ -88,14 +89,16 @@ export function ChannelEditor({
       )}
 
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={testPending || unsaved}
+        <Button type="button" variant="outline" disabled={testPending || unsaved || readOnly}
           title={unsaved ? 'Save first to test this channel' : undefined} onClick={onTest}>
           Test {value.name}
         </Button>
-        <Button type="button" variant="ghost" className="text-muted hover:text-bad" onClick={onRemove}>
+        <Button type="button" variant="ghost" className="text-muted hover:text-bad"
+          disabled={readOnly} onClick={onRemove}>
           Remove {value.name}
         </Button>
         {unsaved && <p className="text-sm text-faint">Save first to test this channel</p>}
+        {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
         {testResult && (
           <p className={testResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{testResult.message}</p>
         )}

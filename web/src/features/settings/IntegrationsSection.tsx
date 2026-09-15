@@ -8,13 +8,13 @@ import { useSettingsSection } from './useSettingsSection';
 
 export function IntegrationsSection() {
   const {
-    integrations, setIntegrations, saving, error, saved, save, testPending, vmResult, vlResult, runTest,
+    integrations, setIntegrations, saving, error, saved, save, testPending, vmResult, vlResult, runTest, readOnly,
   } = useSettingsSection('integrations');
 
   return (
     <Section
       id="integrations-heading" title="Integrations" saving={saving}
-      error={error} saved={saved}
+      error={error} saved={saved} readOnly={readOnly}
       onSave={() => save('integrations', { integrations })}
     >
       <SwitchField
@@ -37,10 +37,11 @@ export function IntegrationsSection() {
         onChange={(v) => setIntegrations({ ...integrations, vm_extra_labels: v })}
       />
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={testPending}
+        <Button type="button" variant="outline" disabled={testPending || readOnly}
           onClick={() => runTest('vm', integrations.vm_url, integrations.vm_auth_header)}>
           Test VictoriaMetrics
         </Button>
+        {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
         {vmResult && (
           <p className={vmResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vmResult.message}</p>
         )}
@@ -66,10 +67,11 @@ export function IntegrationsSection() {
         onChange={(v) => setIntegrations({ ...integrations, vl_stream_fields: v })}
       />
       <div className="flex items-center gap-3">
-        <Button type="button" variant="outline" disabled={testPending}
+        <Button type="button" variant="outline" disabled={testPending || readOnly}
           onClick={() => runTest('vl', integrations.vl_url, integrations.vl_auth_header)}>
           Test VictoriaLogs
         </Button>
+        {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
         {vlResult && (
           <p className={vlResult.ok ? 'text-sm text-ok' : 'text-sm text-bad'}>{vlResult.message}</p>
         )}

@@ -343,6 +343,10 @@ export function useMe() {
   });
 }
 
+export function useLogout() {
+  return useMutation({ mutationFn: api.logout });
+}
+
 export function useTokens() {
   return useQuery({ queryKey: queryKeys.tokens, queryFn: api.listTokens });
 }

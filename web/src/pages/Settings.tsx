@@ -11,7 +11,7 @@ import type {
 import { ApiError } from '../lib/api';
 import { newId } from '../lib/id';
 import {
-  useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
+  useMe, useSettings, useTestIntegration, useTestNotifyChannel, useUpdateSettings,
 } from '../lib/queries';
 
 const TABS: { key: SectionKey; to: string; label: string }[] = [
@@ -54,6 +54,7 @@ export function Settings() {
   const location = useLocation();
   const navigate = useNavigate();
   const settings = useSettings();
+  const me = useMe();
   const update = useUpdateSettings();
   const test = useTestIntegration();
   const testChannel = useTestNotifyChannel();
@@ -180,6 +181,7 @@ export function Settings() {
 
   const context: SettingsOutletContext = {
     locked: settings.data?.locked ?? [],
+    readOnly: me.data ? !me.data.is_admin : false,
     saving: update.isPending,
     errors,
     saved,

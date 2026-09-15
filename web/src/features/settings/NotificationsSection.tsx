@@ -10,21 +10,21 @@ import { useSettingsSection } from './useSettingsSection';
 
 export function NotificationsSection() {
   const {
-    notifications, setNotifications, saving, error, saved, saveNotifications,
+    notifications, setNotifications, saving, error, saved, saveNotifications, readOnly,
     addChannel, updateChannel, removeChannel, runChannelTest, channelResults, testingChannelId, savedChannels,
   } = useSettingsSection('notifications');
 
   return (
     <Section
       id="notifications-heading" title="Notifications" saving={saving}
-      error={error} saved={saved}
+      error={error} saved={saved} readOnly={readOnly}
       onSave={saveNotifications}
     >
       <p className="text-sm text-faint">
         Send a message when a target fails its thresholds (or recovers), through one or more channels below.
       </p>
       <div className="flex justify-end">
-        <Button type="button" onClick={addChannel}>Add channel</Button>
+        <Button type="button" disabled={readOnly} onClick={addChannel}>Add channel</Button>
       </div>
 
       <SwitchField
@@ -45,6 +45,7 @@ export function NotificationsSection() {
             testResult={channelResults[channel.id]}
             testPending={testingChannelId === channel.id}
             unsaved={isChannelUnsaved(channel, savedChannels)}
+            readOnly={readOnly}
           />
         ))}
       </div>

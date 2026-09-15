@@ -8,15 +8,15 @@ import { useSettingsSection } from './useSettingsSection';
  * AuthSection plus the API tokens panel, unchanged from the single-page
  * Settings layout. */
 export function AuthSettingsSection() {
-  const { auth, setAuth, locked, saving, error, saved, saveAuth } = useSettingsSection('auth');
+  const { auth, setAuth, locked, saving, error, saved, saveAuth, readOnly } = useSettingsSection('auth');
 
   return (
     <Section
       id="auth-heading" title="Auth" saving={saving}
-      error={error} saved={saved}
+      error={error} saved={saved} readOnly={readOnly}
       onSave={saveAuth}
     >
-      <AuthSection value={auth} locked={locked} onChange={setAuth} />
+      <AuthSection value={auth} locked={locked} onChange={setAuth} readOnly={readOnly} />
 
       <div className="grid gap-2 border-t border-line pt-4">
         <h3 className="text-sm font-semibold text-fg">API tokens</h3>

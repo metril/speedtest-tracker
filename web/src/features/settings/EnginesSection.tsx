@@ -6,12 +6,12 @@ import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
 export function EnginesSection() {
-  const { engines, setEngines, saving, error, saved, save } = useSettingsSection('engines');
+  const { engines, setEngines, saving, error, saved, save, readOnly } = useSettingsSection('engines');
 
   return (
     <Section
       id="engines-heading" title="Engines" saving={saving}
-      error={error} saved={saved}
+      error={error} saved={saved} readOnly={readOnly}
       onSave={() => save('engines', { engines })}
     >
       <FormField id="engines-speedtest-bin" label="Speedtest binary path">

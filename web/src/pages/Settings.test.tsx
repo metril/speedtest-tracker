@@ -123,6 +123,7 @@ function renderSettings(opts: {
   testChannel?: ReturnType<typeof vi.fn>;
   settings?: SettingsType;
   path?: string;
+  me?: { mode: string; user: string; groups: string[]; is_admin: boolean };
 } = {}) {
   const settings = opts.settings ?? settingsFixture();
   fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
@@ -130,6 +131,10 @@ function renderSettings(opts: {
     if (url.startsWith('/api/v1/settings')) return jsonResponse(settings);
     if (url.startsWith('/api/v1/iperf3/servers')) {
       return jsonResponse({ fetched_at: '2026-09-13T12:00:00.000Z', servers: [], total: 0 });
+    }
+    if (url.startsWith('/api/v1/me')) {
+      if (opts.me) return jsonResponse(opts.me);
+      throw new Error(`unexpected fetch: ${url}`);
     }
     throw new Error(`unexpected fetch: ${url}`);
   });
@@ -490,6 +495,26 @@ describe('Settings page', () => {
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/Remote-User/);
+  });
+
+  it('disables Save and Test with a read-only hint for a non-admin viewer', async () => {
+    renderSettings({
+      path: '/settings/integrations',
+      me: { mode: 'oidc', user: 'bob', groups: [], is_admin: false },
+    });
+    expect(await screen.findByRole('button', { name: 'Save Integrations' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test VictoriaMetrics' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Test VictoriaLogs' })).toBeDisabled();
+    expect(screen.getAllByText('Read-only: admin group required').length).toBeGreaterThan(0);
+  });
+
+  it('leaves Save and Test enabled for an admin viewer', async () => {
+    renderSettings({
+      path: '/settings/integrations',
+      me: { mode: 'oidc', user: 'alice', groups: ['admin'], is_admin: true },
+    });
+    expect(await screen.findByRole('button', { name: 'Save Integrations' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Test VictoriaMetrics' })).toBeEnabled();
   });
 
   it('switching tabs keeps unsaved edits in the tab left behind', async () => {

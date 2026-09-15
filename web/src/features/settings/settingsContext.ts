@@ -16,6 +16,10 @@ export interface TestResult {
  * currently mounted. */
 export interface SettingsOutletContext {
   locked: string[];
+  /** readOnly is true for a signed-in, non-admin viewer (oidc/forward_auth
+   * with a groups-based admin check): every Save and connection-Test
+   * action is disabled, with a hint explaining why. */
+  readOnly: boolean;
   saving: boolean;
   errors: Partial<Record<SectionKey, string>>;
   saved: Record<SectionKey, boolean>;
