@@ -233,6 +233,96 @@ func TestForwardAuthAlsoAcceptsTokensWhenAllowed(t *testing.T) {
 	}
 }
 
+// fakeSessions is a minimal auth.SessionLookup for tests.
+type fakeSessions struct {
+	byHash map[string]auth.SessionInfo
+	expiry map[string]time.Time
+	err    error
+}
+
+func (f *fakeSessions) LookupSession(_ context.Context, hash string, now time.Time) (auth.SessionInfo, bool, error) {
+	if f.err != nil {
+		return auth.SessionInfo{}, false, f.err
+	}
+	info, ok := f.byHash[hash]
+	if !ok {
+		return auth.SessionInfo{}, false, nil
+	}
+	if exp, ok := f.expiry[hash]; ok && !exp.After(now) {
+		return auth.SessionInfo{}, false, nil
+	}
+	return info, true, nil
+}
+
+func TestOIDCModeSessionCookie(t *testing.T) {
+	plain := "session-plaintext"
+	hash := auth.HashSession(plain)
+	sessions := &fakeSessions{byHash: map[string]auth.SessionInfo{
+		hash: {Subject: "sub-1", Email: "alice@example.com", Name: "Alice", Groups: []string{"admins"}, IsAdmin: true},
+	}}
+	m := newMiddleware(t, &fakeTokens{}, settings.Auth{Mode: settings.AuthModeOIDC})
+	m.SetSessions(sessions)
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	r.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: plain})
+	id, err := m.Identify(r)
+	if err != nil || id.User != "alice@example.com" || id.Name != "Alice" || !id.IsAdmin || id.Source != auth.SourceOIDC {
+		t.Fatalf("oidc session = %+v, %v", id, err)
+	}
+
+	// No cookie at all, no bearer, allow_tokens off: unauthorized.
+	if _, err := m.Identify(httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)); !errors.Is(err, auth.ErrUnauthorized) {
+		t.Fatalf("no cookie err = %v, want ErrUnauthorized", err)
+	}
+
+	// Unknown/expired cookie: unauthorized.
+	bad := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	bad.AddCookie(&http.Cookie{Name: auth.SessionCookie, Value: "not-a-real-session"})
+	if _, err := m.Identify(bad); !errors.Is(err, auth.ErrUnauthorized) {
+		t.Fatalf("bad cookie err = %v, want ErrUnauthorized", err)
+	}
+}
+
+func TestOIDCModeFallsBackToTokenWhenAllowed(t *testing.T) {
+	plain, hash, _, err := auth.GenerateToken()
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk := &fakeTokens{byHash: map[string]int64{hash: 9}}
+	m := newMiddleware(t, tk, settings.Auth{Mode: settings.AuthModeOIDC, AllowTokens: true})
+	m.SetSessions(&fakeSessions{byHash: map[string]auth.SessionInfo{}})
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/targets", nil)
+	r.Header.Set("Authorization", "Bearer "+plain)
+	id, err := m.Identify(r)
+	if err != nil || id.TokenID != 9 {
+		t.Fatalf("oidc mode bearer fallback = %+v, %v", id, err)
+	}
+
+	m2 := newMiddleware(t, tk, settings.Auth{Mode: settings.AuthModeOIDC, AllowTokens: false})
+	m2.SetSessions(&fakeSessions{byHash: map[string]auth.SessionInfo{}})
+	if _, err := m2.Identify(r); !errors.Is(err, auth.ErrUnauthorized) {
+		t.Fatal("bearer must be refused in oidc mode when allow_tokens is off")
+	}
+}
+
+func TestGenerateSessionID(t *testing.T) {
+	a, err := auth.GenerateSessionID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := auth.GenerateSessionID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a == "" || a == b {
+		t.Fatalf("GenerateSessionID = %q, %q, want distinct non-empty values", a, b)
+	}
+	if auth.HashSession(a) != auth.HashToken(a) {
+		t.Fatal("HashSession must be a digest of the plaintext, matching HashToken")
+	}
+}
+
 func TestConfigureRejectsBadCIDRAndKeepsPreviousConfig(t *testing.T) {
 	m := newMiddleware(t, &fakeTokens{}, settings.Auth{Mode: settings.AuthModeOpen})
 	err := m.Configure(settings.Auth{Mode: settings.AuthModeForward, TrustedProxies: []string{"not-a-cidr"}})

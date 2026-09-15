@@ -38,20 +38,46 @@ type TokenLookup interface {
 	TouchToken(ctx context.Context, id int64) error
 }
 
+// SessionInfo is what a SessionLookup reports for a valid, unexpired OIDC
+// session.
+type SessionInfo struct {
+	Subject string
+	Email   string
+	Name    string
+	Groups  []string
+	IsAdmin bool
+}
+
+// SessionLookup is the narrow dependency the auth package needs from the
+// session store, so this package never imports internal/store. hashedID
+// is the SHA-256 hex digest of the session cookie's plaintext token (see
+// HashSession); an expired session must be reported as ok=false, not as
+// an error.
+type SessionLookup interface {
+	LookupSession(ctx context.Context, hashedID string, now time.Time) (SessionInfo, bool, error)
+}
+
+// SessionCookie is the name of the cookie carrying an OIDC session's
+// plaintext token.
+const SessionCookie = "st_session"
+
 // Identity is the resolved caller of a request.
 type Identity struct {
 	Mode    string
 	User    string
+	Email   string
+	Name    string
 	Groups  []string
 	IsAdmin bool
 	TokenID int64
 	// Source names the credential that produced this identity: SourceOpen,
-	// SourceForward or SourceToken. Unlike Mode (the configured mode, which
-	// in forward_auth can still be satisfied by a bearer token when
-	// AllowTokens is set), Source always names the actual method used, so
-	// callers that must distinguish "authenticated via a proxy header" from
-	// "authenticated via a bearer/query token" — e.g. the auth-settings
-	// write guard — can rely on it regardless of the configured mode.
+	// SourceForward, SourceToken or SourceOIDC. Unlike Mode (the configured
+	// mode, which in forward_auth can still be satisfied by a bearer token
+	// when AllowTokens is set), Source always names the actual method
+	// used, so callers that must distinguish "authenticated via a proxy
+	// header" from "authenticated via a bearer/query token" — e.g. the
+	// auth-settings write guard — can rely on it regardless of the
+	// configured mode.
 	Source string
 }
 
@@ -60,6 +86,7 @@ const (
 	SourceOpen    = "open"
 	SourceForward = "forward"
 	SourceToken   = "token"
+	SourceOIDC    = "oidc"
 )
 
 type identityCtxKey struct{}
@@ -100,8 +127,9 @@ type Middleware struct {
 	tokens TokenLookup
 	now    func() time.Time
 
-	mu  sync.Mutex
-	cfg config
+	mu       sync.Mutex
+	cfg      config
+	sessions SessionLookup
 
 	touchMu sync.Mutex
 	touched map[int64]time.Time
@@ -203,6 +231,22 @@ func (m *Middleware) snapshot() config {
 	return m.cfg
 }
 
+// SetSessions installs the SessionLookup used to resolve oidc-mode
+// requests. It may be called at any time, including before or after
+// Configure, and again to swap the lookup (e.g. in tests); a nil
+// SessionLookup makes oidc mode's cookie check always fail closed.
+func (m *Middleware) SetSessions(sessions SessionLookup) {
+	m.mu.Lock()
+	m.sessions = sessions
+	m.mu.Unlock()
+}
+
+func (m *Middleware) snapshotSessions() SessionLookup {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessions
+}
+
 // Identify determines the caller of r under the current configuration.
 func (m *Middleware) Identify(r *http.Request) (Identity, error) {
 	cfg := m.snapshot()
@@ -223,6 +267,25 @@ func (m *Middleware) Identify(r *http.Request) (Identity, error) {
 			return Identity{}, ErrUnauthorized
 		}
 		return m.identifyToken(r.Context(), cfg.mode, plain)
+
+	case settings.AuthModeOIDC:
+		if cookie, err := r.Cookie(SessionCookie); err == nil && cookie.Value != "" {
+			id, err := m.identifySession(r.Context(), cookie.Value)
+			if err == nil {
+				return id, nil
+			}
+			if !errors.Is(err, ErrUnauthorized) {
+				return Identity{}, err
+			}
+			// Missing/expired/unknown session: fall through to the
+			// bearer-token fallback below, same as an absent cookie.
+		}
+		if cfg.allowTokens {
+			if plain, ok := bearerToken(r); ok {
+				return m.identifyToken(r.Context(), cfg.mode, plain)
+			}
+		}
+		return Identity{}, ErrUnauthorized
 
 	default:
 		m.warnedUnknownMode.Do(func() {
@@ -320,6 +383,37 @@ func (m *Middleware) identifyToken(ctx context.Context, mode, plain string) (Ide
 	}, nil
 }
 
+// identifySession resolves an oidc-mode session from the plaintext cookie
+// value. ErrUnauthorized covers both "no SessionLookup configured" and
+// "unknown/expired session" so Identify can treat either as equivalent to
+// a missing cookie.
+func (m *Middleware) identifySession(ctx context.Context, plain string) (Identity, error) {
+	sessions := m.snapshotSessions()
+	if sessions == nil {
+		return Identity{}, ErrUnauthorized
+	}
+	info, ok, err := sessions.LookupSession(ctx, HashSession(plain), m.now())
+	if err != nil {
+		return Identity{}, fmt.Errorf("auth: session lookup: %w", err)
+	}
+	if !ok {
+		return Identity{}, ErrUnauthorized
+	}
+	user := info.Email
+	if user == "" {
+		user = info.Subject
+	}
+	return Identity{
+		Mode:    settings.AuthModeOIDC,
+		User:    user,
+		Email:   info.Email,
+		Name:    info.Name,
+		Groups:  info.Groups,
+		IsAdmin: info.IsAdmin,
+		Source:  SourceOIDC,
+	}, nil
+}
+
 // maybeTouch coalesces touches per token id to at most one per minute, then
 // hands the actual write off to touchWorker via a bounded channel so it
 // never runs on the request goroutine. A full queue drops the touch rather
@@ -378,6 +472,24 @@ func credentialToken(r *http.Request) (string, bool) {
 func HashToken(plaintext string) string {
 	sum := sha256.Sum256([]byte(plaintext))
 	return hex.EncodeToString(sum[:])
+}
+
+// HashSession returns the hex-encoded SHA-256 digest of a session
+// cookie's plaintext token — the form stored as sessions.id, so the
+// plaintext itself never reaches the database.
+func HashSession(plaintext string) string {
+	return HashToken(plaintext)
+}
+
+// GenerateSessionID creates a new random plaintext session token, to be
+// stored client-side in the session cookie; only its HashSession digest
+// is persisted server-side.
+func GenerateSessionID() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", fmt.Errorf("auth: generate session id: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(buf), nil
 }
 
 // GenerateToken creates a new random API token, returning its plaintext,
