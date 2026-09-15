@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.8.1](https://github.com/metril/speedtest-tracker/compare/v0.8.0...v0.8.1) (2026-09-15)
+
+
+### Features
+
+* **api:** add oidc login, callback and logout endpoints ([99e2df7](https://github.com/metril/speedtest-tracker/commit/99e2df76373498b4a9e891dffcca5379c45c4635))
+* **api:** oidc settings, lockout guard and discovery test ([646a10f](https://github.com/metril/speedtest-tracker/commit/646a10fc7fc14e610d9f77ecb961a481e2bbd0bf))
+* **app:** wire oidc provider, sessions and expiry sweep ([0362fec](https://github.com/metril/speedtest-tracker/commit/0362fecc8c98ef59de3d7f15830906e3a356d1dd))
+* **auth:** resolve identities from oidc sessions ([21f1e08](https://github.com/metril/speedtest-tracker/commit/21f1e08683c4bca5638a28b1743314f853bbdf5e))
+* **integrations:** structured victoriametrics and victorialogs auth ([69b4c1d](https://github.com/metril/speedtest-tracker/commit/69b4c1d97265be243fb4aaad3ff1a28e00b259e7))
+* **oidcauth:** add oidc provider and claim authorisation ([9c4e3ab](https://github.com/metril/speedtest-tracker/commit/9c4e3ab02f60c12e6ab17d7e438dce465e749fb0))
+* **settings:** add oidc and structured export auth keys ([2379ae1](https://github.com/metril/speedtest-tracker/commit/2379ae18cac2e050403ae2101040a0959aff394b))
+* **store:** add sessions table ([0d37288](https://github.com/metril/speedtest-tracker/commit/0d372883475d86521a70e8301a959aaa7af7daf6))
+* **web:** add login page and redirect unauthenticated users ([5f6fbec](https://github.com/metril/speedtest-tracker/commit/5f6fbec0ff6ed2cb4436d991c24a6c18a8cfa39b))
+* **web:** oidc settings and discovery test ([3da8e7f](https://github.com/metril/speedtest-tracker/commit/3da8e7f9cd5df71d0ac5f58162e6a56745c77d73))
+* **web:** structured victoriametrics and victorialogs auth fields ([f693173](https://github.com/metril/speedtest-tracker/commit/f693173ce282892ca0569120b770aa78229a9004))
+* **web:** user chip, sign out and read-only gating ([d329e6f](https://github.com/metril/speedtest-tracker/commit/d329e6f23e4c2200aa3c122883ebfabaae68cab7))
+
+
+### Bug Fixes
+
+* **api:** close oidc open redirect and legacy export-auth clearing gaps ([99467b2](https://github.com/metril/speedtest-tracker/commit/99467b2349641ad85bb897fbb784081aab4b9981))
+* **api:** reject write requests from non-admin identities ([8568a88](https://github.com/metril/speedtest-tracker/commit/8568a88e51c0206f86cc0faa51b83d240ae17949))
+* **web:** render login page per auth mode and fix error codes ([d92b347](https://github.com/metril/speedtest-tracker/commit/d92b34799816ca3cc7e60a9dc7e2951ead82cc07))
+* **web:** show proxy header fields only in forward_auth mode ([e84c4e6](https://github.com/metril/speedtest-tracker/commit/e84c4e6f41ef11743edbba6e6d1bca1d89157faf))
+
 ## [0.8.0](https://github.com/metril/speedtest-tracker/compare/v0.7.1...v0.8.0) (2026-09-15)
 
 
