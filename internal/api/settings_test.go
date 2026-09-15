@@ -14,6 +14,7 @@ import (
 
 	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/notify"
+	"github.com/metril/speedtest-tracker/internal/oidcauth/oidctest"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
@@ -1034,5 +1035,132 @@ func TestSwitchingAwayFromForwardAuthIsAlwaysAllowed(t *testing.T) {
 	if rec := doJSON(t, h, http.MethodPut, "/api/v1/settings",
 		map[string]any{"auth": map[string]any{"mode": settings.AuthModeOpen}}, nil); rec.Code != http.StatusOK {
 		t.Fatalf("= %d %s, want the escape hatch to always work", rec.Code, rec.Body)
+	}
+}
+
+// oidcSwitchBody builds a full, valid switch-to-oidc PUT body pointed at
+// issuer.
+func oidcSwitchBody(issuer string) map[string]any {
+	return map[string]any{"auth": map[string]any{
+		"mode":               settings.AuthModeOIDC,
+		"oidc_issuer":        issuer,
+		"oidc_client_id":     "client",
+		"oidc_client_secret": "secret",
+		"oidc_groups_claim":  "groups",
+	}}
+}
+
+func TestGetSettingsMasksOIDCClientSecret(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	st.Set(context.Background(), settings.KeyAuthOIDCClientSecret, "supersecret")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "supersecret") {
+		t.Fatalf("secret leaked: %s", rec.Body)
+	}
+	var body struct {
+		Auth settings.Auth `json:"auth"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Auth.OIDCClientSecret != settings.MaskedSecret {
+		t.Fatalf("oidc_client_secret = %q, want masked", body.Auth.OIDCClientSecret)
+	}
+}
+
+func TestPutSettingsKeepsOIDCClientSecretOnMask(t *testing.T) {
+	h, st := newSettingsAPI(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyAuthOIDCClientSecret, "stored-secret")
+
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"auth": map[string]any{"oidc_client_secret": settings.MaskedSecret},
+	}, nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	a, _ := st.Auth(ctx)
+	if a.OIDCClientSecret != "stored-secret" {
+		t.Fatalf("masked sentinel overwrote the stored secret: %q", a.OIDCClientSecret)
+	}
+}
+
+func TestPutAuthOIDCValidation(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	for _, tc := range []struct {
+		name, want string
+		body       map[string]any
+	}{
+		{"bad issuer", "oidc_issuer", map[string]any{
+			"mode": settings.AuthModeOIDC, "oidc_issuer": "not-a-url",
+			"oidc_client_id": "c", "oidc_client_secret": "s", "oidc_groups_claim": "groups",
+		}},
+		{"missing client_id", "oidc_client_id", map[string]any{
+			"mode": settings.AuthModeOIDC, "oidc_issuer": "https://idp.example",
+			"oidc_client_secret": "s", "oidc_groups_claim": "groups",
+		}},
+		{"missing groups_claim", "oidc_groups_claim", map[string]any{
+			// oidc_groups_claim defaults to "groups" in a fresh store, so
+			// this must clear it explicitly to exercise the check.
+			"mode": settings.AuthModeOIDC, "oidc_issuer": "https://idp.example",
+			"oidc_client_id": "c", "oidc_client_secret": "s", "oidc_groups_claim": "",
+		}},
+		{"ttl too low", "session_ttl_hours", map[string]any{"session_ttl_hours": 0}},
+		{"ttl too high", "session_ttl_hours", map[string]any{"session_ttl_hours": 8761}},
+		{"bad redirect base url", "oidc_redirect_base_url", map[string]any{"oidc_redirect_base_url": "not-a-url"}},
+	} {
+		rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", map[string]any{"auth": tc.body}, nil)
+		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
+			t.Errorf("%s: %d %s, want 400 mentioning %q", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+}
+
+func TestSwitchToOIDCLockoutGuard(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	idp := oidctest.NewIDP(t)
+
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", oidcSwitchBody(idp.URL), nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("switch to oidc with a reachable issuer = %d %s", rec.Code, rec.Body)
+	}
+}
+
+func TestSwitchToOIDCLockoutGuardUnreachableIssuer(t *testing.T) {
+	h, _ := newSettingsAPI(t)
+	srv := httptest.NewServer(http.NotFoundHandler())
+	issuer := srv.URL
+	srv.Close() // unreachable by the time the PUT runs
+
+	rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", oidcSwitchBody(issuer), nil)
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "discover") {
+		t.Fatalf("switch to oidc with an unreachable issuer = %d %s, want 400 mentioning discovery", rec.Code, rec.Body)
+	}
+}
+
+func TestSettingsTestOIDCProbesDiscovery(t *testing.T) {
+	h, _, _ := newTestAPIWithSettings(t)
+	idp := oidctest.NewIDP(t)
+
+	var body struct {
+		OK bool `json:"ok"`
+	}
+	doJSON(t, h, http.MethodPost, "/api/v1/settings/test/oidc", map[string]any{"issuer": idp.URL}, &body)
+	if !body.OK {
+		t.Fatalf("reachable issuer: ok = %v, want true", body.OK)
+	}
+
+	srv := httptest.NewServer(http.NotFoundHandler())
+	badIssuer := srv.URL
+	srv.Close()
+	var failBody struct {
+		OK    bool   `json:"ok"`
+		Error string `json:"error"`
+	}
+	doJSON(t, h, http.MethodPost, "/api/v1/settings/test/oidc", map[string]any{"issuer": badIssuer}, &failBody)
+	if failBody.OK || failBody.Error == "" {
+		t.Fatalf("unreachable issuer: = %+v, want ok=false with an error", failBody)
 	}
 }

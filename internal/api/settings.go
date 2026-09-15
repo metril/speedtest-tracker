@@ -17,6 +17,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/notify"
+	"github.com/metril/speedtest-tracker/internal/oidcauth"
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
 
@@ -105,6 +106,19 @@ type authBody struct {
 	TrustedProxies  *[]string `json:"trusted_proxies"`
 	AdminGroup      *string   `json:"admin_group"`
 	AllowTokens     *bool     `json:"allow_tokens"`
+
+	// OIDC* configure auth mode oidc. OIDCClientSecret is a secret: masked
+	// on GET and, on PUT, an echoed-back mask means "keep stored", same as
+	// the VM/VL export-auth secrets.
+	OIDCIssuer          *string   `json:"oidc_issuer"`
+	OIDCClientID        *string   `json:"oidc_client_id"`
+	OIDCClientSecret    *string   `json:"oidc_client_secret"`
+	OIDCRedirectBaseURL *string   `json:"oidc_redirect_base_url"`
+	OIDCScopes          *[]string `json:"oidc_scopes"`
+	OIDCGroupsClaim     *string   `json:"oidc_groups_claim"`
+	OIDCAllowedGroups   *[]string `json:"oidc_allowed_groups"`
+	OIDCAllowedEmails   *[]string `json:"oidc_allowed_emails"`
+	SessionTTLHours     *int      `json:"session_ttl_hours"`
 }
 
 // settingsBody is the partial PUT document. Every field is a pointer: a
@@ -168,6 +182,7 @@ func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
 		internalError(w, d.Logger, "load auth settings", err)
 		return
 	}
+	maskAuthSecrets(&a)
 	locked := d.Settings.LockedKeys()
 	if locked == nil {
 		locked = []string{}
@@ -237,6 +252,14 @@ func maskSecrets(i *settings.Integrations) {
 	}
 }
 
+// maskAuthSecrets replaces a's set OIDC client secret with
+// settings.MaskedSecret, leaving an unset one as the empty string.
+func maskAuthSecrets(a *settings.Auth) {
+	if a.OIDCClientSecret != "" {
+		a.OIDCClientSecret = settings.MaskedSecret
+	}
+}
+
 // putSettings validates the full partial document before writing anything,
 // so a rejected PUT is a no-op, then writes each provided field and
 // responds with the same (masked) document getSettings would produce.
@@ -302,11 +325,26 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		*n.Channels = merged
 	}
 
+	// currentAuth is loaded up front (not just inside the lockout guard
+	// below) because validateAuthBody now needs it too: the oidc-mode
+	// field checks (issuer/client_id/groups_claim non-empty) are evaluated
+	// against the resulting merged config, not just the fields this PUT
+	// happens to touch.
+	var currentAuth settings.Auth
+	if body.Auth != nil {
+		var err error
+		currentAuth, err = d.Settings.Auth(ctx)
+		if err != nil {
+			internalError(w, d.Logger, "load auth settings", err)
+			return
+		}
+	}
+
 	if err := validateSettings(body, current); err != nil {
 		errBadRequest(w, err.Error())
 		return
 	}
-	if err := validateAuthBody(body.Auth); err != nil {
+	if err := validateAuthBody(body.Auth, currentAuth); err != nil {
 		errBadRequest(w, err.Error())
 		return
 	}
@@ -316,11 +354,6 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	// gated behind the caller already satisfying whatever auth mode
 	// happens to be configured.
 	if body.Auth != nil {
-		currentAuth, err := d.Settings.Auth(ctx)
-		if err != nil {
-			internalError(w, d.Logger, "load auth settings", err)
-			return
-		}
 		resultingAuth := mergeAuth(currentAuth, body.Auth)
 		if err := d.checkAuthLockout(r, currentAuth, resultingAuth); err != nil {
 			errBadRequest(w, err.Error())
@@ -458,6 +491,27 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			},
 			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAdminGroup, a.AdminGroup) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAllowTokens, a.AllowTokens) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCIssuer, a.OIDCIssuer) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCClientID, a.OIDCClientID) },
+			func() error {
+				return setSecret(ctx, d.Settings, settings.KeyAuthOIDCClientSecret, a.OIDCClientSecret)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCRedirectBaseURL, a.OIDCRedirectBaseURL)
+			},
+			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCScopes, a.OIDCScopes) },
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCGroupsClaim, a.OIDCGroupsClaim)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCAllowedGroups, a.OIDCAllowedGroups)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCAllowedEmails, a.OIDCAllowedEmails)
+			},
+			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthSessionTTLHours, a.SessionTTLHours)
+			},
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -481,9 +535,11 @@ func requestIsAdmin(r *http.Request) bool {
 
 // requestAuthIsToken reports whether the caller authenticated via a
 // bearer/query API token (auth.SourceToken), as opposed to a forward-auth
-// header or an open-mode session. A zero-value identity (no auth
-// middleware mounted) is not a token, matching requestIsAdmin's convention
-// that an absent Deps.Auth means open access.
+// header, an oidc session or an open-mode session — an oidc-mode request
+// carrying a valid session cookie has Source auth.SourceOIDC, so it passes
+// this check (is not a token) the same as forward-auth. A zero-value
+// identity (no auth middleware mounted) is not a token, matching
+// requestIsAdmin's convention that an absent Deps.Auth means open access.
 func requestAuthIsToken(r *http.Request) bool {
 	id := auth.FromContext(r.Context())
 	return id.Source == auth.SourceToken
@@ -667,6 +723,33 @@ func setKeys(body settingsBody) []string {
 		if a.AllowTokens != nil {
 			keys = append(keys, settings.KeyAuthAllowTokens)
 		}
+		if a.OIDCIssuer != nil {
+			keys = append(keys, settings.KeyAuthOIDCIssuer)
+		}
+		if a.OIDCClientID != nil {
+			keys = append(keys, settings.KeyAuthOIDCClientID)
+		}
+		if a.OIDCClientSecret != nil {
+			keys = append(keys, settings.KeyAuthOIDCClientSecret)
+		}
+		if a.OIDCRedirectBaseURL != nil {
+			keys = append(keys, settings.KeyAuthOIDCRedirectBaseURL)
+		}
+		if a.OIDCScopes != nil {
+			keys = append(keys, settings.KeyAuthOIDCScopes)
+		}
+		if a.OIDCGroupsClaim != nil {
+			keys = append(keys, settings.KeyAuthOIDCGroupsClaim)
+		}
+		if a.OIDCAllowedGroups != nil {
+			keys = append(keys, settings.KeyAuthOIDCAllowedGroups)
+		}
+		if a.OIDCAllowedEmails != nil {
+			keys = append(keys, settings.KeyAuthOIDCAllowedEmails)
+		}
+		if a.SessionTTLHours != nil {
+			keys = append(keys, settings.KeyAuthSessionTTLHours)
+		}
 	}
 	return keys
 }
@@ -697,6 +780,35 @@ func mergeAuth(current settings.Auth, body *authBody) settings.Auth {
 	}
 	if body.AllowTokens != nil {
 		out.AllowTokens = *body.AllowTokens
+	}
+	if body.OIDCIssuer != nil {
+		out.OIDCIssuer = *body.OIDCIssuer
+	}
+	if body.OIDCClientID != nil {
+		out.OIDCClientID = *body.OIDCClientID
+	}
+	if body.OIDCClientSecret != nil && *body.OIDCClientSecret != settings.MaskedSecret {
+		// A mask echoed back means "keep stored" — out.OIDCClientSecret is
+		// already current.OIDCClientSecret, so nothing to do in that case.
+		out.OIDCClientSecret = *body.OIDCClientSecret
+	}
+	if body.OIDCRedirectBaseURL != nil {
+		out.OIDCRedirectBaseURL = *body.OIDCRedirectBaseURL
+	}
+	if body.OIDCScopes != nil {
+		out.OIDCScopes = *body.OIDCScopes
+	}
+	if body.OIDCGroupsClaim != nil {
+		out.OIDCGroupsClaim = *body.OIDCGroupsClaim
+	}
+	if body.OIDCAllowedGroups != nil {
+		out.OIDCAllowedGroups = *body.OIDCAllowedGroups
+	}
+	if body.OIDCAllowedEmails != nil {
+		out.OIDCAllowedEmails = *body.OIDCAllowedEmails
+	}
+	if body.SessionTTLHours != nil {
+		out.SessionTTLHours = *body.SessionTTLHours
 	}
 	return out
 }
@@ -734,17 +846,19 @@ func isHTTPTChar(c byte) bool {
 	return false
 }
 
-// validateAuthBody checks the Auth partial document's own fields, with no
-// dependency on the currently stored config.
-func validateAuthBody(a *authBody) error {
+// validateAuthBody checks the Auth partial document's own fields, plus (for
+// the oidc-mode fields) the resulting config after merging onto current: a
+// PUT that only sets mode=oidc without ever having set an issuer must still
+// be rejected, not just one that clears an already-configured issuer.
+func validateAuthBody(a *authBody, current settings.Auth) error {
 	if a == nil {
 		return nil
 	}
 	if a.Mode != nil {
 		switch *a.Mode {
-		case settings.AuthModeOpen, settings.AuthModeForward, settings.AuthModeToken:
+		case settings.AuthModeOpen, settings.AuthModeForward, settings.AuthModeToken, settings.AuthModeOIDC:
 		default:
-			return fmt.Errorf("mode must be one of open, forward_auth, token")
+			return fmt.Errorf("mode must be one of open, forward_auth, token, oidc")
 		}
 	}
 	if a.UserHeader != nil && !isValidHTTPHeaderName(*a.UserHeader) {
@@ -764,6 +878,48 @@ func validateAuthBody(a *authBody) error {
 				return fmt.Errorf("trusted_proxies: invalid CIDR %q", raw)
 			}
 		}
+	}
+	// session_ttl_hours is checked whenever it is set, regardless of mode:
+	// it's meaningless outside oidc mode today, but a bogus value should
+	// still be rejected rather than stored silently.
+	if a.SessionTTLHours != nil {
+		if *a.SessionTTLHours < 1 || *a.SessionTTLHours > 8760 {
+			return fmt.Errorf("session_ttl_hours must be between 1 and 8760")
+		}
+	}
+	if a.OIDCRedirectBaseURL != nil && *a.OIDCRedirectBaseURL != "" {
+		if err := validateAbsoluteHTTPURL(*a.OIDCRedirectBaseURL); err != nil {
+			return fmt.Errorf("oidc_redirect_base_url: %w", err)
+		}
+	}
+
+	resulting := mergeAuth(current, a)
+	if resulting.Mode == settings.AuthModeOIDC {
+		if err := validateAbsoluteHTTPURL(resulting.OIDCIssuer); err != nil {
+			return fmt.Errorf("oidc_issuer: %w", err)
+		}
+		if resulting.OIDCClientID == "" {
+			return fmt.Errorf("oidc_client_id is required when mode is oidc")
+		}
+		if resulting.OIDCGroupsClaim == "" {
+			return fmt.Errorf("oidc_groups_claim is required when mode is oidc")
+		}
+	}
+	return nil
+}
+
+// validateAbsoluteHTTPURL reports an error unless raw parses as an absolute
+// http(s) URL with a host.
+func validateAbsoluteHTTPURL(raw string) error {
+	if raw == "" {
+		return fmt.Errorf("required")
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return fmt.Errorf("must be an absolute http(s) URL")
 	}
 	return nil
 }
@@ -848,6 +1004,32 @@ func (d Deps) checkAuthLockout(r *http.Request, current, resulting settings.Auth
 			return fmt.Errorf("verify bearer token: %w", err)
 		} else if !found {
 			return fmt.Errorf("include a valid bearer token on this request to switch to token mode")
+		}
+		return nil
+
+	case settings.AuthModeOIDC:
+		if resulting.OIDCIssuer == "" || resulting.OIDCClientID == "" || resulting.OIDCClientSecret == "" {
+			return fmt.Errorf("oidc_issuer, oidc_client_id and oidc_client_secret must all be set")
+		}
+		if resulting.Mode == current.Mode {
+			return nil
+		}
+		// An actual switch into oidc mode: require the switching request
+		// to be an admin, forward-auth or open-mode session (not a bearer
+		// token — same rationale as the token-mode switch guard above),
+		// and require the configured issuer to actually be reachable and
+		// speak OIDC discovery, so a typo doesn't lock every session out
+		// the moment the SPA's own next request needs a working provider.
+		if !requestIsAdmin(r) {
+			return fmt.Errorf("admin access required to switch to oidc mode")
+		}
+		if requestAuthIsToken(r) {
+			return fmt.Errorf("switching to oidc mode requires a forward-auth or open-mode session")
+		}
+		discoverCtx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+		defer cancel()
+		if err := oidcauth.Discover(discoverCtx, resulting.OIDCIssuer, nil); err != nil {
+			return fmt.Errorf("discover oidc issuer %q: %w", resulting.OIDCIssuer, err)
 		}
 		return nil
 
@@ -1314,6 +1496,10 @@ func resolveMaybeMaskedSecret(v *string, storedValue string, same bool) string {
 // show the reason inline.
 func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 	target := chi.URLParam(r, "target")
+	if target == "oidc" {
+		d.testOIDC(w, r)
+		return
+	}
 	if target != "vm" && target != "vl" {
 		errNotFound(w, "unknown test target "+target)
 		return
@@ -1386,6 +1572,47 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		"status":     resp.StatusCode,
 		"latency_ms": latency.Milliseconds(),
 	})
+}
+
+// testOIDC probes an OIDC issuer via discovery, mirroring testIntegration's
+// {ok,...}/{ok,error} response shape. issuer/client_id/client_secret in the
+// body default to the stored values; a client_secret equal to
+// settings.MaskedSecret also resolves to the stored value. client_id and
+// client_secret are accepted (and mask-resolved) for parity with the stored
+// config and future use, but discovery itself only ever fetches the
+// issuer's public metadata/JWKS, so neither is actually sent anywhere.
+func (d Deps) testOIDC(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Issuer       *string `json:"issuer"`
+		ClientID     *string `json:"client_id"`
+		ClientSecret *string `json:"client_secret"`
+	}
+	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+		return
+	}
+	cur, err := d.Settings.Auth(r.Context())
+	if err != nil {
+		internalError(w, d.Logger, "load auth settings", err)
+		return
+	}
+
+	issuer := cur.OIDCIssuer
+	if body.Issuer != nil {
+		issuer = *body.Issuer
+	}
+	if err := validateAbsoluteHTTPURL(issuer); err != nil {
+		errBadRequest(w, "issuer: "+err.Error())
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	defer cancel()
+	start := time.Now()
+	if err := oidcauth.Discover(ctx, issuer, nil); err != nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "latency_ms": time.Since(start).Milliseconds()})
 }
 
 // testNotifyChannel probes one stored notification channel. The channel is
