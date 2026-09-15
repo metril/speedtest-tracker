@@ -6,7 +6,8 @@ import { stripIrrelevantChannelFields } from '../features/settings/channelHelper
 import { validateAuthSettings } from '../features/settings/AuthSection';
 import { validateThresholds } from '../features/targets/ThresholdFields';
 import type {
-  AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
+  AuthSettings, EngineSettings, ExportAuth, GeneralSettings, IntegrationSettings, NotificationSettings,
+  NotifyChannel,
 } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { newId } from '../lib/id';
@@ -95,11 +96,11 @@ export function Settings() {
     });
   };
 
-  const runTest = (target: 'vm' | 'vl', url: string, authHeader: string) => {
+  const runTest = (target: 'vm' | 'vl', url: string, auth: ExportAuth) => {
     const setResult = target === 'vm' ? setVmResult : setVlResult;
     setResult(null);
     test.mutate(
-      { target, body: { url, auth_header: authHeader } },
+      { target, body: { url, auth } },
       {
         onSuccess: (result) => {
           setResult(result.ok

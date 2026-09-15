@@ -369,7 +369,7 @@ export function useDeleteToken() {
 
 export function useTestIntegration() {
   return useMutation({
-    mutationFn: ({ target, body }: { target: 'vm' | 'vl'; body: { url?: string; auth_header?: string } }) =>
+    mutationFn: ({ target, body }: { target: 'vm' | 'vl'; body: { url?: string; auth?: api.ExportAuth } }) =>
       api.testIntegration(target, body),
   });
 }

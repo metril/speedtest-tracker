@@ -287,6 +287,18 @@ describe('Settings page', () => {
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
   });
 
+  it('sends a structured auth payload with the connection test', async () => {
+    const test = vi.fn().mockResolvedValue({ ok: true, latency_ms: 5 });
+    renderSettings({ test, path: '/settings/integrations' });
+    await userEvent.selectOptions(await screen.findByLabelText('VictoriaMetrics auth'), 'bearer');
+    await userEvent.type(screen.getByLabelText('VictoriaMetrics auth token'), 'tok123');
+    await userEvent.click(screen.getByRole('button', { name: 'Test VictoriaMetrics' }));
+    expect(test).toHaveBeenCalledWith('vm', expect.objectContaining({
+      url: 'http://vm:8428',
+      auth: expect.objectContaining({ type: 'bearer', token: 'tok123' }),
+    }));
+  });
+
   it('saves only the notifications section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
     renderSettings({ put, path: '/settings/notifications' });

@@ -3,13 +3,16 @@ import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
 import { LabelsEditor } from '../../components/LabelsEditor';
 import { SwitchField } from '../../components/SwitchField';
+import { ExportAuthFields } from './ExportAuthFields';
 import { Section } from './Section';
 import { useSettingsSection } from './useSettingsSection';
 
 export function IntegrationsSection() {
   const {
     integrations, setIntegrations, saving, error, saved, save, testPending, vmResult, vlResult, runTest, readOnly,
+    locked,
   } = useSettingsSection('integrations');
+  const isLocked = (key: string) => locked.includes(`integrations.${key}`);
 
   return (
     <Section
@@ -26,11 +29,27 @@ export function IntegrationsSection() {
         <Input id="vm-url" value={integrations.vm_url}
           onChange={(e) => setIntegrations({ ...integrations, vm_url: e.target.value })} />
       </FormField>
-      <FormField id="vm-auth" label="VictoriaMetrics auth header">
-        <Input id="vm-auth" type="password" placeholder="leave unchanged"
-          value={integrations.vm_auth_header}
-          onChange={(e) => setIntegrations({ ...integrations, vm_auth_header: e.target.value })} />
-      </FormField>
+      <ExportAuthFields
+        idPrefix="vm" label="VictoriaMetrics auth"
+        locked={isLocked}
+        value={{
+          type: integrations.vm_auth_type,
+          username: integrations.vm_auth_username,
+          password: integrations.vm_auth_password,
+          token: integrations.vm_auth_token,
+          header_name: integrations.vm_auth_header_name,
+          header_value: integrations.vm_auth_header_value,
+        }}
+        onChange={(next) => setIntegrations({
+          ...integrations,
+          vm_auth_type: next.type,
+          vm_auth_username: next.username ?? '',
+          vm_auth_password: next.password ?? '',
+          vm_auth_token: next.token ?? '',
+          vm_auth_header_name: next.header_name ?? '',
+          vm_auth_header_value: next.header_value ?? '',
+        })}
+      />
       <LabelsEditor
         label="VictoriaMetrics extra labels"
         value={integrations.vm_extra_labels}
@@ -38,7 +57,14 @@ export function IntegrationsSection() {
       />
       <div className="flex items-center gap-3">
         <Button type="button" variant="outline" disabled={testPending || readOnly}
-          onClick={() => runTest('vm', integrations.vm_url, integrations.vm_auth_header)}>
+          onClick={() => runTest('vm', integrations.vm_url, {
+            type: integrations.vm_auth_type,
+            username: integrations.vm_auth_username,
+            password: integrations.vm_auth_password,
+            token: integrations.vm_auth_token,
+            header_name: integrations.vm_auth_header_name,
+            header_value: integrations.vm_auth_header_value,
+          })}>
           Test VictoriaMetrics
         </Button>
         {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}
@@ -56,11 +82,27 @@ export function IntegrationsSection() {
         <Input id="vl-url" value={integrations.vl_url}
           onChange={(e) => setIntegrations({ ...integrations, vl_url: e.target.value })} />
       </FormField>
-      <FormField id="vl-auth" label="VictoriaLogs auth header">
-        <Input id="vl-auth" type="password" placeholder="leave unchanged"
-          value={integrations.vl_auth_header}
-          onChange={(e) => setIntegrations({ ...integrations, vl_auth_header: e.target.value })} />
-      </FormField>
+      <ExportAuthFields
+        idPrefix="vl" label="VictoriaLogs auth"
+        locked={isLocked}
+        value={{
+          type: integrations.vl_auth_type,
+          username: integrations.vl_auth_username,
+          password: integrations.vl_auth_password,
+          token: integrations.vl_auth_token,
+          header_name: integrations.vl_auth_header_name,
+          header_value: integrations.vl_auth_header_value,
+        }}
+        onChange={(next) => setIntegrations({
+          ...integrations,
+          vl_auth_type: next.type,
+          vl_auth_username: next.username ?? '',
+          vl_auth_password: next.password ?? '',
+          vl_auth_token: next.token ?? '',
+          vl_auth_header_name: next.header_name ?? '',
+          vl_auth_header_value: next.header_value ?? '',
+        })}
+      />
       <LabelsEditor
         label="Extra stream fields"
         value={integrations.vl_stream_fields}
@@ -68,7 +110,14 @@ export function IntegrationsSection() {
       />
       <div className="flex items-center gap-3">
         <Button type="button" variant="outline" disabled={testPending || readOnly}
-          onClick={() => runTest('vl', integrations.vl_url, integrations.vl_auth_header)}>
+          onClick={() => runTest('vl', integrations.vl_url, {
+            type: integrations.vl_auth_type,
+            username: integrations.vl_auth_username,
+            password: integrations.vl_auth_password,
+            token: integrations.vl_auth_token,
+            header_name: integrations.vl_auth_header_name,
+            header_value: integrations.vl_auth_header_value,
+          })}>
           Test VictoriaLogs
         </Button>
         {readOnly && <p className="text-sm text-faint">Read-only: admin group required</p>}

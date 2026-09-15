@@ -416,6 +416,19 @@ export interface EngineSettings {
 
 export type ExportAuthType = 'none' | 'basic' | 'bearer' | 'custom';
 
+/** ExportAuth is the structured auth payload sent to POST
+ * /settings/test/{vm|vl}, mirroring the vm_auth_ and vl_auth_ settings
+ * fields for whichever type is selected. The server also still accepts
+ * the legacy auth_header field, but the UI no longer sends it. */
+export interface ExportAuth {
+  type: ExportAuthType;
+  username?: string;
+  password?: string;
+  token?: string;
+  header_name?: string;
+  header_value?: string;
+}
+
 export interface IntegrationSettings {
   vm_enabled: boolean;
   vm_url: string;
@@ -534,7 +547,7 @@ export interface ConnectionTest {
 export const getSettings = () => request<Settings>('/settings');
 export const updateSettings = (patch: SettingsPatch) =>
   request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) });
-export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth_header?: string }) =>
+export const testIntegration = (target: 'vm' | 'vl', body: { url?: string; auth?: ExportAuth }) =>
   request<ConnectionTest>(`/settings/test/${target}`, { method: 'POST', body: JSON.stringify(body) });
 export const testOIDC = (body: { issuer: string; client_id: string; client_secret: string }) =>
   request<ConnectionTest>('/settings/test/oidc', { method: 'POST', body: JSON.stringify(body) });

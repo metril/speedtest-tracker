@@ -1,5 +1,6 @@
 import type {
-  AuthSettings, EngineSettings, GeneralSettings, IntegrationSettings, NotificationSettings, NotifyChannel,
+  AuthSettings, EngineSettings, ExportAuth, GeneralSettings, IntegrationSettings, NotificationSettings,
+  NotifyChannel,
 } from '../../lib/api';
 
 export type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications' | 'auth';
@@ -36,7 +37,7 @@ export interface SettingsOutletContext {
   testPending: boolean;
   vmResult: TestResult | null;
   vlResult: TestResult | null;
-  runTest: (target: 'vm' | 'vl', url: string, authHeader: string) => void;
+  runTest: (target: 'vm' | 'vl', url: string, auth: ExportAuth) => void;
 
   notifications: NotificationSettings;
   setNotifications: (next: NotificationSettings) => void;
