@@ -270,8 +270,8 @@ func applyIntegrations(ctx context.Context, st *settings.Store, vm *vmpush.Write
 	if err != nil {
 		return err
 	}
-	vm.Configure(i.VMEnabled, i.VMURL, i.VMAuthHeader, i.VMExtraLabels)
-	vl.Configure(i.VLEnabled, i.VLURL, i.VLAuthHeader, i.VLStreamFields)
+	vm.Configure(i.VMEnabled, i.VMURL, i.VMAuth(), i.VMExtraLabels)
+	vl.Configure(i.VLEnabled, i.VLURL, i.VLAuth(), i.VLStreamFields)
 	metricsEnabled.Store(i.MetricsEnabled)
 	logger.Debug("integrations applied", "vm_enabled", i.VMEnabled, "vl_enabled", i.VLEnabled)
 	return nil

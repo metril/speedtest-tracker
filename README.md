@@ -438,6 +438,22 @@ Identity and auth endpoints:
   go to `/insert/jsonline?_stream_fields=app,level&_msg_field=_msg&_time_field=_time`
   in batches of 100 or every 2s. Logs always go to stdout as well; a VL
   outage drops lines rather than blocking the process.
+- **Export auth** — VM/VL push requests can authenticate as `basic`,
+  `bearer`, or a `custom` header, set via Settings → Integrations or seeded
+  from the environment:
+
+  | Variable | Meaning |
+  | --- | --- |
+  | `ST_INTEGRATIONS_VM_AUTH_TYPE` / `ST_INTEGRATIONS_VL_AUTH_TYPE` | `none` (default), `basic`, `bearer`, or `custom` |
+  | `ST_INTEGRATIONS_VM_AUTH_USERNAME` / `ST_INTEGRATIONS_VL_AUTH_USERNAME` | Username when type is `basic` |
+  | `ST_INTEGRATIONS_VM_AUTH_PASSWORD` / `ST_INTEGRATIONS_VL_AUTH_PASSWORD` | Password when type is `basic` |
+  | `ST_INTEGRATIONS_VM_AUTH_TOKEN` / `ST_INTEGRATIONS_VL_AUTH_TOKEN` | Token when type is `bearer` (sent as `Authorization: Bearer <token>`) |
+  | `ST_INTEGRATIONS_VM_AUTH_HEADER_NAME` / `ST_INTEGRATIONS_VL_AUTH_HEADER_NAME` | Header name when type is `custom` |
+  | `ST_INTEGRATIONS_VM_AUTH_HEADER_VALUE` / `ST_INTEGRATIONS_VL_AUTH_HEADER_VALUE` | Header value when type is `custom` |
+
+  `ST_INTEGRATIONS_VM_AUTH_HEADER` / `ST_INTEGRATIONS_VL_AUTH_HEADER` are
+  deprecated but still honoured as a custom `Authorization` header when no
+  structured auth type is configured.
 - **`/metrics`** — off by default, toggled by Settings → Integrations →
   *Enable /metrics*, answering 404 while disabled. Exposes
   `speedtest_latest_*` gauges per target, `speedtest_runs_total{status}`,

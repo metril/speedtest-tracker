@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/vlpush"
 )
 
@@ -31,7 +32,7 @@ func TestHandlerMirrorsToNextAndShipsBatch(t *testing.T) {
 		Next: slog.NewJSONHandler(&stdout, nil), App: "speedtest-tracker",
 		BatchSize: 2, FlushInterval: 20 * time.Millisecond,
 	})
-	h.Configure(true, srv.URL, "Bearer tok", map[string]string{"host": "pi4"})
+	h.Configure(true, srv.URL, settings.ExportAuth{Type: settings.ExportAuthCustom, HeaderName: "Authorization", HeaderValue: "Bearer tok"}, map[string]string{"host": "pi4"})
 	h.Start()
 	defer h.Close(context.Background())
 
@@ -65,6 +66,53 @@ func TestHandlerMirrorsToNextAndShipsBatch(t *testing.T) {
 	}
 }
 
+func TestHandlerAppliesExportAuth(t *testing.T) {
+	for name, tc := range map[string]struct {
+		auth       settings.ExportAuth
+		wantAuth   string
+		customHdr  string
+		wantCustom string
+	}{
+		"none":   {auth: settings.ExportAuth{}},
+		"basic":  {auth: settings.ExportAuth{Type: settings.ExportAuthBasic, Username: "u", Password: "p"}, wantAuth: "Basic dTpw"},
+		"bearer": {auth: settings.ExportAuth{Type: settings.ExportAuthBearer, Token: "tok"}, wantAuth: "Bearer tok"},
+		"custom": {auth: settings.ExportAuth{Type: settings.ExportAuthCustom, HeaderName: "X-Api-Key", HeaderValue: "secret"}, customHdr: "X-Api-Key", wantCustom: "secret"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var gotAuth, gotCustom string
+			hit := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				if tc.customHdr != "" {
+					gotCustom = r.Header.Get(tc.customHdr)
+				}
+				hit <- struct{}{}
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
+				BatchSize: 1, FlushInterval: 10 * time.Millisecond})
+			h.Configure(true, srv.URL, tc.auth, nil)
+			h.Start()
+			defer h.Close(context.Background())
+
+			slog.New(h).Info("hello")
+			select {
+			case <-hit:
+			case <-time.After(2 * time.Second):
+				t.Fatal("no flush")
+			}
+			if gotAuth != tc.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", gotAuth, tc.wantAuth)
+			}
+			if tc.customHdr != "" && gotCustom != tc.wantCustom {
+				t.Fatalf("%s = %q, want %q", tc.customHdr, gotCustom, tc.wantCustom)
+			}
+		})
+	}
+}
+
 func TestHandlerDisabledStillLogsToStdout(t *testing.T) {
 	var stdout bytes.Buffer
 	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(&stdout, nil)})
@@ -83,7 +131,7 @@ func TestHandlerDropsWhenQueueFullAndNeverBlocks(t *testing.T) {
 	defer close(block)
 	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
 		QueueSize: 4, BatchSize: 1, FlushInterval: time.Millisecond})
-	h.Configure(true, srv.URL, "", nil)
+	h.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	h.Start()
 	defer h.Close(context.Background())
 	log := slog.New(h)
@@ -121,7 +169,7 @@ func TestCloseFlushesBufferedLinesBeforeReturning(t *testing.T) {
 	// the queue, unflushed, when Close is called.
 	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
 		BatchSize: 1000, FlushInterval: time.Hour})
-	h.Configure(true, srv.URL, "", nil)
+	h.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	h.Start()
 	slog.New(h).Info("buffered at shutdown")
 
@@ -150,7 +198,7 @@ func TestWithAttrsAndGroupAreCarried(t *testing.T) {
 	defer srv.Close()
 	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
 		BatchSize: 1, FlushInterval: 10 * time.Millisecond})
-	h.Configure(true, srv.URL, "", nil)
+	h.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	h.Start()
 	defer h.Close(context.Background())
 	slog.New(h).With("component", "runner").Info("started")

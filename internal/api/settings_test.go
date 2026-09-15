@@ -314,6 +314,175 @@ func TestSettingsTestDoesNotLeakStoredSecretToOtherHost(t *testing.T) {
 	}
 }
 
+func TestSettingsTestSendsBasicAuthFromBody(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, _ := newTestAPIWithSettings(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{
+		"url": srv.URL,
+		"auth": map[string]any{
+			"type": "basic", "username": "u", "password": "p",
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if gotAuth != "Basic dTpw" {
+		t.Fatalf("Authorization = %q, want Basic dTpw", gotAuth)
+	}
+}
+
+// TestSettingsTestLegacyAuthHeaderStillWorks is the regression case for
+// keeping the deprecated auth_header field functional alongside the new
+// structured auth object.
+func TestSettingsTestLegacyAuthHeaderStillWorks(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, _ := newTestAPIWithSettings(t)
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{
+		"url": srv.URL, "auth_header": "Bearer legacy-tok",
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if gotAuth != "Bearer legacy-tok" {
+		t.Fatalf("Authorization = %q, want Bearer legacy-tok", gotAuth)
+	}
+}
+
+// TestSettingsTestMaskedAuthFieldsReuseStoredValueSameOrigin verifies a
+// masked secret inside the structured auth object resolves to the stored
+// value when the probe targets the same origin as the stored URL.
+func TestSettingsTestMaskedAuthFieldsReuseStoredValueSameOrigin(t *testing.T) {
+	var gotAuth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMURL, srv.URL)
+	st.Set(ctx, settings.KeyVMAuthType, settings.ExportAuthBearer)
+	st.Set(ctx, settings.KeyVMAuthToken, "stored-tok")
+
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{
+		"url":  srv.URL,
+		"auth": map[string]any{"type": "bearer", "token": settings.MaskedSecret},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if gotAuth != "Bearer stored-tok" {
+		t.Fatalf("Authorization = %q, want Bearer stored-tok", gotAuth)
+	}
+}
+
+// TestSettingsTestMaskedAuthFieldsDoNotLeakToOtherOrigin extends the
+// existing SSRF/credential-exfil regression coverage to the structured
+// auth object's masked secret fields.
+func TestSettingsTestMaskedAuthFieldsDoNotLeakToOtherOrigin(t *testing.T) {
+	var gotAuth string
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer attacker.Close()
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMURL, "http://vm.internal:8428")
+	st.Set(ctx, settings.KeyVMAuthType, settings.ExportAuthBearer)
+	st.Set(ctx, settings.KeyVMAuthToken, "stored-tok")
+
+	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{
+		"url":  attacker.URL,
+		"auth": map[string]any{"type": "bearer", "token": settings.MaskedSecret},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(gotAuth, "stored-tok") {
+		t.Fatalf("stored secret leaked to a different origin via the structured auth object: %q", gotAuth)
+	}
+}
+
+func TestGetSettingsMasksStructuredExportAuthSecrets(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMAuthType, settings.ExportAuthBasic)
+	st.Set(ctx, settings.KeyVMAuthPassword, "supersecret")
+	st.Set(ctx, settings.KeyVMAuthUsername, "admin")
+	st.Set(ctx, settings.KeyVLAuthType, settings.ExportAuthBearer)
+	st.Set(ctx, settings.KeyVLAuthToken, "vl-token")
+
+	rec := do(t, h, http.MethodGet, "/api/v1/settings", nil)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	if strings.Contains(rec.Body.String(), "supersecret") || strings.Contains(rec.Body.String(), "vl-token") {
+		t.Fatalf("secret leaked: %s", rec.Body)
+	}
+	var body struct {
+		Integrations settings.Integrations `json:"integrations"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &body)
+	if body.Integrations.VMAuthPassword != settings.MaskedSecret {
+		t.Fatalf("vm_auth_password = %q, want masked", body.Integrations.VMAuthPassword)
+	}
+	if body.Integrations.VMAuthUsername != "admin" {
+		t.Fatalf("vm_auth_username = %q, want unmasked (not a secret)", body.Integrations.VMAuthUsername)
+	}
+	if body.Integrations.VLAuthToken != settings.MaskedSecret {
+		t.Fatalf("vl_auth_token = %q, want masked", body.Integrations.VLAuthToken)
+	}
+}
+
+func TestPutSettingsKeepsStructuredExportAuthSecretsOnMask(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	st.Set(ctx, settings.KeyVMAuthType, settings.ExportAuthBearer)
+	st.Set(ctx, settings.KeyVMAuthToken, "stored-tok")
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"integrations": map[string]any{
+			"vm_auth_type": "bearer", "vm_auth_token": settings.MaskedSecret,
+		},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	i, _ := st.Integrations(ctx)
+	if i.VMAuthToken != "stored-tok" {
+		t.Fatalf("masked sentinel overwrote the stored token: %q", i.VMAuthToken)
+	}
+}
+
+func TestPutSettingsValidatesExportAuthType(t *testing.T) {
+	h, _, _ := newTestAPIWithSettings(t)
+	for name, body := range map[string]map[string]any{
+		"bad vm auth type": {"integrations": map[string]any{"vm_auth_type": "hmac"}},
+		"custom without header name": {"integrations": map[string]any{
+			"vm_auth_type": "custom", "vm_auth_header_value": "v",
+		}},
+		"custom with invalid header name": {"integrations": map[string]any{
+			"vl_auth_type": "custom", "vl_auth_header_name": "Bad,Name", "vl_auth_header_value": "v",
+		}},
+	} {
+		rec := do(t, h, http.MethodPut, "/api/v1/settings", body)
+		if rec.Code != http.StatusBadRequest {
+			t.Fatalf("%s: status %d, want 400 (%s)", name, rec.Code, rec.Body)
+		}
+	}
+}
+
 func TestSettingsTestReportsUnreachable(t *testing.T) {
 	h, _, _ := newTestAPIWithSettings(t)
 	rec := do(t, h, http.MethodPost, "/api/v1/settings/test/vm", map[string]any{"url": "http://127.0.0.1:1"})

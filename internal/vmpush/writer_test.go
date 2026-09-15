@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 	"github.com/metril/speedtest-tracker/internal/vmpush"
 )
@@ -52,7 +53,7 @@ func TestWriterPostsBatchToImportEndpoint(t *testing.T) {
 	defer srv.Close()
 
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger()})
-	wr.Configure(true, srv.URL, "Bearer tok", map[string]string{"host": "pi4"})
+	wr.Configure(true, srv.URL, settings.ExportAuth{Type: settings.ExportAuthCustom, HeaderName: "Authorization", HeaderValue: "Bearer tok"}, map[string]string{"host": "pi4"})
 	wr.Start()
 	defer wr.Close(context.Background())
 
@@ -74,12 +75,63 @@ func TestWriterPostsBatchToImportEndpoint(t *testing.T) {
 	waitFor(t, func() bool { return wr.Stats().Pushed == 1 })
 }
 
+func TestWriterAppliesExportAuth(t *testing.T) {
+	for name, tc := range map[string]struct {
+		auth       settings.ExportAuth
+		wantAuth   string
+		wantHeader string
+	}{
+		"none":   {auth: settings.ExportAuth{}, wantHeader: "Authorization"},
+		"basic":  {auth: settings.ExportAuth{Type: settings.ExportAuthBasic, Username: "u", Password: "p"}, wantAuth: "Basic dTpw"},
+		"bearer": {auth: settings.ExportAuth{Type: settings.ExportAuthBearer, Token: "tok"}, wantAuth: "Bearer tok"},
+		"custom": {auth: settings.ExportAuth{Type: settings.ExportAuthCustom, HeaderName: "X-Api-Key", HeaderValue: "secret"}, wantHeader: "X-Api-Key", wantAuth: "secret"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var gotAuth, gotCustom string
+			ch := make(chan struct{}, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotAuth = r.Header.Get("Authorization")
+				if tc.wantHeader == "X-Api-Key" {
+					gotCustom = r.Header.Get("X-Api-Key")
+				}
+				ch <- struct{}{}
+				w.WriteHeader(http.StatusNoContent)
+			}))
+			defer srv.Close()
+
+			wr := vmpush.New(vmpush.Config{Logger: discardLogger()})
+			wr.Configure(true, srv.URL, tc.auth, nil)
+			wr.Start()
+			defer wr.Close(context.Background())
+
+			wr.OnResult(context.Background(), okResult(), vmpush.Meta{})
+			select {
+			case <-ch:
+			case <-time.After(2 * time.Second):
+				t.Fatal("no push within 2s")
+			}
+			if name == "custom" {
+				if gotCustom != tc.wantAuth {
+					t.Fatalf("X-Api-Key = %q, want %q", gotCustom, tc.wantAuth)
+				}
+				if gotAuth != "" {
+					t.Fatalf("Authorization = %q, want unset", gotAuth)
+				}
+				return
+			}
+			if gotAuth != tc.wantAuth {
+				t.Fatalf("Authorization = %q, want %q", gotAuth, tc.wantAuth)
+			}
+		})
+	}
+}
+
 func TestWriterDisabledDoesNotPush(t *testing.T) {
 	hits := make(chan struct{}, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits <- struct{}{} }))
 	defer srv.Close()
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger()})
-	wr.Configure(false, srv.URL, "", nil)
+	wr.Configure(false, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 	defer wr.Close(context.Background())
 	wr.OnResult(context.Background(), okResult(), vmpush.Meta{})
@@ -101,7 +153,7 @@ func TestWriterRetriesAfterFailureAndCountsFailures(t *testing.T) {
 	}))
 	defer srv.Close()
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), MaxBackoff: 10 * time.Millisecond})
-	wr.Configure(true, srv.URL, "", nil)
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 	defer wr.Close(context.Background())
 	wr.OnResult(context.Background(), okResult(), vmpush.Meta{})
@@ -119,14 +171,14 @@ func TestDeliverAbandonsBatchWhenDisabledMidRetry(t *testing.T) {
 	}))
 	defer srv.Close()
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), MaxBackoff: 5 * time.Millisecond})
-	wr.Configure(true, srv.URL, "", nil)
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 	defer wr.Close(context.Background())
 
 	wr.OnResult(context.Background(), okResult(), vmpush.Meta{})
 	waitFor(t, func() bool { return calls.Load() >= 2 }) // confirm it is actually retrying
 
-	wr.Configure(false, "", "", nil)
+	wr.Configure(false, "", settings.ExportAuth{}, nil)
 	waitFor(t, func() bool { return wr.Stats().Failed >= 1 })
 
 	seen := calls.Load()
@@ -147,7 +199,7 @@ func TestOnResultConcurrentEnqueueAccountsForEveryCall(t *testing.T) {
 	}))
 	defer srv.Close()
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), RingSize: 4})
-	wr.Configure(true, srv.URL, "", nil)
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 
 	const n = 500
@@ -183,7 +235,7 @@ func TestWriterRingDropsOldestWhenFull(t *testing.T) {
 	defer srv.Close()
 	defer close(block)
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), RingSize: 2, MaxBackoff: time.Millisecond})
-	wr.Configure(true, srv.URL, "", nil)
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 	defer wr.Close(context.Background())
 	for i := 0; i < 50; i++ {
@@ -213,7 +265,7 @@ func TestCloseDrainsQueuedBatches(t *testing.T) {
 	defer srv.Close()
 
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), RingSize: 10})
-	wr.Configure(true, srv.URL, "", nil)
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
 	wr.Start()
 
 	for i := 0; i < 3; i++ {
@@ -243,7 +295,7 @@ func TestCloseDrainsQueuedBatches(t *testing.T) {
 
 func TestOnResultNeverBlocks(t *testing.T) {
 	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), RingSize: 1})
-	wr.Configure(true, "http://127.0.0.1:1", "", nil) // nothing listening
+	wr.Configure(true, "http://127.0.0.1:1", settings.ExportAuth{}, nil) // nothing listening
 	wr.Start()
 	defer wr.Close(context.Background())
 	done := make(chan struct{})

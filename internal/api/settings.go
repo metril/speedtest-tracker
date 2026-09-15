@@ -61,15 +61,27 @@ type enginesBody struct {
 // key and an explicit "{}" are distinguishable, matching the auth-header
 // pointer-string fields.
 type integrationsBody struct {
-	VMEnabled      *bool              `json:"vm_enabled"`
-	VMURL          *string            `json:"vm_url"`
-	VMAuthHeader   *string            `json:"vm_auth_header"`
-	VMExtraLabels  *map[string]string `json:"vm_extra_labels"`
-	VLEnabled      *bool              `json:"vl_enabled"`
-	VLURL          *string            `json:"vl_url"`
-	VLAuthHeader   *string            `json:"vl_auth_header"`
-	VLStreamFields *map[string]string `json:"vl_stream_fields"`
-	MetricsEnabled *bool              `json:"metrics_enabled"`
+	VMEnabled         *bool              `json:"vm_enabled"`
+	VMURL             *string            `json:"vm_url"`
+	VMAuthHeader      *string            `json:"vm_auth_header"`
+	VMAuthType        *string            `json:"vm_auth_type"`
+	VMAuthUsername    *string            `json:"vm_auth_username"`
+	VMAuthPassword    *string            `json:"vm_auth_password"`
+	VMAuthToken       *string            `json:"vm_auth_token"`
+	VMAuthHeaderName  *string            `json:"vm_auth_header_name"`
+	VMAuthHeaderValue *string            `json:"vm_auth_header_value"`
+	VMExtraLabels     *map[string]string `json:"vm_extra_labels"`
+	VLEnabled         *bool              `json:"vl_enabled"`
+	VLURL             *string            `json:"vl_url"`
+	VLAuthHeader      *string            `json:"vl_auth_header"`
+	VLAuthType        *string            `json:"vl_auth_type"`
+	VLAuthUsername    *string            `json:"vl_auth_username"`
+	VLAuthPassword    *string            `json:"vl_auth_password"`
+	VLAuthToken       *string            `json:"vl_auth_token"`
+	VLAuthHeaderName  *string            `json:"vl_auth_header_name"`
+	VLAuthHeaderValue *string            `json:"vl_auth_header_value"`
+	VLStreamFields    *map[string]string `json:"vl_stream_fields"`
+	MetricsEnabled    *bool              `json:"metrics_enabled"`
 }
 
 // notificationsBody is the partial PUT document for the Notifications
@@ -195,14 +207,33 @@ func maskChannelTokens(n *settings.Notifications) {
 	}
 }
 
-// maskSecrets replaces a set auth header with settings.MaskedSecret,
-// leaving an unset one as the empty string.
+// maskSecrets replaces every set secret (the legacy auth header and each
+// structured export-auth secret field) with settings.MaskedSecret, leaving
+// an unset one as the empty string.
 func maskSecrets(i *settings.Integrations) {
 	if i.VMAuthHeader != "" {
 		i.VMAuthHeader = settings.MaskedSecret
 	}
+	if i.VMAuthPassword != "" {
+		i.VMAuthPassword = settings.MaskedSecret
+	}
+	if i.VMAuthToken != "" {
+		i.VMAuthToken = settings.MaskedSecret
+	}
+	if i.VMAuthHeaderValue != "" {
+		i.VMAuthHeaderValue = settings.MaskedSecret
+	}
 	if i.VLAuthHeader != "" {
 		i.VLAuthHeader = settings.MaskedSecret
+	}
+	if i.VLAuthPassword != "" {
+		i.VLAuthPassword = settings.MaskedSecret
+	}
+	if i.VLAuthToken != "" {
+		i.VLAuthToken = settings.MaskedSecret
+	}
+	if i.VLAuthHeaderValue != "" {
+		i.VLAuthHeaderValue = settings.MaskedSecret
 	}
 }
 
@@ -365,10 +396,22 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMEnabled, i.VMEnabled) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMURL, i.VMURL) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthHeader, i.VMAuthHeader) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthType, i.VMAuthType) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthUsername, i.VMAuthUsername) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthPassword, i.VMAuthPassword) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthToken, i.VMAuthToken) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthHeaderName, i.VMAuthHeaderName) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthHeaderValue, i.VMAuthHeaderValue) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVMExtraLabels, i.VMExtraLabels) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLEnabled, i.VLEnabled) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLURL, i.VLURL) },
 			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthHeader, i.VLAuthHeader) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthType, i.VLAuthType) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthUsername, i.VLAuthUsername) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthPassword, i.VLAuthPassword) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthToken, i.VLAuthToken) },
+			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthHeaderName, i.VLAuthHeaderName) },
+			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthHeaderValue, i.VLAuthHeaderValue) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyVLStreamFields, i.VLStreamFields) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeyMetricsEnabled, i.MetricsEnabled) },
 		}
@@ -524,6 +567,24 @@ func setKeys(body settingsBody) []string {
 		if i.VMAuthHeader != nil {
 			keys = append(keys, settings.KeyVMAuthHeader)
 		}
+		if i.VMAuthType != nil {
+			keys = append(keys, settings.KeyVMAuthType)
+		}
+		if i.VMAuthUsername != nil {
+			keys = append(keys, settings.KeyVMAuthUsername)
+		}
+		if i.VMAuthPassword != nil {
+			keys = append(keys, settings.KeyVMAuthPassword)
+		}
+		if i.VMAuthToken != nil {
+			keys = append(keys, settings.KeyVMAuthToken)
+		}
+		if i.VMAuthHeaderName != nil {
+			keys = append(keys, settings.KeyVMAuthHeaderName)
+		}
+		if i.VMAuthHeaderValue != nil {
+			keys = append(keys, settings.KeyVMAuthHeaderValue)
+		}
 		if i.VMExtraLabels != nil {
 			keys = append(keys, settings.KeyVMExtraLabels)
 		}
@@ -535,6 +596,24 @@ func setKeys(body settingsBody) []string {
 		}
 		if i.VLAuthHeader != nil {
 			keys = append(keys, settings.KeyVLAuthHeader)
+		}
+		if i.VLAuthType != nil {
+			keys = append(keys, settings.KeyVLAuthType)
+		}
+		if i.VLAuthUsername != nil {
+			keys = append(keys, settings.KeyVLAuthUsername)
+		}
+		if i.VLAuthPassword != nil {
+			keys = append(keys, settings.KeyVLAuthPassword)
+		}
+		if i.VLAuthToken != nil {
+			keys = append(keys, settings.KeyVLAuthToken)
+		}
+		if i.VLAuthHeaderName != nil {
+			keys = append(keys, settings.KeyVLAuthHeaderName)
+		}
+		if i.VLAuthHeaderValue != nil {
+			keys = append(keys, settings.KeyVLAuthHeaderValue)
 		}
 		if i.VLStreamFields != nil {
 			keys = append(keys, settings.KeyVLStreamFields)
@@ -982,6 +1061,30 @@ func validateSettings(body settingsBody, current settings.Integrations) error {
 				return fmt.Errorf("vl_stream_fields: %w", err)
 			}
 		}
+
+		vmAuthType := current.VMAuthType
+		if i.VMAuthType != nil {
+			vmAuthType = *i.VMAuthType
+		}
+		vmAuthHeaderName := current.VMAuthHeaderName
+		if i.VMAuthHeaderName != nil {
+			vmAuthHeaderName = *i.VMAuthHeaderName
+		}
+		if err := validateExportAuthType(i.VMAuthType, vmAuthType, vmAuthHeaderName); err != nil {
+			return fmt.Errorf("vm_auth: %w", err)
+		}
+
+		vlAuthType := current.VLAuthType
+		if i.VLAuthType != nil {
+			vlAuthType = *i.VLAuthType
+		}
+		vlAuthHeaderName := current.VLAuthHeaderName
+		if i.VLAuthHeaderName != nil {
+			vlAuthHeaderName = *i.VLAuthHeaderName
+		}
+		if err := validateExportAuthType(i.VLAuthType, vlAuthType, vlAuthHeaderName); err != nil {
+			return fmt.Errorf("vl_auth: %w", err)
+		}
 	}
 
 	if n := body.Notifications; n != nil {
@@ -1096,6 +1199,28 @@ func sameOrigin(a, b string) bool {
 	return ua.Scheme == ub.Scheme && ua.Host == ub.Host
 }
 
+// validateExportAuthType validates a structured export-auth type/header-name
+// pair. bodyType is the body-supplied *_auth_type pointer (nil when the
+// request didn't touch it, in which case a bad type already stored is not
+// this request's problem); effectiveType/effectiveHeaderName are the
+// resulting values after merging the body onto the current settings. A
+// custom type requires a non-empty, syntactically valid header name.
+func validateExportAuthType(bodyType *string, effectiveType, effectiveHeaderName string) error {
+	if bodyType != nil && !settings.ValidExportAuthType(*bodyType) {
+		return fmt.Errorf("auth_type must be one of %s, %s, %s, %s",
+			settings.ExportAuthNone, settings.ExportAuthBasic, settings.ExportAuthBearer, settings.ExportAuthCustom)
+	}
+	if effectiveType == settings.ExportAuthCustom {
+		if effectiveHeaderName == "" {
+			return fmt.Errorf("auth_header_name is required when auth_type is custom")
+		}
+		if !isValidHTTPHeaderName(effectiveHeaderName) {
+			return fmt.Errorf("auth_header_name is not a valid HTTP header name")
+		}
+	}
+	return nil
+}
+
 // validateKeys checks every key against settingsKeyPattern and rejects
 // reserved built-in names.
 func validateKeys(m map[string]string, reserved map[string]bool) error {
@@ -1110,6 +1235,79 @@ func validateKeys(m map[string]string, reserved map[string]bool) error {
 	return nil
 }
 
+// testAuthBody is the structured export-auth object accepted by
+// POST /settings/test/{vm,vl}, mirroring settings.ExportAuth. A secret
+// field (password, token, header_value) equal to settings.MaskedSecret
+// resolves to the stored value, but only per resolveTestAuth's same-origin
+// rule.
+type testAuthBody struct {
+	Type        *string `json:"type"`
+	Username    *string `json:"username"`
+	Password    *string `json:"password"`
+	Token       *string `json:"token"`
+	HeaderName  *string `json:"header_name"`
+	HeaderValue *string `json:"header_value"`
+}
+
+// resolveTestAuth builds the settings.ExportAuth to apply to a connection
+// test probe. auth (structured, preferred) takes priority over legacyHeader
+// (the deprecated auth_header field); when neither is present in the
+// request, the stored auth is reused. In every case, a masked secret
+// (settings.MaskedSecret) — whether a field inside auth or the whole
+// legacyHeader — resolves to the corresponding stored value only when
+// rawURL is the same origin as storedURL; on a different origin it
+// resolves to empty, since the caller could otherwise redirect the stored
+// credential to an arbitrary host (SSRF + credential exfil).
+func resolveTestAuth(rawURL, storedURL string, stored settings.ExportAuth, legacyHeader *string, auth *testAuthBody) settings.ExportAuth {
+	same := sameOrigin(rawURL, storedURL)
+	if auth != nil {
+		out := settings.ExportAuth{}
+		if auth.Type != nil {
+			out.Type = *auth.Type
+		}
+		if auth.Username != nil {
+			out.Username = *auth.Username
+		}
+		out.Password = resolveMaybeMaskedSecret(auth.Password, stored.Password, same)
+		out.Token = resolveMaybeMaskedSecret(auth.Token, stored.Token, same)
+		if auth.HeaderName != nil {
+			out.HeaderName = *auth.HeaderName
+		}
+		out.HeaderValue = resolveMaybeMaskedSecret(auth.HeaderValue, stored.HeaderValue, same)
+		return out
+	}
+	if legacyHeader != nil {
+		if *legacyHeader != settings.MaskedSecret {
+			return settings.ExportAuth{Type: settings.ExportAuthCustom, HeaderName: "Authorization", HeaderValue: *legacyHeader}
+		}
+		if same {
+			return stored
+		}
+		return settings.ExportAuth{}
+	}
+	if same {
+		return stored
+	}
+	return settings.ExportAuth{}
+}
+
+// resolveMaybeMaskedSecret resolves one secret field of a testAuthBody: nil
+// (field omitted) is empty, settings.MaskedSecret resolves to storedValue
+// only when same is true (otherwise empty), and anything else is taken
+// literally as the caller's own input.
+func resolveMaybeMaskedSecret(v *string, storedValue string, same bool) string {
+	if v == nil {
+		return ""
+	}
+	if *v == settings.MaskedSecret {
+		if same {
+			return storedValue
+		}
+		return ""
+	}
+	return *v
+}
+
 // testIntegration probes the configured VictoriaMetrics or VictoriaLogs
 // endpoint with GET /health. A reachable-but-unhappy endpoint is reported
 // in the body with ok=false rather than as an HTTP error, so the form can
@@ -1121,8 +1319,9 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		URL        *string `json:"url"`
-		AuthHeader *string `json:"auth_header"`
+		URL        *string       `json:"url"`
+		AuthHeader *string       `json:"auth_header"` // deprecated: use Auth
+		Auth       *testAuthBody `json:"auth"`
 	}
 	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
 		return
@@ -1132,9 +1331,9 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		internalError(w, d.Logger, "load integrations", err)
 		return
 	}
-	storedURL, storedAuth := cur.VMURL, cur.VMAuthHeader
+	storedURL, storedAuth := cur.VMURL, cur.VMAuth()
 	if target == "vl" {
-		storedURL, storedAuth = cur.VLURL, cur.VLAuthHeader
+		storedURL, storedAuth = cur.VLURL, cur.VLAuth()
 	}
 	rawURL := storedURL
 	if body.URL != nil {
@@ -1148,15 +1347,9 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 	// The stored credential is only reused when the effective URL is the
 	// same origin as the stored one; otherwise an unauthenticated caller
 	// could redirect it to an arbitrary host (SSRF + credential exfil).
-	// An explicit, non-masked auth_header is always honored since it is
-	// the caller's own input, not the stored secret.
-	var auth string
-	switch {
-	case body.AuthHeader != nil && *body.AuthHeader != settings.MaskedSecret:
-		auth = *body.AuthHeader
-	case sameOrigin(rawURL, storedURL):
-		auth = storedAuth
-	}
+	// An explicit, non-masked auth is always honored since it is the
+	// caller's own input, not the stored secret.
+	auth := resolveTestAuth(rawURL, storedURL, storedAuth, body.AuthHeader, body.Auth)
 
 	client := d.TestClient
 	if client == nil {
@@ -1169,9 +1362,7 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
 		return
 	}
-	if auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	auth.Apply(req)
 
 	start := time.Now()
 	resp, err := client.Do(req)

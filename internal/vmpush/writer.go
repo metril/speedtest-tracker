@@ -11,6 +11,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
@@ -40,7 +41,7 @@ type Writer struct {
 	mu      sync.Mutex // guards config only; never held across I/O
 	enabled bool
 	url     string
-	auth    string
+	auth    settings.ExportAuth
 	extra   map[string]string
 
 	enqueueMu sync.Mutex // serializes the drop-oldest ring dance in OnResult
@@ -85,7 +86,7 @@ func New(cfg Config) *Writer {
 
 // Configure hot-reloads the target and labels. Safe to call concurrently
 // with OnResult and the worker loop.
-func (w *Writer) Configure(enabled bool, url, authHeader string, extra map[string]string) {
+func (w *Writer) Configure(enabled bool, url string, auth settings.ExportAuth, extra map[string]string) {
 	cloned := make(map[string]string, len(extra))
 	for k, v := range extra {
 		cloned[k] = v
@@ -93,7 +94,7 @@ func (w *Writer) Configure(enabled bool, url, authHeader string, extra map[strin
 	w.mu.Lock()
 	w.enabled = enabled
 	w.url = url
-	w.auth = authHeader
+	w.auth = auth
 	w.extra = cloned
 	w.mu.Unlock()
 }
@@ -276,7 +277,7 @@ func (w *Writer) deliver(b []byte) {
 	}
 }
 
-func (w *Writer) post(parent context.Context, url, auth string, b []byte) (int, error) {
+func (w *Writer) post(parent context.Context, url string, auth settings.ExportAuth, b []byte) (int, error) {
 	ctx, cancel := context.WithTimeout(parent, 30*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost,
@@ -285,9 +286,7 @@ func (w *Writer) post(parent context.Context, url, auth string, b []byte) (int, 
 		return 0, err
 	}
 	req.Header.Set("Content-Type", "text/plain")
-	if auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	auth.Apply(req)
 	resp, err := w.cfg.Client.Do(req)
 	if err != nil {
 		return 0, err

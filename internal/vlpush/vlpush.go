@@ -18,6 +18,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/metril/speedtest-tracker/internal/settings"
 )
 
 // Config configures a Handler. Zero values get sane defaults in New.
@@ -36,7 +38,7 @@ type shared struct {
 	mu           sync.Mutex // guards enabled/url/auth/streamFields only; never held across I/O
 	enabled      bool
 	url          string
-	auth         string
+	auth         settings.ExportAuth
 	streamFields map[string]string
 
 	lines chan []byte // handoff from Handle to the worker
@@ -119,7 +121,7 @@ func New(cfg Config) *Handler {
 
 // Configure hot-reloads the shipping target and labels. Safe to call
 // concurrently with Handle and the worker loop.
-func (h *Handler) Configure(enabled bool, u, authHeader string, streamFields map[string]string) {
+func (h *Handler) Configure(enabled bool, u string, auth settings.ExportAuth, streamFields map[string]string) {
 	cloned := make(map[string]string, len(streamFields))
 	for k, v := range streamFields {
 		cloned[k] = v
@@ -127,7 +129,7 @@ func (h *Handler) Configure(enabled bool, u, authHeader string, streamFields map
 	h.shared.mu.Lock()
 	h.shared.enabled = enabled
 	h.shared.url = u
-	h.shared.auth = authHeader
+	h.shared.auth = auth
 	h.shared.streamFields = cloned
 	h.shared.mu.Unlock()
 }
@@ -331,7 +333,7 @@ func (s *shared) doFlush(ctx context.Context, buf [][]byte) {
 	}
 }
 
-func (s *shared) post(ctx context.Context, u, auth string, streamFields map[string]string, buf [][]byte) error {
+func (s *shared) post(ctx context.Context, u string, auth settings.ExportAuth, streamFields map[string]string, buf [][]byte) error {
 	body := bytes.Join(buf, []byte("\n"))
 	body = append(body, '\n')
 
@@ -353,9 +355,7 @@ func (s *shared) post(ctx context.Context, u, auth string, streamFields map[stri
 		return err
 	}
 	req.Header.Set("Content-Type", "application/stream+json")
-	if auth != "" {
-		req.Header.Set("Authorization", auth)
-	}
+	auth.Apply(req)
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return err
