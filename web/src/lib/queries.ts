@@ -2,6 +2,7 @@ import {
   useInfiniteQuery, useMutation, useQuery, useQueryClient,
 } from '@tanstack/react-query';
 import * as api from './api';
+import { ApiError } from './api';
 import type {
   QueueInput, Range, ResultFilters, ScheduleInput, TargetInput,
 } from './api';
@@ -330,14 +331,15 @@ export function useUpdateSettings() {
 }
 
 /** useMe is the caller's identity under the active auth mode. It never
- * changes under a live session, so it is fetched once and never retried --
- * a failure here is an answer (not authenticated), not a transient error. */
+ * changes under a live session, so it is fetched once and rarely retried --
+ * a 401 is an answer (not authenticated), not a transient error, so it never
+ * retries; any other failure gets a couple of retries. */
 export function useMe() {
   return useQuery({
     queryKey: queryKeys.me,
     queryFn: api.getMe,
     staleTime: Infinity,
-    retry: false,
+    retry: (n, err) => !(err instanceof ApiError && err.status === 401) && n < 2,
   });
 }
 
