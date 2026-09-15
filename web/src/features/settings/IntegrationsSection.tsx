@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
-import { LabelsEditor } from '../../components/LabelsEditor';
+import { KeyValueInput } from '../../components/settings/KeyValueInput';
 import { SwitchField } from '../../components/SwitchField';
 import { ExportAuthFields } from './ExportAuthFields';
 import { Section } from './Section';
@@ -51,7 +51,7 @@ export function IntegrationsSection() {
           vm_auth_header_value: next.header_value ?? '',
         })}
       />
-      <LabelsEditor
+      <KeyValueInput
         label="VictoriaMetrics extra labels"
         value={integrations.vm_extra_labels}
         onChange={(v) => setIntegrations({ ...integrations, vm_extra_labels: v })}
@@ -105,7 +105,7 @@ export function IntegrationsSection() {
           vl_auth_header_value: next.header_value ?? '',
         })}
       />
-      <LabelsEditor
+      <KeyValueInput
         label="Extra stream fields"
         value={integrations.vl_stream_fields}
         onChange={(v) => setIntegrations({ ...integrations, vl_stream_fields: v })}

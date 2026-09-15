@@ -2,7 +2,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
 import { Input } from '@/components/ui/input';
-import { LabelsEditor } from '../../components/LabelsEditor';
+import { KeyValueInput } from '../../components/settings/KeyValueInput';
 import { SwitchField } from '../../components/SwitchField';
 import type { NotifyChannel, NotifyChannelType } from '../../lib/api';
 import { inputClass } from './styles';
@@ -72,7 +72,7 @@ export function ChannelEditor({
 
       {value.type === 'webhook' && (
         <div aria-label="Headers">
-          <LabelsEditor
+          <KeyValueInput
             label="Headers"
             value={value.headers ?? {}}
             onChange={(v) => onChange({ ...value, headers: v })}
