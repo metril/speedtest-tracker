@@ -11,7 +11,7 @@ function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
 }
 
-const OPEN_ME: Me = { mode: 'open', user: '', groups: [], is_admin: true };
+const OPEN_ME: Me = { mode: 'open', user: '', display_name: '', groups: [], is_admin: true };
 
 beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
@@ -89,13 +89,13 @@ describe('Layout', () => {
   });
 
   it('shows the signed-in user and a sign out button under oidc mode', async () => {
-    renderLayout('/', { mode: 'oidc', user: 'alice', groups: [], is_admin: true, name: 'Alice' });
+    renderLayout('/', { mode: 'oidc', user: 'alice', display_name: 'Alice', groups: [], is_admin: true });
     expect(await screen.findAllByText('Alice')).not.toHaveLength(0);
     expect(screen.getAllByRole('button', { name: 'Sign out' }).length).toBeGreaterThan(0);
   });
 
   it('signs out, clears the query cache and navigates to /login', async () => {
-    renderLayout('/', { mode: 'oidc', user: 'alice', groups: [], is_admin: true, email: 'alice@example.com' });
+    renderLayout('/', { mode: 'oidc', user: 'alice', display_name: 'alice', groups: [], is_admin: true });
     const [signOut] = await screen.findAllByRole('button', { name: 'Sign out' });
     await userEvent.click(signOut);
     expect(await screen.findByText('Login page marker')).toBeInTheDocument();

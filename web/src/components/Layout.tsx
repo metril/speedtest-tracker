@@ -62,7 +62,7 @@ function UserChip({ collapsed }: { collapsed?: boolean }) {
   const navigate = useNavigate();
 
   if (me.data?.mode !== 'oidc') return null;
-  const label = me.data.name || me.data.email || me.data.user;
+  const label = me.data.display_name || me.data.user;
 
   const signOut = () => {
     logout.mutate(undefined, {
@@ -74,7 +74,7 @@ function UserChip({ collapsed }: { collapsed?: boolean }) {
   };
 
   return (
-    <div className={`flex items-center gap-2 ${collapsed ? 'flex-col' : ''}`}>
+    <div className={`flex items-center gap-2 ${collapsed ? 'flex-col' : 'min-w-0 flex-1'}`}>
       {!collapsed && label && (
         <span className="truncate text-sm text-muted" title={label}>{label}</span>
       )}
@@ -121,11 +121,14 @@ export function Layout() {
             </div>
             <div className={`flex items-center gap-2 border-t border-line p-2 ${collapsed ? 'flex-col' : 'justify-between'}`}>
               <UserChip collapsed={collapsed} />
-              <ThemeToggle collapsed={collapsed} />
+              <div className="shrink-0">
+                <ThemeToggle collapsed={collapsed} />
+              </div>
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
+                className="shrink-0"
                 aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
                 onClick={() => setCollapsed((v) => !v)}
               >
