@@ -25,10 +25,7 @@ var validChannelTypes = map[string]bool{"webhook": true, "apprise": true}
 // parse as a supported apprise-go target URL); the other types validate
 // URL as an absolute http(s) endpoint.
 func ValidateChannel(ch settings.Channel) error {
-	name := ch.ID
-	if name == "" {
-		name = "(new)"
-	}
+	name := channelLabel(ch)
 	if ch.ID == "" {
 		return fmt.Errorf("channel %s: id must be set", name)
 	}
@@ -57,6 +54,20 @@ func ValidateChannel(ch settings.Channel) error {
 		}
 	}
 	return nil
+}
+
+// channelLabel returns the identifier to use for ch in a user-facing
+// error: its Name (quoted) when set, since that's what the settings UI
+// shows the user, falling back to its ID (an opaque UUID the UI never
+// displays) and finally "(new)" for a channel with neither.
+func channelLabel(ch settings.Channel) string {
+	if ch.Name != "" {
+		return fmt.Sprintf("%q", ch.Name)
+	}
+	if ch.ID != "" {
+		return ch.ID
+	}
+	return "(new)"
 }
 
 // RedactURL returns u with only scheme and host kept ("scheme://host"),

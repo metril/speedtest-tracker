@@ -68,6 +68,26 @@ describe('ChannelEditor', () => {
     expect(onTest).not.toHaveBeenCalled();
   });
 
+  it('shows "Unnamed channel" and generic aria-labels when name is empty', async () => {
+    const unnamed: NotifyChannel = { id: 'c3', type: 'webhook', name: '', enabled: true, url: '' };
+    render(
+      <ChannelEditor value={unnamed} onChange={vi.fn()} onRemove={vi.fn()} onTest={vi.fn()} />,
+    );
+    expect(screen.getByText('Unnamed channel')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Test channel' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Remove channel' })).toBeInTheDocument();
+  });
+
+  it('highlights the card and shows the error message when invalid', () => {
+    render(
+      <ChannelEditor
+        value={webhookChannel} onChange={vi.fn()} onRemove={vi.fn()} onTest={vi.fn()}
+        invalid errorMessage='channel "hook": url must be an absolute http(s) URL'
+      />,
+    );
+    expect(screen.getByText('channel "hook": url must be an absolute http(s) URL')).toHaveClass('text-bad');
+  });
+
   it('does not render a Tags field for apprise (apprise-go has no tag option)', async () => {
     const appriseChannel: NotifyChannel = {
       id: 'c2', type: 'apprise', name: 'phone', enabled: true, url: '', tags: ['a', 'b'],

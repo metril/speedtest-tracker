@@ -158,6 +158,21 @@ func TestDeliverReportsNon2xx(t *testing.T) {
 	}
 }
 
+// TestValidateChannelErrorUsesName is the regression case for the
+// opaque-ID bug: a channel with a Name set must be identified by that
+// name (quoted) in the error, not by its ID, since the settings UI
+// never shows the ID to the user.
+func TestValidateChannelErrorUsesName(t *testing.T) {
+	ch := settings.Channel{ID: "4bc556d4", Name: "Discord", Type: "webhook", URL: ""}
+	err := notify.ValidateChannel(ch)
+	if err == nil || !strings.Contains(err.Error(), `channel "Discord":`) {
+		t.Fatalf("err = %v, want it to name the channel by its Name", err)
+	}
+	if strings.Contains(err.Error(), "4bc556d4") {
+		t.Fatalf("err = %v, should not expose the opaque id when a name is set", err)
+	}
+}
+
 func TestValidateChannel(t *testing.T) {
 	for _, tc := range []struct {
 		name string

@@ -4,7 +4,7 @@ import { Switch } from '@/components/ui/switch';
 import { SettingsCard, SettingsRow, useSettingsRowField } from '@/components/settings';
 import { ThresholdFields } from '../targets/ThresholdFields';
 import { ChannelEditor } from './ChannelEditor';
-import { isChannelUnsaved } from './channelHelpers';
+import { channelErrorTarget, isChannelUnsaved } from './channelHelpers';
 import { useSettingsSection } from './useSettingsSection';
 
 function CooldownField({ value, onChange }: { value: number; onChange: (v: number) => void }) {
@@ -38,9 +38,11 @@ function QuietHoursFields({
 
 export function NotificationsSection() {
   const {
-    notifications, setNotifications, readOnly,
+    notifications, setNotifications, readOnly, error,
     addChannel, updateChannel, removeChannel, runChannelTest, channelResults, testingChannelId, savedChannels,
   } = useSettingsSection('notifications');
+
+  const errorTarget = error ? channelErrorTarget(error) : null;
 
   return (
     <div className="grid gap-4">
@@ -93,19 +95,24 @@ export function NotificationsSection() {
         {notifications.channels.length === 0 && (
           <p className="px-4 py-3 text-sm text-faint">No channels yet — nothing will be delivered.</p>
         )}
-        {notifications.channels.map((channel) => (
-          <ChannelEditor
-            key={channel.id}
-            value={channel}
-            onChange={(next) => updateChannel(channel.id, next)}
-            onRemove={() => removeChannel(channel.id)}
-            onTest={() => runChannelTest(channel)}
-            testResult={channelResults[channel.id]}
-            testPending={testingChannelId === channel.id}
-            unsaved={isChannelUnsaved(channel, savedChannels)}
-            readOnly={readOnly}
-          />
-        ))}
+        {notifications.channels.map((channel) => {
+          const invalid = !!errorTarget && (errorTarget === channel.id || errorTarget === channel.name);
+          return (
+            <ChannelEditor
+              key={channel.id}
+              value={channel}
+              onChange={(next) => updateChannel(channel.id, next)}
+              onRemove={() => removeChannel(channel.id)}
+              onTest={() => runChannelTest(channel)}
+              testResult={channelResults[channel.id]}
+              testPending={testingChannelId === channel.id}
+              unsaved={isChannelUnsaved(channel, savedChannels)}
+              readOnly={readOnly}
+              invalid={invalid}
+              errorMessage={invalid ? error : undefined}
+            />
+          );
+        })}
       </SettingsCard>
 
       <SettingsCard title="Default thresholds" description="Targets can override any of these.">

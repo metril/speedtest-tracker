@@ -15,7 +15,12 @@ export function stripIrrelevantChannelFields(channel: NotifyChannel): NotifyChan
       };
     case 'apprise':
       return {
-        id, type, name, enabled, url: '', urls,
+        id,
+        type,
+        name,
+        enabled,
+        url: '',
+        urls: (urls ?? []).map((u) => u.trim()).filter((u) => u !== ''),
       };
     default:
       return {
@@ -32,4 +37,14 @@ export function isChannelUnsaved(channel: NotifyChannel, saved: NotifyChannel[] 
   const match = saved?.find((c) => c.id === channel.id);
   if (!match) return true;
   return JSON.stringify(stripIrrelevantChannelFields(channel)) !== JSON.stringify(stripIrrelevantChannelFields(match));
+}
+
+/** Extracts the channel id-or-name a save error names, from messages of
+ * the form `channel "<name>": ...` or `channel <id>: ...` (internal/notify's
+ * ValidateChannel prefers the human-readable Name when set, falling back
+ * to the opaque ID). Returns null when the message doesn't match that
+ * shape, e.g. a non-channel-specific error. */
+export function channelErrorTarget(error: string): string | null {
+  const match = error.match(/^channel "?([^":]+)"?:/);
+  return match ? match[1] : null;
 }

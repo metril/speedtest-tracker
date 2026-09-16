@@ -26,6 +26,7 @@ function mockSection(overrides: Partial<ReturnType<typeof useSettingsSection>> =
     notifications: baseNotifications,
     setNotifications,
     readOnly: false,
+    error: undefined,
     addChannel,
     updateChannel: vi.fn(),
     removeChannel: vi.fn(),
@@ -89,6 +90,16 @@ describe('NotificationsSection', () => {
     expect(screen.getByText('hook')).toBeInTheDocument();
     await userEvent.click(screen.getByRole('button', { name: 'Add channel' }));
     expect(addChannel).toHaveBeenCalled();
+  });
+
+  it('highlights the channel card a save error names', () => {
+    const channel: NotifyChannel = { id: 'c1', type: 'webhook', name: 'Discord', enabled: true, url: '' };
+    mockSection({
+      notifications: { ...baseNotifications, channels: [channel] },
+      error: 'channel "Discord": url must be an absolute http(s) URL',
+    });
+    renderSection();
+    expect(screen.getByText('channel "Discord": url must be an absolute http(s) URL')).toBeInTheDocument();
   });
 
   it('disables the Delivery switch and Add channel button when read-only', () => {

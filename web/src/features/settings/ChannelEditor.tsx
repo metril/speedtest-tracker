@@ -1,3 +1,4 @@
+import { Send, Trash2 } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { FormField } from '@/components/FormField';
@@ -19,6 +20,10 @@ interface Props {
    * testing it would test stale/nonexistent server state. */
   unsaved?: boolean;
   readOnly?: boolean;
+  /** True when a save error names this channel; highlights the card. */
+  invalid?: boolean;
+  /** The save error text to show under the header when invalid. */
+  errorMessage?: string;
 }
 
 /** ChannelEditor edits one notification channel. Changing Type keeps all
@@ -29,33 +34,42 @@ interface Props {
  * option, so it would be inert; the field still exists on the model
  * because ntfy-channel migration reads it from legacy stored data. */
 export function ChannelEditor({
-  value, onChange, onRemove, onTest, testResult, testPending, unsaved, readOnly,
+  value, onChange, onRemove, onTest, testResult, testPending, unsaved, readOnly, invalid, errorMessage,
 }: Props) {
   const { id } = value;
+  const displayName = value.name || 'channel';
 
   const changeType = (type: NotifyChannelType) => {
     onChange({ ...value, type });
   };
 
   return (
-    <div className="grid gap-3 px-4 py-3">
+    <div className={`grid gap-3 px-4 py-3 ${invalid ? 'border border-bad rounded-md' : ''}`}>
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Badge variant="secondary" className="uppercase">{value.type}</Badge>
-          <span className="text-sm font-medium text-fg">{value.name}</span>
+          {value.name ? (
+            <span className="text-sm font-medium text-fg">{value.name}</span>
+          ) : (
+            <span className="text-sm font-medium italic text-faint">Unnamed channel</span>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <TestButton
-            label={`Test ${value.name}`} onTest={onTest} pending={!!testPending}
+            label={`Test ${displayName}`} buttonText="Test" icon={<Send className="h-4 w-4" />}
+            variant="outline" size="sm" onTest={onTest} pending={!!testPending}
             result={testResult} disabled={testPending || unsaved || readOnly}
             disabledReason={unsaved ? 'Save first to test this channel' : readOnly ? 'Read-only: admin group required' : undefined}
           />
-          <Button type="button" variant="ghost" className="text-muted hover:text-bad"
+          <Button type="button" variant="ghost" size="icon" className="text-muted hover:text-bad"
+            aria-label={`Remove ${displayName}`} title="Remove channel"
             disabled={readOnly} onClick={onRemove}>
-            Remove {value.name}
+            <Trash2 className="h-4 w-4" />
           </Button>
         </div>
       </div>
+
+      {invalid && errorMessage && <p className="text-sm text-bad">{errorMessage}</p>}
 
       <SwitchField
         id={`channel-${id}-enabled`} label="Enabled"
