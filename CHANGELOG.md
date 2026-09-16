@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.8.4](https://github.com/metril/speedtest-tracker/compare/v0.8.3...v0.8.4) (2026-09-16)
+
+
+### Features
+
+* **auth:** configurable OIDC display-name claim and callback failure logging ([0e5077b](https://github.com/metril/speedtest-tracker/commit/0e5077b12950a061257783df1de7facede20c122))
+* **notify:** optional summary notification after every result ([0ea6fda](https://github.com/metril/speedtest-tracker/commit/0ea6fda2a17f248d39a4bff3ce941530842fa43b))
+
+
+### Bug Fixes
+
+* **notify:** name channels in validation errors and make channel actions visible ([af8065e](https://github.com/metril/speedtest-tracker/commit/af8065e033dedfbc725e475ce6282df19a0fcf58))
+* **web:** live panel sparkline follows the gauge phase colour ([85ad89e](https://github.com/metril/speedtest-tracker/commit/85ad89e866342db6e926179c08dcecb2a88e44f3))
+* **web:** stop long user names overflowing the sidebar footer ([6091c78](https://github.com/metril/speedtest-tracker/commit/6091c784ba3bd76d24d994f9109e79a4001547dd))
+
 ## [0.8.3](https://github.com/metril/speedtest-tracker/compare/v0.8.2...v0.8.3) (2026-09-16)
 
 
