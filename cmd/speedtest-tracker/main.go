@@ -120,11 +120,12 @@ func (s storeSessions) LookupSession(ctx context.Context, hashedID string, now t
 		return auth.SessionInfo{}, ok, err
 	}
 	return auth.SessionInfo{
-		Subject: sess.Subject,
-		Email:   sess.Email,
-		Name:    sess.Name,
-		Groups:  sess.Groups,
-		IsAdmin: sess.IsAdmin,
+		Subject:  sess.Subject,
+		Email:    sess.Email,
+		Name:     sess.Name,
+		Username: sess.Username,
+		Groups:   sess.Groups,
+		IsAdmin:  sess.IsAdmin,
 	}, true, nil
 }
 

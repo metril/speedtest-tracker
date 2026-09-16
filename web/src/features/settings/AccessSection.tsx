@@ -3,7 +3,7 @@ import { Input } from '@/components/ui/input';
 import { Switch } from '@/components/ui/switch';
 import { ListInput, SettingsCard, SettingsRow, TestButton, useSettingsRowField } from '@/components/settings';
 import { testOIDC } from '../../lib/api';
-import type { AuthMode, AuthSettings } from '../../lib/api';
+import type { AuthMode, AuthSettings, OidcDisplayClaim } from '../../lib/api';
 import { inputClass } from './styles';
 import { TokenPanel } from './TokenPanel';
 import { useSettingsSection } from './useSettingsSection';
@@ -50,6 +50,20 @@ function ModeField({ value, onChange }: { value: AuthMode; onChange: (v: AuthMod
       <option value="forward_auth">forward_auth</option>
       <option value="token">token</option>
       <option value="oidc">oidc</option>
+    </select>
+  );
+}
+
+function DisplayClaimField({ value, onChange }: { value: OidcDisplayClaim; onChange: (v: OidcDisplayClaim) => void }) {
+  const props = useSettingsRowField();
+  return (
+    <select
+      {...props} className={inputClass} value={value}
+      onChange={(e) => onChange(e.target.value as OidcDisplayClaim)}
+    >
+      <option value="name">name</option>
+      <option value="preferred_username">preferred_username</option>
+      <option value="email">email</option>
     </select>
   );
 }
@@ -196,6 +210,15 @@ export function AccessSection() {
             <TextField
               value={auth.oidc_groups_claim} placeholder="groups"
               onChange={(v) => setAuth({ ...auth, oidc_groups_claim: v })}
+            />
+          </SettingsRow>
+          <SettingsRow
+            label="Display name claim" htmlFor="auth-oidc-display-claim" lockKey="auth.oidc_display_claim" size="sm"
+            description="Which claim the sidebar shows for the signed-in user."
+          >
+            <DisplayClaimField
+              value={auth.oidc_display_claim}
+              onChange={(v) => setAuth({ ...auth, oidc_display_claim: v })}
             />
           </SettingsRow>
           <SettingsRow

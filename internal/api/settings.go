@@ -118,6 +118,7 @@ type authBody struct {
 	OIDCGroupsClaim     *string   `json:"oidc_groups_claim"`
 	OIDCAllowedGroups   *[]string `json:"oidc_allowed_groups"`
 	OIDCAllowedEmails   *[]string `json:"oidc_allowed_emails"`
+	OIDCDisplayClaim    *string   `json:"oidc_display_claim"`
 	SessionTTLHours     *int      `json:"session_ttl_hours"`
 }
 
@@ -533,6 +534,9 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCAllowedEmails, a.OIDCAllowedEmails)
 			},
 			func() error {
+				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCDisplayClaim, a.OIDCDisplayClaim)
+			},
+			func() error {
 				return setPtr(ctx, d.Settings, settings.KeyAuthSessionTTLHours, a.SessionTTLHours)
 			},
 		}
@@ -770,6 +774,9 @@ func setKeys(body settingsBody) []string {
 		if a.OIDCAllowedEmails != nil {
 			keys = append(keys, settings.KeyAuthOIDCAllowedEmails)
 		}
+		if a.OIDCDisplayClaim != nil {
+			keys = append(keys, settings.KeyAuthOIDCDisplayClaim)
+		}
 		if a.SessionTTLHours != nil {
 			keys = append(keys, settings.KeyAuthSessionTTLHours)
 		}
@@ -829,6 +836,9 @@ func mergeAuth(current settings.Auth, body *authBody) settings.Auth {
 	}
 	if body.OIDCAllowedEmails != nil {
 		out.OIDCAllowedEmails = *body.OIDCAllowedEmails
+	}
+	if body.OIDCDisplayClaim != nil {
+		out.OIDCDisplayClaim = *body.OIDCDisplayClaim
 	}
 	if body.SessionTTLHours != nil {
 		out.SessionTTLHours = *body.SessionTTLHours
@@ -913,6 +923,14 @@ func validateAuthBody(a *authBody, current settings.Auth) error {
 	if a.OIDCRedirectBaseURL != nil && *a.OIDCRedirectBaseURL != "" {
 		if err := validateAbsoluteHTTPURL(*a.OIDCRedirectBaseURL); err != nil {
 			return fmt.Errorf("oidc_redirect_base_url: %w", err)
+		}
+	}
+
+	if a.OIDCDisplayClaim != nil {
+		switch *a.OIDCDisplayClaim {
+		case settings.OIDCDisplayClaimName, settings.OIDCDisplayClaimUsername, settings.OIDCDisplayClaimEmail:
+		default:
+			return fmt.Errorf("oidc_display_claim: must be one of name, preferred_username, email")
 		}
 	}
 

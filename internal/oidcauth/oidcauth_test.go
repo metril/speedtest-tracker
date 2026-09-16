@@ -58,17 +58,18 @@ func TestExchangeGroupsFromList(t *testing.T) {
 	p := newProvider(t, idp, Config{GroupsClaim: "groups"})
 
 	idp.Issue("code-list", map[string]any{
-		"sub":    "user-1",
-		"email":  "user@example.com",
-		"name":   "User One",
-		"groups": []any{"admins", "users"},
+		"sub":                "user-1",
+		"email":              "user@example.com",
+		"name":               "User One",
+		"preferred_username": "user1",
+		"groups":             []any{"admins", "users"},
 	})
 
 	claims, err := p.Exchange(context.Background(), "code-list", "verifier-1", "https://app.example/auth/oidc/callback")
 	if err != nil {
 		t.Fatalf("Exchange: %v", err)
 	}
-	if claims.Subject != "user-1" || claims.Email != "user@example.com" || claims.Name != "User One" {
+	if claims.Subject != "user-1" || claims.Email != "user@example.com" || claims.Name != "User One" || claims.PreferredUsername != "user1" {
 		t.Fatalf("claims = %+v", claims)
 	}
 	if len(claims.Groups) != 2 || claims.Groups[0] != "admins" || claims.Groups[1] != "users" {

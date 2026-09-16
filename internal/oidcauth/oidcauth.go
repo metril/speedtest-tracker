@@ -37,10 +37,11 @@ type Config struct {
 
 // Claims is the identity extracted from a verified ID token.
 type Claims struct {
-	Subject string
-	Email   string
-	Name    string
-	Groups  []string
+	Subject           string
+	Email             string
+	Name              string
+	PreferredUsername string
+	Groups            []string
 }
 
 // Provider is a discovered OIDC provider ready to run the authorization
@@ -161,6 +162,9 @@ func (p *Provider) Exchange(ctx context.Context, code, verifier, redirectURI str
 	}
 	if v, ok := raw["name"].(string); ok {
 		claims.Name = v
+	}
+	if v, ok := raw["preferred_username"].(string); ok {
+		claims.PreferredUsername = v
 	}
 	claims.Groups = extractGroups(raw, p.cfg.GroupsClaim)
 	return claims, nil

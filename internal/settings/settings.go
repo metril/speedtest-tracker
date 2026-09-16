@@ -120,6 +120,7 @@ var defaults = map[string]any{
 	KeyAuthOIDCGroupsClaim:     "groups",
 	KeyAuthOIDCAllowedGroups:   []string{},
 	KeyAuthOIDCAllowedEmails:   []string{},
+	KeyAuthOIDCDisplayClaim:    OIDCDisplayClaimName,
 	KeyAuthSessionTTLHours:     24,
 }
 
@@ -296,6 +297,11 @@ type Auth struct {
 	OIDCAllowedGroups   []string `json:"oidc_allowed_groups"`
 	OIDCAllowedEmails   []string `json:"oidc_allowed_emails"`
 
+	// OIDCDisplayClaim selects which OIDC claim /auth/me reports as the
+	// caller's display name: OIDCDisplayClaimName, OIDCDisplayClaimUsername
+	// or OIDCDisplayClaimEmail.
+	OIDCDisplayClaim string `json:"oidc_display_claim"`
+
 	// SessionTTLHours is how long an OIDC-established session lasts before
 	// re-authentication is required.
 	SessionTTLHours int `json:"session_ttl_hours"`
@@ -308,6 +314,14 @@ const (
 	AuthModeForward = "forward_auth"
 	AuthModeToken   = "token"
 	AuthModeOIDC    = "oidc"
+)
+
+// OIDC display-claim values, selecting which claim /auth/me reports as
+// the caller's display name.
+const (
+	OIDCDisplayClaimName     = "name"
+	OIDCDisplayClaimUsername = "preferred_username"
+	OIDCDisplayClaimEmail    = "email"
 )
 
 // Keys of the Auth section.
@@ -328,6 +342,7 @@ const (
 	KeyAuthOIDCGroupsClaim     = "auth.oidc_groups_claim"
 	KeyAuthOIDCAllowedGroups   = "auth.oidc_allowed_groups"
 	KeyAuthOIDCAllowedEmails   = "auth.oidc_allowed_emails"
+	KeyAuthOIDCDisplayClaim    = "auth.oidc_display_claim"
 	KeyAuthSessionTTLHours     = "auth.session_ttl_hours"
 )
 
@@ -579,6 +594,7 @@ func (s *Store) Auth(ctx context.Context) (Auth, error) {
 		{KeyAuthOIDCGroupsClaim, &a.OIDCGroupsClaim},
 		{KeyAuthOIDCAllowedGroups, &a.OIDCAllowedGroups},
 		{KeyAuthOIDCAllowedEmails, &a.OIDCAllowedEmails},
+		{KeyAuthOIDCDisplayClaim, &a.OIDCDisplayClaim},
 		{KeyAuthSessionTTLHours, &a.SessionTTLHours},
 	} {
 		raw, ok, err := s.Get(ctx, f.key)

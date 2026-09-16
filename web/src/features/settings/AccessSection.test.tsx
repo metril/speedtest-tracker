@@ -26,6 +26,7 @@ const baseAuth: AuthSettings = {
   oidc_redirect_base_url: '',
   oidc_scopes: [],
   oidc_groups_claim: '',
+  oidc_display_claim: 'name',
   oidc_allowed_groups: [],
   oidc_allowed_emails: [],
   session_ttl_hours: 24,
@@ -114,6 +115,15 @@ describe('AccessSection', () => {
     expect(api.testOIDC).toHaveBeenCalledWith({
       issuer: 'https://issuer.example', client_id: 'client-1', client_secret: '',
     });
+  });
+
+  it('renders the display name claim select in oidc mode and changes its value', async () => {
+    const setAuth = mockSection({ ...baseAuth, mode: 'oidc' });
+    renderSection();
+    const select = screen.getByLabelText('Display name claim');
+    expect(select).toHaveValue('name');
+    await userEvent.selectOptions(select, 'preferred_username');
+    expect(setAuth).toHaveBeenCalledWith({ ...baseAuth, mode: 'oidc', oidc_display_claim: 'preferred_username' });
   });
 
   it('shows oidc-only authorization fields and hides API tokens in open mode but not oidc', () => {

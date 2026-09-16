@@ -501,6 +501,8 @@ export interface NotificationSettings {
 
 export type AuthMode = 'open' | 'forward_auth' | 'token' | 'oidc';
 
+export type OidcDisplayClaim = 'name' | 'preferred_username' | 'email';
+
 export interface AuthSettings {
   mode: AuthMode;
   user_header: string;
@@ -515,6 +517,7 @@ export interface AuthSettings {
   oidc_redirect_base_url: string;
   oidc_scopes: string[];
   oidc_groups_claim: string;
+  oidc_display_claim: OidcDisplayClaim;
   oidc_allowed_groups: string[];
   oidc_allowed_emails: string[];
   session_ttl_hours: number;
@@ -557,6 +560,8 @@ export const testNotifyChannel = (channelId: string) =>
 export interface Me {
   mode: AuthMode;
   user: string;
+  username?: string;
+  display_name: string;
   groups: string[];
   is_admin: boolean;
   source?: string;

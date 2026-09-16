@@ -39,13 +39,13 @@ function renderWithMe(me: Me) {
 describe('OpenModeBanner', () => {
   it('warns while the instance is open and stays quiet otherwise', async () => {
     renderWithMe({
-      mode: 'open', user: '', groups: [], is_admin: true,
+      mode: 'open', user: '', display_name: '', groups: [], is_admin: true,
     });
     expect(await screen.findByRole('status')).toHaveTextContent(/no authentication/i);
     cleanup();
 
     renderWithMe({
-      mode: 'token', user: 'token', groups: [], is_admin: true,
+      mode: 'token', user: 'token', display_name: 'token', groups: [], is_admin: true,
     });
     expect(screen.queryByRole('status')).toBeNull();
   });

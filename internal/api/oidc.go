@@ -95,13 +95,17 @@ func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	redirectURI := externalBaseURL(r, provider.Config().RedirectBaseURL) + "/auth/oidc/callback"
+
 	if errCode := r.URL.Query().Get("error"); errCode != "" {
+		d.logOIDCFailure(r, "provider_error", nil, provider, redirectURI)
 		redirectLoginError(w, r, "provider_error")
 		return
 	}
 
 	cookie, err := r.Cookie(oidcStateCookie)
 	if err != nil || cookie.Value == "" {
+		d.logOIDCFailure(r, "state", nil, provider, redirectURI)
 		redirectLoginError(w, r, "state")
 		return
 	}
@@ -109,33 +113,38 @@ func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	wantState, verifier, returnTo, err := d.StateCodec.Decode(cookie.Value, d.now())
 	if err != nil {
+		d.logOIDCFailure(r, "state", err, provider, redirectURI)
 		redirectLoginError(w, r, "state")
 		return
 	}
 	if r.URL.Query().Get("state") != wantState {
+		d.logOIDCFailure(r, "state", nil, provider, redirectURI)
 		redirectLoginError(w, r, "state")
 		return
 	}
 
 	code := r.URL.Query().Get("code")
 	if code == "" {
+		d.logOIDCFailure(r, "state", nil, provider, redirectURI)
 		redirectLoginError(w, r, "state")
 		return
 	}
 
-	redirectURI := externalBaseURL(r, provider.Config().RedirectBaseURL) + "/auth/oidc/callback"
 	claims, err := provider.Exchange(r.Context(), code, verifier, redirectURI)
 	if err != nil {
+		d.logOIDCFailure(r, "exchange_failed", err, provider, redirectURI)
 		redirectLoginError(w, r, "exchange_failed")
 		return
 	}
 
 	isAdmin, err := provider.Config().Authorize(claims)
 	if errors.Is(err, oidcauth.ErrForbidden) {
+		d.logOIDCFailure(r, "forbidden", err, provider, redirectURI)
 		redirectLoginError(w, r, "forbidden")
 		return
 	}
 	if err != nil {
+		d.logOIDCFailure(r, "authorize_failed", err, provider, redirectURI)
 		redirectLoginError(w, r, "authorize_failed")
 		return
 	}
@@ -147,6 +156,7 @@ func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	plain, err := auth.GenerateSessionID()
 	if err != nil {
+		d.logOIDCFailure(r, "session_failed", err, provider, redirectURI)
 		redirectLoginError(w, r, "session_failed")
 		return
 	}
@@ -160,6 +170,7 @@ func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		Subject:   claims.Subject,
 		Email:     claims.Email,
 		Name:      claims.Name,
+		Username:  claims.PreferredUsername,
 		Groups:    claims.Groups,
 		IsAdmin:   isAdmin,
 		CreatedAt: now,
@@ -229,6 +240,21 @@ func sanitizeReturnTo(returnTo string) string {
 		return "/"
 	}
 	return returnTo
+}
+
+// logOIDCFailure logs a swallowed OIDC callback failure before the caller
+// redirects the browser to the login page with an opaque error code, so
+// the underlying cause (bad state, exchange failure, forbidden claims,
+// ...) is not lost.
+func (d Deps) logOIDCFailure(r *http.Request, code string, err error, provider *oidcauth.Provider, redirectURI string) {
+	if d.Logger == nil {
+		return
+	}
+	args := []any{"reason", code, "issuer", provider.Config().Issuer, "redirect_uri", redirectURI}
+	if err != nil {
+		args = append(args, "err", err)
+	}
+	d.Logger.Warn("oidc login failed", args...)
 }
 
 func redirectLoginError(w http.ResponseWriter, r *http.Request, code string) {

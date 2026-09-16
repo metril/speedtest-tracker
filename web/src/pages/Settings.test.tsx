@@ -108,6 +108,7 @@ function settingsFixture({
       oidc_redirect_base_url: '',
       oidc_scopes: [],
       oidc_groups_claim: 'groups',
+      oidc_display_claim: 'name',
       oidc_allowed_groups: [],
       oidc_allowed_emails: [],
       session_ttl_hours: 24,

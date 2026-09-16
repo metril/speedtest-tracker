@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-const sessionColumns = `id,subject,email,name,groups,is_admin,created_at,expires_at`
+const sessionColumns = `id,subject,email,name,username,groups,is_admin,created_at,expires_at`
 
 // sessionTimeFormat is a fixed-width UTC timestamp format so expires_at
 // comparisons (used by DeleteExpiredSessions) remain lexicographically
@@ -24,6 +24,7 @@ type Session struct {
 	Subject   string
 	Email     string
 	Name      string
+	Username  string
 	Groups    []string
 	IsAdmin   bool
 	CreatedAt time.Time
@@ -35,7 +36,7 @@ func scanSession(sc interface{ Scan(...any) error }) (Session, error) {
 	var groupsJSON string
 	var isAdmin int
 	var created, expires string
-	if err := sc.Scan(&s.ID, &s.Subject, &s.Email, &s.Name, &groupsJSON, &isAdmin, &created, &expires); err != nil {
+	if err := sc.Scan(&s.ID, &s.Subject, &s.Email, &s.Name, &s.Username, &groupsJSON, &isAdmin, &created, &expires); err != nil {
 		return Session{}, err
 	}
 	s.IsAdmin = isAdmin != 0
@@ -70,8 +71,8 @@ func (s *Store) CreateSession(ctx context.Context, sess Session) error {
 		isAdmin = 1
 	}
 	_, err = s.Write.ExecContext(ctx,
-		`INSERT INTO sessions(`+sessionColumns+`) VALUES(?,?,?,?,?,?,?,?)`,
-		sess.ID, sess.Subject, sess.Email, sess.Name, string(groupsJSON), isAdmin,
+		`INSERT INTO sessions(`+sessionColumns+`) VALUES(?,?,?,?,?,?,?,?,?)`,
+		sess.ID, sess.Subject, sess.Email, sess.Name, sess.Username, string(groupsJSON), isAdmin,
 		sess.CreatedAt.UTC().Format(sessionTimeFormat), sess.ExpiresAt.UTC().Format(sessionTimeFormat))
 	if err != nil {
 		return fmt.Errorf("insert session: %w", err)

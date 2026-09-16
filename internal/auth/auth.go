@@ -41,11 +41,12 @@ type TokenLookup interface {
 // SessionInfo is what a SessionLookup reports for a valid, unexpired OIDC
 // session.
 type SessionInfo struct {
-	Subject string
-	Email   string
-	Name    string
-	Groups  []string
-	IsAdmin bool
+	Subject  string
+	Email    string
+	Name     string
+	Username string
+	Groups   []string
+	IsAdmin  bool
 }
 
 // SessionLookup is the narrow dependency the auth package needs from the
@@ -63,13 +64,14 @@ const SessionCookie = "st_session"
 
 // Identity is the resolved caller of a request.
 type Identity struct {
-	Mode    string
-	User    string
-	Email   string
-	Name    string
-	Groups  []string
-	IsAdmin bool
-	TokenID int64
+	Mode     string
+	User     string
+	Email    string
+	Name     string
+	Username string
+	Groups   []string
+	IsAdmin  bool
+	TokenID  int64
 	// Source names the credential that produced this identity: SourceOpen,
 	// SourceForward, SourceToken or SourceOIDC. Unlike Mode (the configured
 	// mode, which in forward_auth can still be satisfied by a bearer token
@@ -404,13 +406,14 @@ func (m *Middleware) identifySession(ctx context.Context, plain string) (Identit
 		user = info.Subject
 	}
 	return Identity{
-		Mode:    settings.AuthModeOIDC,
-		User:    user,
-		Email:   info.Email,
-		Name:    info.Name,
-		Groups:  info.Groups,
-		IsAdmin: info.IsAdmin,
-		Source:  SourceOIDC,
+		Mode:     settings.AuthModeOIDC,
+		User:     user,
+		Email:    info.Email,
+		Name:     info.Name,
+		Username: info.Username,
+		Groups:   info.Groups,
+		IsAdmin:  info.IsAdmin,
+		Source:   SourceOIDC,
 	}, nil
 }
 

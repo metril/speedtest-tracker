@@ -904,6 +904,7 @@ func TestPutAuthValidation(t *testing.T) {
 		{"bad cidr", "trusted_proxies", map[string]any{"trusted_proxies": []string{"10.0.0.0/33"}}},
 		{"bad header name", "user_header", map[string]any{"user_header": "Remote User"}},
 		{"empty separator", "groups_separator", map[string]any{"groups_separator": ""}},
+		{"bad display claim", "oidc_display_claim", map[string]any{"oidc_display_claim": "nickname"}},
 	} {
 		rec := doJSON(t, h, http.MethodPut, "/api/v1/settings", map[string]any{"auth": tc.body}, nil)
 		if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), tc.want) {
