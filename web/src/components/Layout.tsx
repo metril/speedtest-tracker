@@ -76,18 +76,17 @@ function UserChip({ collapsed }: { collapsed?: boolean }) {
   return (
     <div className={`flex items-center gap-2 ${collapsed ? 'flex-col' : 'min-w-0 flex-1'}`}>
       {!collapsed && label && (
-        <span className="truncate text-sm text-muted" title={label}>{label}</span>
+        <span className="min-w-0 flex-1 truncate text-sm text-muted" title={label}>{label}</span>
       )}
       <Button
         type="button"
         variant="ghost"
-        size={collapsed ? 'icon' : 'sm'}
+        size="icon"
         aria-label="Sign out"
         disabled={logout.isPending}
         onClick={signOut}
       >
         <LogOut className="h-4 w-4" />
-        {!collapsed && 'Sign out'}
       </Button>
     </div>
   );
@@ -100,6 +99,8 @@ function UserChip({ collapsed }: { collapsed?: boolean }) {
 export function Layout() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const me = useMe();
+  const isOidc = me.data?.mode === 'oidc';
 
   return (
     <LiveRunProvider>
@@ -119,22 +120,41 @@ export function Layout() {
             <div className="flex-1 px-2">
               <NavLinks collapsed={collapsed} />
             </div>
-            <div className={`flex items-center gap-2 border-t border-line p-2 ${collapsed ? 'flex-col' : 'justify-between'}`}>
-              <UserChip collapsed={collapsed} />
-              <div className="shrink-0">
-                <ThemeToggle collapsed={collapsed} />
+            {collapsed ? (
+              <div className="flex flex-col items-center gap-2 border-t border-line p-2">
+                <UserChip collapsed />
+                <ThemeToggle collapsed />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0"
+                  aria-label="Expand sidebar"
+                  onClick={() => setCollapsed((v) => !v)}
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
               </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="shrink-0"
-                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                onClick={() => setCollapsed((v) => !v)}
-              >
-                {collapsed ? <ChevronsRight className="h-4 w-4" /> : <ChevronsLeft className="h-4 w-4" />}
-              </Button>
-            </div>
+            ) : (
+              <div className="flex flex-col gap-2 border-t border-line p-2">
+                {isOidc && <UserChip />}
+                <div className="flex items-center justify-between">
+                  <div className="shrink-0">
+                    <ThemeToggle />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="shrink-0"
+                    aria-label="Collapse sidebar"
+                    onClick={() => setCollapsed((v) => !v)}
+                  >
+                    <ChevronsLeft className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
           </aside>
 
           <div className="flex min-w-0 flex-1 flex-col">
@@ -156,10 +176,12 @@ export function Layout() {
                   </div>
                 </SheetContent>
               </Sheet>
-              <span className="font-semibold tracking-tight">speedtest-tracker</span>
+              <span className="min-w-0 truncate font-semibold tracking-tight">speedtest-tracker</span>
               <div className="ml-auto flex items-center gap-2">
                 <UserChip collapsed />
-                <ThemeToggle />
+                <div className="shrink-0">
+                  <ThemeToggle />
+                </div>
               </div>
             </header>
 
