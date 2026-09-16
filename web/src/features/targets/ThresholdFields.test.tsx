@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { ThresholdFields } from './ThresholdFields';
+import { ThresholdFields, validateThresholds } from './ThresholdFields';
 
 describe('ThresholdFields', () => {
   it('shows the Custom notification toggle by default, off with empty value', () => {
@@ -18,5 +18,22 @@ describe('ThresholdFields', () => {
     render(<ThresholdFields value={{}} onChange={vi.fn()} showCustomToggle={false} />);
     expect(screen.queryByLabelText('Custom notification')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Min download (Mbps) mode')).toBeInTheDocument();
+  });
+
+  it('shows the SLA tolerance override field with overrides present', () => {
+    render(<ThresholdFields value={{ sla_tolerance_pct: 0 }} onChange={vi.fn()} />);
+    expect(screen.getByLabelText('SLA tolerance override (%)')).toHaveValue(0);
+  });
+});
+
+describe('validateThresholds SLA tolerance', () => {
+  it('accepts 0 and 99', () => {
+    expect(validateThresholds({ sla_tolerance_pct: 0 })).toBeUndefined();
+    expect(validateThresholds({ sla_tolerance_pct: 99 })).toBeUndefined();
+  });
+
+  it('rejects out-of-range values', () => {
+    expect(validateThresholds({ sla_tolerance_pct: -1 })).toBe('SLA tolerance must be 0-99');
+    expect(validateThresholds({ sla_tolerance_pct: 100 })).toBe('SLA tolerance must be 0-99');
   });
 });

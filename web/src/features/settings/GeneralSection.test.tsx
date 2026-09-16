@@ -57,6 +57,7 @@ describe('GeneralSection', () => {
     expect(screen.getByLabelText('Prune interval (minutes)')).toBeInTheDocument();
     expect(screen.getByLabelText('Plan download (Mbps)')).toBeInTheDocument();
     expect(screen.getByLabelText('Plan upload (Mbps)')).toBeInTheDocument();
+    expect(screen.getByLabelText('Tolerance (%)')).toBeInTheDocument();
     expect(screen.getByLabelText('Log level')).toBeInTheDocument();
   });
 
@@ -68,6 +69,16 @@ describe('GeneralSection', () => {
     await userEvent.click(screen.getAllByRole('button', { name: 'Clear' })[0]);
     expect(input).toHaveValue(null);
     expect(setGeneral).toHaveBeenCalledWith(expect.objectContaining({ sla_download_mbps: 0 }));
+  });
+
+  it('clears the SLA tolerance field to undefined (not 0) via the Clear button', async () => {
+    const setGeneral = mockSection({ ...baseGeneral, sla_tolerance_pct: 10 });
+    renderSection();
+    const input = screen.getByLabelText('Tolerance (%)');
+    expect(input).toHaveValue(10);
+    await userEvent.click(screen.getAllByRole('button', { name: 'Clear' })[2]);
+    expect(input).toHaveValue(null);
+    expect(setGeneral).toHaveBeenCalledWith(expect.objectContaining({ sla_tolerance_pct: undefined }));
   });
 
   it('disables fields for a locked key', () => {

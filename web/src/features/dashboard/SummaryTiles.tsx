@@ -28,6 +28,12 @@ function delta(current: number, previous: number): number | undefined {
   return (current - previous) / previous;
 }
 
+/** fmt1 formats a number with up to one decimal place, trimming a
+ * trailing ".0" (e.g. 90 -> "90", 17.55 -> "17.6"). */
+function fmt1(n: number): string {
+  return (Math.round(n * 10) / 10).toFixed(1).replace(/\.0$/, '');
+}
+
 export interface DashboardSpark {
   download: number[];
   upload: number[];
@@ -73,13 +79,23 @@ export function SummaryTiles({ stats, previousStats, spark, general }: {
   // rather than rendering a misleading "0" for it.
   const planDownload = general?.sla_download_mbps || undefined;
   const planUpload = general?.sla_upload_mbps || undefined;
-  const planSubtext = planDownload && planUpload
-    ? `${planDownload}/${planUpload} Mbps plan`
-    : planDownload
-      ? `${planDownload} Mbps download plan`
-      : planUpload
-        ? `${planUpload} Mbps upload plan`
-        : undefined;
+  const tolerancePct = general?.sla_tolerance_pct || undefined;
+  const effective = (plan: number) => plan * (1 - (tolerancePct ?? 0) / 100);
+  const planSubtext = tolerancePct
+    ? planDownload && planUpload
+      ? `≥ ${fmt1(effective(planDownload))}/${fmt1(effective(planUpload))} Mbps (${fmt1(planDownload)}/${fmt1(planUpload)} plan, ${fmt1(tolerancePct)}% tolerance)`
+      : planDownload
+        ? `≥ ${fmt1(effective(planDownload))} Mbps download (${fmt1(planDownload)} plan, ${fmt1(tolerancePct)}% tolerance)`
+        : planUpload
+          ? `≥ ${fmt1(effective(planUpload))} Mbps upload (${fmt1(planUpload)} plan, ${fmt1(tolerancePct)}% tolerance)`
+          : undefined
+    : planDownload && planUpload
+      ? `${planDownload}/${planUpload} Mbps plan`
+      : planDownload
+        ? `${planDownload} Mbps download plan`
+        : planUpload
+          ? `${planUpload} Mbps upload plan`
+          : undefined;
 
   return (
     <div className={`grid grid-cols-2 gap-3 sm:grid-cols-4 ${slaCompliance != null ? 'lg:grid-cols-5' : ''}`}>
@@ -121,6 +137,7 @@ export function SummaryTiles({ stats, previousStats, spark, general }: {
           subtext={planSubtext}
           delta={prevSlaCompliance != null ? delta(slaCompliance, prevSlaCompliance) : undefined}
           favorable
+          title="Share of tests in this period, including failed ones, whose download and upload both reached the plan speed minus tolerance."
         />
       )}
     </div>

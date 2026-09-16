@@ -145,6 +145,14 @@ type settingsBody struct {
 		// explicit null on a plain pointer field.
 		SLADownloadMbps *float64 `json:"sla_download_mbps"`
 		SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
+
+		// SLATolerancePct: unlike the plan-speed fields above, 0 is a real
+		// tolerance value (not "unset"), so PUT-0-to-clear doesn't apply
+		// here. Instead this field is always written whenever General is
+		// present in the body: nil (omitted, or an explicit JSON null —
+		// still indistinguishable on a plain pointer field) clears the
+		// stored tolerance; a value sets it.
+		SLATolerancePct *float64 `json:"sla_tolerance_pct"`
 	} `json:"general"`
 	Engines       *enginesBody       `json:"engines"`
 	Integrations  *integrationsBody  `json:"integrations"`
@@ -382,6 +390,9 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 			},
 			func() error { return setPtr(ctx, d.Settings, settings.KeySLADownloadMbps, g.SLADownloadMbps) },
 			func() error { return setPtr(ctx, d.Settings, settings.KeySLAUploadMbps, g.SLAUploadMbps) },
+			// Always written (not via setPtr): see settingsBody.General's
+			// SLATolerancePct doc comment — nil clears the stored value.
+			func() error { return d.Settings.Set(ctx, settings.KeySLATolerancePct, g.SLATolerancePct) },
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -610,6 +621,17 @@ func setKeys(body settingsBody) []string {
 		if g.RetentionPruneIntervalMinutes != nil {
 			keys = append(keys, settings.KeyRetentionPruneIntervalMinutes)
 		}
+		if g.SLADownloadMbps != nil {
+			keys = append(keys, settings.KeySLADownloadMbps)
+		}
+		if g.SLAUploadMbps != nil {
+			keys = append(keys, settings.KeySLAUploadMbps)
+		}
+		// SLATolerancePct is always written whenever General is present
+		// (see settingsBody.General.SLATolerancePct), so it's always
+		// considered "set" here too, regardless of whether the field
+		// itself is nil.
+		keys = append(keys, settings.KeySLATolerancePct)
 	}
 	if e := body.Engines; e != nil {
 		if e.SpeedtestBin != nil {
@@ -1247,6 +1269,9 @@ func validateSettings(body settingsBody, current settings.Integrations) error {
 		if g.SLAUploadMbps != nil && *g.SLAUploadMbps < 0 {
 			return fmt.Errorf("sla_upload_mbps must be >= 0")
 		}
+		if g.SLATolerancePct != nil && (*g.SLATolerancePct < 0 || *g.SLATolerancePct > 99) {
+			return fmt.Errorf("sla_tolerance_pct must be between 0 and 99")
+		}
 	}
 
 	if i := body.Integrations; i != nil {
@@ -1370,6 +1395,7 @@ func validateThresholds(t settings.Thresholds) error {
 		{"loss_pct_max", t.LossPctMax, float64Ptr(100)},
 		{"sla_download_mbps", t.SLADownloadMbps, nil},
 		{"sla_upload_mbps", t.SLAUploadMbps, nil},
+		{"sla_tolerance_pct", t.SLATolerancePct, float64Ptr(99)},
 	}
 	for _, f := range fields {
 		if f.v == nil {

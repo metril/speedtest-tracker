@@ -24,7 +24,7 @@ const label = 'block text-xs font-medium uppercase tracking-wide text-muted';
 
 type NumericKey =
   | 'download_mbps_min' | 'upload_mbps_min' | 'ping_ms_max' | 'jitter_ms_max' | 'loss_pct_max'
-  | 'sla_download_mbps' | 'sla_upload_mbps';
+  | 'sla_download_mbps' | 'sla_upload_mbps' | 'sla_tolerance_pct';
 
 type Mode = 'inherit' | 'off' | 'custom';
 
@@ -36,9 +36,19 @@ const NUMERIC_FIELDS: { key: NumericKey; id: string; text: string }[] = [
   { key: 'loss_pct_max', id: 'threshold-loss-max', text: 'Max packet loss (%)' },
 ];
 
-const SLA_FIELDS: { key: NumericKey; id: string; text: string }[] = [
-  { key: 'sla_download_mbps', id: 'threshold-sla-download', text: 'SLA plan download override (Mbps)' },
-  { key: 'sla_upload_mbps', id: 'threshold-sla-upload', text: 'SLA plan upload override (Mbps)' },
+const SLA_FIELDS: { key: NumericKey; id: string; text: string; hint: string }[] = [
+  {
+    key: 'sla_download_mbps', id: 'threshold-sla-download', text: 'SLA plan download override (Mbps)',
+    hint: 'Blank inherits the plan speed from Settings → General.',
+  },
+  {
+    key: 'sla_upload_mbps', id: 'threshold-sla-upload', text: 'SLA plan upload override (Mbps)',
+    hint: 'Blank inherits the plan speed from Settings → General.',
+  },
+  {
+    key: 'sla_tolerance_pct', id: 'threshold-sla-tolerance', text: 'SLA tolerance override (%)',
+    hint: 'Blank inherits Settings → General; 0 means no tolerance for this target.',
+  },
 ];
 
 const BLANK: Record<NumericKey, string> = {
@@ -49,6 +59,7 @@ const BLANK: Record<NumericKey, string> = {
   loss_pct_max: '',
   sla_download_mbps: '',
   sla_upload_mbps: '',
+  sla_tolerance_pct: '',
 };
 
 const INHERIT_MODES: Record<NumericKey, Mode> = {
@@ -59,6 +70,7 @@ const INHERIT_MODES: Record<NumericKey, Mode> = {
   loss_pct_max: 'inherit',
   sla_download_mbps: 'inherit',
   sla_upload_mbps: 'inherit',
+  sla_tolerance_pct: 'inherit',
 };
 
 /** validateThresholds enforces the same rules as the server (Task 6):
@@ -71,6 +83,9 @@ export function validateThresholds(t: ThresholdSet): string | undefined {
   ];
   if (numeric.some((v) => typeof v === 'number' && v < 0)) return 'Thresholds must be zero or more';
   if (typeof t.loss_pct_max === 'number' && t.loss_pct_max > 100) return 'Packet loss must be 0-100';
+  if (typeof t.sla_tolerance_pct === 'number' && (t.sla_tolerance_pct < 0 || t.sla_tolerance_pct > 99)) {
+    return 'SLA tolerance must be 0-99';
+  }
   return undefined;
 }
 
@@ -105,6 +120,7 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
     loss_pct_max: toRaw(value.loss_pct_max),
     sla_download_mbps: toRaw(value.sla_download_mbps),
     sla_upload_mbps: toRaw(value.sla_upload_mbps),
+    sla_tolerance_pct: toRaw(value.sla_tolerance_pct),
   }));
   const [modes, setModes] = useState<Record<NumericKey, Mode>>(() => ({
     ...INHERIT_MODES,
@@ -210,10 +226,10 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
           </div>
           <div className="grid gap-3 border-t border-line pt-3">
             <div className="grid gap-3 sm:grid-cols-2">
-              {SLA_FIELDS.map(({ key, id, text }) => (
+              {SLA_FIELDS.map(({ key, id, text, hint }) => (
                 <FormField
                   key={key} id={id} label={text}
-                  hint="Blank inherits the plan speed from Settings → General."
+                  hint={hint}
                 >
                   <input
                     id={id}

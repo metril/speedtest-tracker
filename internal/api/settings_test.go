@@ -151,16 +151,65 @@ func TestPutSettingsGeneralSLARoundTrip(t *testing.T) {
 	}
 }
 
+// TestPutSettingsGeneralSLATolerancePctClearsOnOmit checks the tolerance
+// field's different-from-its-siblings contract: unlike sla_download_mbps/
+// sla_upload_mbps (0 clears, omission leaves untouched), sla_tolerance_pct
+// is always written whenever "general" is present in the body, so omitting
+// it clears the stored value (since 0 is itself a valid tolerance and
+// can't double as "unset").
+func TestPutSettingsGeneralSLATolerancePctClearsOnOmit(t *testing.T) {
+	h, _, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"sla_tolerance_pct": 10},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	g, _ := st.General(ctx)
+	if g.SLATolerancePct == nil || *g.SLATolerancePct != 10 {
+		t.Fatalf("SLATolerancePct = %v, want 10", g.SLATolerancePct)
+	}
+
+	// A PUT with "general" present but sla_tolerance_pct omitted clears it
+	// (unlike the plan-speed fields, which are left untouched on omission).
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"base_url": "http://example.test"},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	g, _ = st.General(ctx)
+	if g.SLATolerancePct != nil {
+		t.Errorf("SLATolerancePct = %v, want nil (cleared by omission)", *g.SLATolerancePct)
+	}
+
+	// 0 is a real, roundtrippable value.
+	rec = do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"sla_tolerance_pct": 0},
+	})
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status %d: %s", rec.Code, rec.Body)
+	}
+	g, _ = st.General(ctx)
+	if g.SLATolerancePct == nil || *g.SLATolerancePct != 0 {
+		t.Errorf("SLATolerancePct = %v, want 0 (a real value, not cleared)", g.SLATolerancePct)
+	}
+}
+
 func TestPutSettingsValidation(t *testing.T) {
 	h, _, _ := newTestAPIWithSettings(t)
 	for name, body := range map[string]map[string]any{
-		"bad vm url":      {"integrations": map[string]any{"vm_enabled": true, "vm_url": "ftp://vm"}},
-		"enabled no url":  {"integrations": map[string]any{"vm_enabled": true, "vm_url": ""}},
-		"zero retention":  {"general": map[string]any{"retention_days_results": 0}},
-		"bad log level":   {"general": map[string]any{"log_level": "shout"}},
-		"bad label name":  {"integrations": map[string]any{"vm_extra_labels": map[string]string{"1bad": "x"}}},
-		"negative sla dl": {"general": map[string]any{"sla_download_mbps": -1}},
-		"negative sla ul": {"general": map[string]any{"sla_upload_mbps": -1}},
+		"bad vm url":       {"integrations": map[string]any{"vm_enabled": true, "vm_url": "ftp://vm"}},
+		"enabled no url":   {"integrations": map[string]any{"vm_enabled": true, "vm_url": ""}},
+		"zero retention":   {"general": map[string]any{"retention_days_results": 0}},
+		"bad log level":    {"general": map[string]any{"log_level": "shout"}},
+		"bad label name":   {"integrations": map[string]any{"vm_extra_labels": map[string]string{"1bad": "x"}}},
+		"negative sla dl":  {"general": map[string]any{"sla_download_mbps": -1}},
+		"negative sla ul":  {"general": map[string]any{"sla_upload_mbps": -1}},
+		"negative sla tol": {"general": map[string]any{"sla_tolerance_pct": -1}},
+		"sla tol over 99":  {"general": map[string]any{"sla_tolerance_pct": 100}},
 	} {
 		rec := do(t, h, http.MethodPut, "/api/v1/settings", body)
 		if rec.Code != http.StatusBadRequest {

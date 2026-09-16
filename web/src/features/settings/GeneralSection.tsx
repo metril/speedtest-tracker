@@ -6,7 +6,7 @@ import { TimezoneSelect } from '../../components/TimezoneSelect';
 import { inputClass } from './styles';
 import { useSettingsSection } from './useSettingsSection';
 
-type SLAKey = 'sla_download_mbps' | 'sla_upload_mbps';
+type SLAKey = 'sla_download_mbps' | 'sla_upload_mbps' | 'sla_tolerance_pct';
 
 function toRaw(v: number | undefined): string {
   return v === undefined ? '' : String(v);
@@ -72,6 +72,7 @@ export function GeneralSection() {
   const [raw, setRaw] = useState<Record<SLAKey, string>>(() => ({
     sla_download_mbps: toRaw(general.sla_download_mbps),
     sla_upload_mbps: toRaw(general.sla_upload_mbps),
+    sla_tolerance_pct: toRaw(general.sla_tolerance_pct),
   }));
 
   function setSla(key: SLAKey, text: string) {
@@ -80,9 +81,12 @@ export function GeneralSection() {
     if (Number.isFinite(n)) setGeneral({ ...general, [key]: n });
   }
 
+  // sla_tolerance_pct treats 0 as a real value ("no tolerance"), unlike
+  // the plan speeds where 0 means "unset" -- so clearing it must omit the
+  // field from the PUT body (undefined) rather than send 0.
   function clearSla(key: SLAKey) {
     setRaw((r) => ({ ...r, [key]: '' }));
-    setGeneral({ ...general, [key]: 0 });
+    setGeneral({ ...general, [key]: key === 'sla_tolerance_pct' ? undefined : 0 });
   }
 
   return (
@@ -134,7 +138,7 @@ export function GeneralSection() {
 
       <SettingsCard
         title="Plan speeds (SLA)"
-        description="Leave blank to disable. Targets can override."
+        description="A test meets the plan when download and upload each reach plan × (1 − tolerance). Failed tests count as misses. Leave blank to disable; targets can override."
       >
         <SettingsRow
           label="Plan download (Mbps)" htmlFor="general-sla-download" lockKey="general.sla_download_mbps"
@@ -152,6 +156,15 @@ export function GeneralSection() {
             value={raw.sla_upload_mbps}
             onChange={(v) => setSla('sla_upload_mbps', v)}
             onClear={() => clearSla('sla_upload_mbps')}
+          />
+        </SettingsRow>
+        <SettingsRow
+          label="Tolerance (%)" htmlFor="general-sla-tolerance" lockKey="general.sla_tolerance_pct"
+        >
+          <SlaField
+            value={raw.sla_tolerance_pct}
+            onChange={(v) => setSla('sla_tolerance_pct', v)}
+            onClear={() => clearSla('sla_tolerance_pct')}
           />
         </SettingsRow>
       </SettingsCard>

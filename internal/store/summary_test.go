@@ -141,15 +141,16 @@ func TestSummarySLAComplianceNilWithoutPlan(t *testing.T) {
 }
 
 // TestSummarySLAComplianceFromGeneralPlan checks the general plan applies
-// to a target with no override, counting only successful results, and
-// requiring both download and upload to meet the plan.
+// to a target with no override, counting both 'ok' and 'failed' results
+// (a failed row always counts as a miss), and requiring both download and
+// upload to meet the plan for a non-failed row.
 func TestSummarySLAComplianceFromGeneralPlan(t *testing.T) {
 	s, ctx := openTemp(t), context.Background()
 	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
 	// insertResultAt always uses download=100e6 (100Mbps), upload=50e6 (50Mbps).
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:00:00.000Z")     // meets 90/40 plan
 	insertResultAt(t, s, a, "fake", "ok", "2026-09-13T10:05:00.000Z")     // meets 90/40 plan
-	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T10:10:00.000Z") // not counted (not ok)
+	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T10:10:00.000Z") // counted as a miss
 	if _, err := s.InsertResult(ctx, &Result{
 		TargetID: &a, TargetName: "home", Engine: "fake", Status: "ok",
 		StartedAt: "2026-09-13T10:15:00.000Z", DurationMs: 500,
@@ -168,12 +169,104 @@ func TestSummarySLAComplianceFromGeneralPlan(t *testing.T) {
 	if ts.SLACompliance == nil {
 		t.Fatal("target SLACompliance = nil, want a resolved plan")
 	}
-	// 2 of 3 successful results meet the plan.
-	if *ts.SLACompliance < 0.66 || *ts.SLACompliance > 0.67 {
-		t.Errorf("target SLACompliance = %v, want ~0.667", *ts.SLACompliance)
+	// 2 of 4 results meet the plan (the failed row and the 80Mbps row miss).
+	if *ts.SLACompliance != 0.5 {
+		t.Errorf("target SLACompliance = %v, want 0.5", *ts.SLACompliance)
 	}
 	if got.SLACompliance == nil || *got.SLACompliance != *ts.SLACompliance {
 		t.Errorf("overall SLACompliance = %v, want it to match the single target", got.SLACompliance)
+	}
+}
+
+// TestSummarySLATolerancePassesReducedThreshold checks a general tolerance
+// percent shrinks the effective threshold: a result below the raw plan but
+// within tolerance still counts as compliant.
+func TestSummarySLATolerancePassesReducedThreshold(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
+	if _, err := s.InsertResult(ctx, &Result{
+		TargetID: &a, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt: "2026-09-13T10:00:00.000Z", DurationMs: 500,
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     90e6, UploadBps: 90e6, // 90Mbps, below the 100Mbps plan
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z",
+		SLAPlan{DownloadMbps: mbps(100), UploadMbps: mbps(100), TolerancePct: mbps(10)})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Targets[0].SLACompliance == nil || *got.Targets[0].SLACompliance != 1 {
+		t.Errorf("SLACompliance = %v, want 1 (90Mbps meets 100Mbps plan at 10%% tolerance)",
+			got.Targets[0].SLACompliance)
+	}
+}
+
+// TestSummarySLATargetToleranceOverrideZero checks a target's own
+// sla_tolerance_pct override of 0 wins over a nonzero general tolerance
+// (0 is a real override value here, unlike the plan speeds).
+func TestSummarySLATargetToleranceOverrideZero(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	thresholds, _ := json.Marshal(map[string]any{"sla_tolerance_pct": 0})
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1,
+		Thresholds: thresholds})
+	if _, err := s.InsertResult(ctx, &Result{
+		TargetID: &a, TargetName: "home", Engine: "fake", Status: "ok",
+		StartedAt: "2026-09-13T10:00:00.000Z", DurationMs: 500,
+		OptionsSnapshot: json.RawMessage(`{}`),
+		DownloadBps:     95e6, UploadBps: 95e6, // 95Mbps, below the 100Mbps plan
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z",
+		SLAPlan{DownloadMbps: mbps(100), UploadMbps: mbps(100), TolerancePct: mbps(10)})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Targets[0].SLACompliance == nil || *got.Targets[0].SLACompliance != 0 {
+		t.Errorf("SLACompliance = %v, want 0 (target tolerance override 0 beats the general 10%%, 95Mbps fails 100Mbps plan)",
+			got.Targets[0].SLACompliance)
+	}
+}
+
+// TestSummarySLAOnlyFailedResultsGivesZeroNotNil checks a target with a
+// resolved plan whose only results are 'failed' gets SLACompliance = 0
+// (counted, all misses), not nil.
+func TestSummarySLAOnlyFailedResultsGivesZeroNotNil(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
+	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T10:00:00.000Z")
+
+	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z",
+		SLAPlan{DownloadMbps: mbps(90), UploadMbps: mbps(40)})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Targets[0].SLACompliance == nil {
+		t.Fatal("SLACompliance = nil, want 0 (a resolved plan with only failed results is 0, not nil)")
+	}
+	if *got.Targets[0].SLACompliance != 0 {
+		t.Errorf("SLACompliance = %v, want 0", *got.Targets[0].SLACompliance)
+	}
+}
+
+// TestSummarySLAFailedResultsNoPlanStaysNil checks the no-plan guard runs
+// before the failed-row bump: a target with no resolved plan keeps
+// SLACompliance nil even though it has failed results.
+func TestSummarySLAFailedResultsNoPlanStaysNil(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	a, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "fake", Enabled: true, QueueID: 1})
+	insertResultAt(t, s, a, "fake", "failed", "2026-09-13T10:00:00.000Z")
+
+	got, err := s.Summary(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", SLAPlan{})
+	if err != nil {
+		t.Fatalf("Summary: %v", err)
+	}
+	if got.Targets[0].SLACompliance != nil {
+		t.Errorf("SLACompliance = %v, want nil (no plan resolves for this target)", *got.Targets[0].SLACompliance)
 	}
 }
 

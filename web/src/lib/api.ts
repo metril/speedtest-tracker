@@ -158,10 +158,10 @@ export interface TargetSummary {
   avg_upload_bps: number;
   avg_ping_ms: number;
   max_ping_ms: number;
-  /** sla_compliance is the fraction (0..1) of this target's successful
-   * results in range that met its resolved SLA plan speeds; null when no
-   * plan resolves for it (neither a per-target override nor the general
-   * plan) or it has no successful results in range. */
+  /** sla_compliance is the fraction (0..1) of this target's results in
+   * range (failed ones counting as misses) that met its resolved SLA plan
+   * speeds; null when no plan resolves for it (neither a per-target
+   * override nor the general plan) or it has no results in range. */
   sla_compliance: number | null;
 }
 
@@ -173,8 +173,8 @@ export interface SummaryStats {
   total_failures: number;
   success_rate: number;
   /** sla_compliance is the overall fraction (0..1), weighted by each
-   * target's own successful-result count; null when it resolves for no
-   * target. */
+   * target's own result count (failed ones counting as misses); null when
+   * it resolves for no target. */
   sla_compliance: number | null;
 }
 
@@ -400,6 +400,12 @@ export interface GeneralSettings {
    * PUT 0 (or omit) to leave/clear it -- 0 or blank means "no plan". */
   sla_download_mbps?: number;
   sla_upload_mbps?: number;
+  /** sla_tolerance_pct is the percent margin subtracted from the plan
+   * speeds when computing SLA compliance (0..99). Unlike the plan speeds,
+   * 0 is a meaningful value ("no tolerance"), not "unset" -- the server
+   * omits the field entirely from GET /settings when unset, and PUT with
+   * the field omitted or null clears it (0 must be sent explicitly). */
+  sla_tolerance_pct?: number;
 }
 
 export interface EngineSettings {
@@ -473,6 +479,11 @@ export interface ThresholdSet {
    * other field here) means "inherit the general plan for this field". */
   sla_download_mbps?: number | null;
   sla_upload_mbps?: number | null;
+  /** sla_tolerance_pct overrides the general SLA tolerance
+   * (GeneralSettings.sla_tolerance_pct) for this target; 0 is a valid
+   * override (no tolerance for this target); omitted/null means "inherit
+   * the general tolerance". */
+  sla_tolerance_pct?: number | null;
 }
 
 export type NotifyChannelType = 'webhook' | 'apprise';

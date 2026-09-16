@@ -30,6 +30,13 @@ type General struct {
 	// general plan.
 	SLADownloadMbps *float64 `json:"sla_download_mbps,omitempty"`
 	SLAUploadMbps   *float64 `json:"sla_upload_mbps,omitempty"`
+
+	// SLATolerancePct is the general percent tolerance applied to the SLA
+	// plan speeds above (effective threshold = plan * (1 - tol/100)), for
+	// any target that doesn't set its own Thresholds.SLATolerancePct
+	// override. Unlike the plan speeds, 0 is a real tolerance value (not
+	// "unset") — nil means no general tolerance (0% is used).
+	SLATolerancePct *float64 `json:"sla_tolerance_pct,omitempty"`
 }
 
 // Keys of the General section.
@@ -43,6 +50,7 @@ const (
 	KeyRetentionPruneIntervalMinutes = "general.retention_prune_interval_minutes"
 	KeySLADownloadMbps               = "general.sla_download_mbps"
 	KeySLAUploadMbps                 = "general.sla_upload_mbps"
+	KeySLATolerancePct               = "general.sla_tolerance_pct"
 )
 
 // MaskedSecret is what the API sends instead of a stored secret, and the
@@ -63,6 +71,7 @@ var defaults = map[string]any{
 	KeyRetentionPruneIntervalMinutes: 60,
 	KeySLADownloadMbps:               (*float64)(nil),
 	KeySLAUploadMbps:                 (*float64)(nil),
+	KeySLATolerancePct:               (*float64)(nil),
 
 	KeySpeedtestBin:             "speedtest",
 	KeyIperf3Bin:                "iperf3",
@@ -229,6 +238,12 @@ type Thresholds struct {
 	// field", not "no SLA".
 	SLADownloadMbps *float64 `json:"sla_download_mbps,omitempty"`
 	SLAUploadMbps   *float64 `json:"sla_upload_mbps,omitempty"`
+
+	// SLATolerancePct overrides General.SLATolerancePct for this target
+	// only. nil means "inherit the general tolerance" (or 0% if the
+	// general tolerance is also unset); unlike the plan-speed overrides
+	// above, 0 is itself a valid override (no tolerance for this target).
+	SLATolerancePct *float64 `json:"sla_tolerance_pct,omitempty"`
 }
 
 // Channel is one notification destination. Which fields matter depends on
@@ -419,6 +434,7 @@ func (s *Store) General(ctx context.Context) (General, error) {
 		KeyRetentionPruneIntervalMinutes: &g.RetentionPruneIntervalMinutes,
 		KeySLADownloadMbps:               &g.SLADownloadMbps,
 		KeySLAUploadMbps:                 &g.SLAUploadMbps,
+		KeySLATolerancePct:               &g.SLATolerancePct,
 	}
 	for key, dest := range targets {
 		raw, ok, err := s.Get(ctx, key)

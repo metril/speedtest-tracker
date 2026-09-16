@@ -19,12 +19,15 @@ export interface KpiTileProps {
   /** subtext is a small line shown under the value, e.g. a supporting
    * count ("1,234 tests"). Omit for none. */
   subtext?: string;
+  /** title is a native tooltip shown on hover over the whole tile,
+   * e.g. explaining how a percentage is computed. Omit for none. */
+  title?: string;
 }
 
 /** KpiTile is one headline dashboard stat: a big value, an optional
  * previous-period delta (colored by whether the change is favorable, not
  * just by sign), and a small trend sparkline. */
-export function KpiTile({ label, value, spark, sparkColor, delta, favorable, subtext }: KpiTileProps) {
+export function KpiTile({ label, value, spark, sparkColor, delta, favorable, subtext, title }: KpiTileProps) {
   const showDelta = delta !== undefined && Number.isFinite(delta) && Math.abs(delta) > 0.0005;
   const isUp = (delta ?? 0) >= 0;
   const isGood = isUp === favorable;
@@ -33,7 +36,7 @@ export function KpiTile({ label, value, spark, sparkColor, delta, favorable, sub
   const pctLabel = pct >= 10 ? Math.round(pct) : pct.toFixed(1);
 
   return (
-    <Card>
+    <Card title={title}>
       <CardContent className="p-4">
         <p className="text-sm text-muted">{label}</p>
         <div className="mt-1 flex items-baseline justify-between gap-2">

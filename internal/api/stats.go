@@ -72,7 +72,7 @@ func slaKeyPart(sla store.SLAPlan) string {
 		}
 		return strconv.FormatFloat(*v, 'g', -1, 64)
 	}
-	return f(sla.DownloadMbps) + "," + f(sla.UploadMbps)
+	return f(sla.DownloadMbps) + "," + f(sla.UploadMbps) + "," + f(sla.TolerancePct)
 }
 
 // statsSummary answers GET /stats/summary?range=[&offset=], serving a
@@ -114,7 +114,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 			internalError(w, d.Logger, "load general settings", err)
 			return
 		}
-		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps}
+		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps, TolerancePct: g.SLATolerancePct}
 	}
 	key := from + "|" + to + "|" + strconv.Itoa(offset) + "|" + slaKeyPart(sla)
 	w.Header().Set("Cache-Control", "max-age=30")

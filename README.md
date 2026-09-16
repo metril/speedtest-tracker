@@ -391,20 +391,42 @@ or a per-target override via that target's `thresholds.sla_download_mbps`/
 `sla_upload_mbps` (either field independently; an unset field falls back to
 the general plan) — adds `sla_compliance` to `GET /api/v1/stats/summary`: a
 0..1 fraction, per target and overall (the overall figure weighted by each
-target's own successful-result count, not a plain average across targets).
-It is the share of successful (`status=ok`) results in the window whose
-download **and** upload speed both met the resolved plan; `null` when
-neither the target nor the general settings set a plan, or per-target when
-there were no successful results in the window to judge. A direction the
-engine didn't actually measure (e.g. iperf3 reverse-only or forward-only,
-which leaves the other direction's speed at 0) is skipped rather than
-counted as a miss; if neither applicable direction was measured, that
-result is excluded from the compliance fraction entirely. Set a plan speed
-to 0 to disable it — the settings API can't distinguish an omitted field
-from an explicit null, so 0 is the documented way to clear a plan. A
-per-target override of 0 re-inherits the general plan for that field rather
-than opting the target out of SLA tracking entirely — there is currently no
-per-target opt-out.
+target's own SLA-counted result count, not a plain average across targets).
+It is the share of results in the window whose download **and** upload
+speed each reached the resolved plan speed minus an optional percent
+tolerance; `null` when neither the target nor the general settings set a
+plan, or per-target when there were no results in the window that counted
+toward it.
+
+A `failed` result always counts as a miss — it goes straight into the
+denominator without being judged on its (typically zero or partial)
+readings. An `ok` or `degraded` result is judged on its measurements the
+same way: a direction the engine didn't actually measure (e.g. iperf3
+reverse-only or forward-only, which leaves the other direction's speed at
+0) is skipped rather than counted as a miss; if neither applicable
+direction was measured, that result is excluded from the compliance
+fraction entirely.
+
+`sla_tolerance_pct` (General settings, and per-target as
+`thresholds.sla_tolerance_pct`) shrinks the effective threshold to
+`plan × (1 − tolerance / 100)`: e.g. a 100 Mbps plan with 10% tolerance
+counts a 90 Mbps result as compliant. Valid range is 0..99 at both levels;
+a per-target override, when present, always wins over the general
+tolerance — including an override of exactly 0, which is honored as "no
+tolerance for this target" rather than being treated as unset. This is the
+opposite of the plan-speed fields: for `sla_download_mbps`/`sla_upload_mbps`,
+0 (or omitting the field) means unset/inherit, and PUTting `0` is the
+documented way to clear a plan, since the settings API otherwise can't
+distinguish an omitted field from an explicit JSON null on a plain pointer
+field. `sla_tolerance_pct` can't reuse that trick, since 0 is itself a
+meaningful value — so at the General level, the field is instead always
+written whenever the `general` object is present in a `PUT /api/v1/settings`
+body: omitting `sla_tolerance_pct` (or sending it as `null`) clears the
+stored tolerance, and any other value sets it.
+
+A per-target plan-speed override of 0 re-inherits the general plan for
+that field rather than opting the target out of SLA tracking entirely —
+there is currently no per-target opt-out.
 
 ## Outages
 

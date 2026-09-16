@@ -94,6 +94,24 @@ it('shows the plan speeds as subtext on the "Meets plan" tile', () => {
   expect(screen.getByText('1000/50 Mbps plan')).toBeInTheDocument();
 });
 
+it('shows the tolerance-adjusted subtext when a tolerance is set', () => {
+  render(
+    <SummaryTiles
+      stats={{ ...stats, sla_compliance: 0.9 }}
+      general={{ ...general, sla_download_mbps: 100, sla_upload_mbps: 20, sla_tolerance_pct: 10 }}
+    />,
+  );
+  expect(screen.getByText('≥ 90/18 Mbps (100/20 plan, 10% tolerance)')).toBeInTheDocument();
+});
+
+it('adds a tooltip title to the "Meets plan" tile', () => {
+  render(<SummaryTiles stats={{ ...stats, sla_compliance: 0.9 }} general={general} />);
+  expect(screen.getByText('Meets plan').closest('[title]')).toHaveAttribute(
+    'title',
+    'Share of tests in this period, including failed ones, whose download and upload both reached the plan speed minus tolerance.',
+  );
+});
+
 it('shows a favorable delta on "Meets plan" vs. the previous period', () => {
   const previous: SummaryStats = { ...stats, sla_compliance: 0.8 };
   render(<SummaryTiles stats={{ ...stats, sla_compliance: 0.9 }} previousStats={previous} />);

@@ -24,12 +24,15 @@ type TargetSummary struct {
 	AvgPingMs      float64 `json:"avg_ping_ms"`
 	MaxPingMs      float64 `json:"max_ping_ms"`
 
-	// SLACompliance is the fraction (0..1) of successful (status='ok')
-	// results in the window whose download and upload speeds both met
-	// this target's effective SLA plan (its own Thresholds override,
-	// falling back to the SLAPlan passed to Summary). nil when neither
-	// the target nor the general plan set a download or upload speed, or
-	// when there were no successful results in the window to judge.
+	// SLACompliance is the fraction (0..1) of results in the window
+	// (status 'ok', 'degraded' or 'failed') that count toward this
+	// target's effective SLA plan (its own Thresholds override, falling
+	// back to the SLAPlan passed to Summary): a 'failed' row always
+	// counts as a miss, while an 'ok'/'degraded' row is judged on
+	// whether its download and upload speeds both met the plan, reduced
+	// by the effective tolerance percent. nil when neither the target
+	// nor the general plan set a download or upload speed, or when there
+	// were no results in the window that counted toward the plan.
 	SLACompliance *float64 `json:"sla_compliance"`
 }
 
@@ -43,17 +46,22 @@ type SummaryStats struct {
 	SuccessRate   float64         `json:"success_rate"`
 
 	// SLACompliance is the overall fraction (0..1), weighted by each
-	// target's own successful-result count, across every target with a
-	// resolved SLA plan. nil when no target has one.
+	// target's own SLA-counted result count (see TargetSummary.SLACompliance),
+	// across every target with a resolved SLA plan. nil when no target has
+	// one.
 	SLACompliance *float64 `json:"sla_compliance"`
 }
 
-// SLAPlan is the general (fallback) SLA plan speeds, in Mbps, used to
-// resolve a target's effective plan when its own Thresholds don't set
-// sla_download_mbps/sla_upload_mbps. Either field may be nil.
+// SLAPlan is the general (fallback) SLA plan, used to resolve a target's
+// effective plan when its own Thresholds don't set the matching field.
+// DownloadMbps/UploadMbps are in Mbps and either may be nil. TolerancePct
+// is a percent (0..99) shrinking the effective threshold
+// (plan * (1 - tol/100)); unlike the speed fields, nil and 0 are distinct
+// (nil means "no general tolerance", equivalent to 0).
 type SLAPlan struct {
 	DownloadMbps *float64
 	UploadMbps   *float64
+	TolerancePct *float64
 }
 
 // targetSLAOverride mirrors the two SLA fields of settings.Thresholds
@@ -62,6 +70,18 @@ type SLAPlan struct {
 type targetSLAOverride struct {
 	SLADownloadMbps *float64 `json:"sla_download_mbps"`
 	SLAUploadMbps   *float64 `json:"sla_upload_mbps"`
+	SLATolerancePct *float64 `json:"sla_tolerance_pct"`
+}
+
+// clampTolerancePct clamps a tolerance percent to the valid 0..99 range.
+func clampTolerancePct(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 99 {
+		return 99
+	}
+	return v
 }
 
 // normalizeMbps treats a non-positive plan speed as unset: <PUT>ting a plan
@@ -79,9 +99,13 @@ func normalizeMbps(v *float64) *float64 {
 // resolvePlan resolves a target's effective SLA plan: its own override
 // (parsed from its thresholds JSON) takes precedence per-field over the
 // general plan, and a non-positive value at either level is treated as
-// unset (see normalizeMbps). Both returned pointers are nil when neither
-// the target nor the general plan set that field.
-func resolvePlan(thresholdsJSON string, general SLAPlan) (downloadMbps, uploadMbps *float64) {
+// unset (see normalizeMbps). downloadMbps/uploadMbps are nil when neither
+// the target nor the general plan set that field. tolerancePct is resolved
+// separately (it is a real value at 0, so it is never routed through
+// normalizeMbps): the target's own override wins if present (non-nil,
+// including an explicit 0), else the general tolerance, else 0 — always
+// clamped to 0..99.
+func resolvePlan(thresholdsJSON string, general SLAPlan) (downloadMbps, uploadMbps *float64, tolerancePct float64) {
 	var t targetSLAOverride
 	if thresholdsJSON != "" {
 		_ = json.Unmarshal([]byte(thresholdsJSON), &t) // malformed thresholds: treat as no override
@@ -94,7 +118,15 @@ func resolvePlan(thresholdsJSON string, general SLAPlan) (downloadMbps, uploadMb
 	if uploadMbps == nil {
 		uploadMbps = normalizeMbps(general.UploadMbps)
 	}
-	return downloadMbps, uploadMbps
+	switch {
+	case t.SLATolerancePct != nil:
+		tolerancePct = *t.SLATolerancePct
+	case general.TolerancePct != nil:
+		tolerancePct = *general.TolerancePct
+	default:
+		tolerancePct = 0
+	}
+	return downloadMbps, uploadMbps, clampTolerancePct(tolerancePct)
 }
 
 // Summary returns per-target aggregates over [from,to] plus each target's
@@ -124,11 +156,12 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 	defer rows.Close()
 
 	out := &SummaryStats{From: from, To: to, Targets: []TargetSummary{}}
-	// planDL/planUL per target, keyed by target id, resolved once here so
-	// the SLA pass below (over individual results) doesn't need to
+	// planDL/planUL/planTol per target, keyed by target id, resolved once
+	// here so the SLA pass below (over individual results) doesn't need to
 	// re-parse thresholds JSON per row.
 	planDL := map[int64]*float64{}
 	planUL := map[int64]*float64{}
+	planTol := map[int64]float64{}
 	for rows.Next() {
 		var (
 			ts               TargetSummary
@@ -147,7 +180,7 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 		if ts.Count > 0 {
 			ts.SuccessRate = float64(ts.Count-ts.FailCount) / float64(ts.Count)
 		}
-		planDL[ts.TargetID], planUL[ts.TargetID] = resolvePlan(thresholdsJSON, sla)
+		planDL[ts.TargetID], planUL[ts.TargetID], planTol[ts.TargetID] = resolvePlan(thresholdsJSON, sla)
 		out.Targets = append(out.Targets, ts)
 		out.TotalResults += ts.Count
 		out.TotalFailures += ts.FailCount
@@ -159,27 +192,37 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 		out.SuccessRate = float64(out.TotalResults-out.TotalFailures) / float64(out.TotalResults)
 	}
 
-	// SLA compliance pass: one query over every successful result in the
-	// window (across all targets), tallied per target against its
+	// SLA compliance pass: one query over every result in the window
+	// (across all targets, any status), tallied per target against its
 	// already-resolved plan.
 	slaDenom := map[int64]int{}
 	slaCompliant := map[int64]int{}
 	slaRows, err := s.Read.QueryContext(ctx, `
-		SELECT target_id, COALESCE(download_bps,0), COALESCE(upload_bps,0) FROM results
-		WHERE status='ok' AND target_id IS NOT NULL AND started_at >= ? AND started_at <= ?`, from, to)
+		SELECT target_id, status, COALESCE(download_bps,0), COALESCE(upload_bps,0) FROM results
+		WHERE target_id IS NOT NULL AND started_at >= ? AND started_at <= ?`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("summary sla results: %w", err)
 	}
 	for slaRows.Next() {
 		var targetID int64
+		var status string
 		var downloadBps, uploadBps float64
-		if err := slaRows.Scan(&targetID, &downloadBps, &uploadBps); err != nil {
+		if err := slaRows.Scan(&targetID, &status, &downloadBps, &uploadBps); err != nil {
 			slaRows.Close()
 			return nil, fmt.Errorf("scan summary sla row: %w", err)
 		}
 		dl, ul := planDL[targetID], planUL[targetID]
 		if dl == nil && ul == nil {
 			continue // no plan resolves for this target: not counted
+		}
+		// A failed row always counts as a miss: it never had a chance to
+		// meet the plan, so it goes straight into the denominator without
+		// being judged on its (likely zero/partial) speeds. This check
+		// must stay after the no-plan guard above, so a plan-less target's
+		// failed rows still don't count (SLACompliance stays nil for it).
+		if status == "failed" {
+			slaDenom[targetID]++
+			continue
 		}
 		// A direction whose measured value is exactly 0 means the engine
 		// never measured it (e.g. a reverse-only or forward-only iperf3
@@ -188,14 +231,24 @@ func (s *Store) Summary(ctx context.Context, from, to string, sla SLAPlan) (*Sum
 		// measured a genuine 0bps: skip that direction's criterion rather
 		// than count it as a miss. If neither applicable direction was
 		// actually measured, the result says nothing about plan
-		// compliance and is excluded from the denominator entirely.
+		// compliance and is excluded from the denominator entirely. This
+		// applies to 'ok' and 'degraded' rows alike — both are judged on
+		// their measurements the same way.
 		checkDL := dl != nil && downloadBps != 0
 		checkUL := ul != nil && uploadBps != 0
 		if !checkDL && !checkUL {
 			continue
 		}
 		slaDenom[targetID]++
-		if (!checkDL || downloadBps >= *dl*1e6) && (!checkUL || uploadBps >= *ul*1e6) {
+		tol := planTol[targetID]
+		thresholdDL, thresholdUL := 0.0, 0.0
+		if dl != nil {
+			thresholdDL = *dl * 1e6 * (1 - tol/100)
+		}
+		if ul != nil {
+			thresholdUL = *ul * 1e6 * (1 - tol/100)
+		}
+		if (!checkDL || downloadBps >= thresholdDL) && (!checkUL || uploadBps >= thresholdUL) {
 			slaCompliant[targetID]++
 		}
 	}
