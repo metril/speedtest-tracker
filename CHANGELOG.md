@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.8.5](https://github.com/metril/speedtest-tracker/compare/v0.8.4...v0.8.5) (2026-09-16)
+
+
+### Features
+
+* **stats:** SLA tolerance percentage and failed tests count as plan misses ([01a8e66](https://github.com/metril/speedtest-tracker/commit/01a8e6695c38289e7eed15eb0a5c8142d4bb6a54))
+
+
+### Bug Fixes
+
+* **web:** live compact bar takes the phase colour of the gauge ([057a5c6](https://github.com/metril/speedtest-tracker/commit/057a5c6deef42fa2f7725e7ab784e14a14b207ff))
+* **web:** two-row sidebar footer so the user name and theme toggle both fit ([61ab1c6](https://github.com/metril/speedtest-tracker/commit/61ab1c617044c1be000d76a45ab7664806efbb75))
+
 ## [0.8.4](https://github.com/metril/speedtest-tracker/compare/v0.8.3...v0.8.4) (2026-09-16)
 
 
