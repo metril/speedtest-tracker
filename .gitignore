@@ -12,3 +12,6 @@ internal/web/dist/*
 *.db-wal
 *.db-shm
 .DS_Store
+
+# Playwright MCP screenshots and logs
+.playwright-mcp/
