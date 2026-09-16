@@ -394,8 +394,8 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
         </div>
       )}
 
-      <div className="flex gap-2">
-        <div className="flex-1">
+      <div className="flex flex-wrap gap-2">
+        <div className="min-w-48 flex-1">
           <FormField id="ookla-server-search" label="Search servers">
           <Popover open={open} onOpenChange={(o) => { if (!o) setFocused(false); }}>
             <PopoverAnchor asChild>
@@ -435,7 +435,7 @@ function OoklaFields({ options, onChange }: Omit<Props, 'engine'>) {
           </Popover>
           </FormField>
         </div>
-        <div className="w-28 shrink-0">
+        <div className="w-44 shrink-0">
           <FormField id="ookla-country" label="Country">
             <select
               id="ookla-country"

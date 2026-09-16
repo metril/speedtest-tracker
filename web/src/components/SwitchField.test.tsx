@@ -38,7 +38,7 @@ describe('SwitchField', () => {
     render(
       <SwitchField id="f" label="Enable thing" hint="Extra detail" checked disabled onCheckedChange={vi.fn()} />,
     );
-    expect(screen.getByText('Extra detail')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Extra detail' })).toBeInTheDocument();
     expect(screen.getByRole('switch', { name: 'Enable thing' })).toBeDisabled();
   });
 });

@@ -160,7 +160,11 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
       {showCustomToggle && (
         <SwitchField
           id="threshold-custom" label="Custom notification" checked={custom} onCheckedChange={toggleCustom}
-          hint="Off: this target uses the global notification defaults from Settings → Notifications."
+          hint={
+            allowDisable
+              ? 'Off: this target uses the global notification defaults from Settings → Notifications. Inherit uses the global defaults; Off disables the check for this target.'
+              : 'Off: this target uses the global notification defaults from Settings → Notifications. Unset means no default for that metric.'
+          }
         />
       )}
 
@@ -171,11 +175,6 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
               Nothing overridden yet — this target still follows the global defaults.
             </p>
           )}
-          <p className="text-xs text-faint">
-            {allowDisable
-              ? 'Inherit uses the global defaults from Settings → Notifications; Off disables the check for this target.'
-              : 'Unset means no default for that metric.'}
-          </p>
           <div className="grid gap-3 sm:grid-cols-2">
             {NUMERIC_FIELDS.map(({ key, id, text }) => {
               const mode = modes[key];
@@ -210,21 +209,20 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
             })}
           </div>
           <div className="grid gap-3 border-t border-line pt-3">
-            <p className="text-xs text-faint">
-              Blank fields inherit the plan speeds from Settings &rarr; General.
-            </p>
             <div className="grid gap-3 sm:grid-cols-2">
               {SLA_FIELDS.map(({ key, id, text }) => (
-                <div key={key}>
-                  <label className={label} htmlFor={id}>{text}</label>
+                <FormField
+                  key={key} id={id} label={text}
+                  hint="Blank inherits the plan speed from Settings → General."
+                >
                   <input
                     id={id}
                     type="number"
-                    className={field}
+                    className={inputClass}
                     value={raw[key]}
                     onChange={(e) => setNumeric(key, e.target.value)}
                   />
-                </div>
+                </FormField>
               ))}
             </div>
           </div>

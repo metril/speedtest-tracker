@@ -93,18 +93,20 @@ export function TargetForm({ initial, onSubmit, onCancel, submitting, error }: P
             <FormField
               id="target-queue" label="Queue"
               hint="Targets in the same queue run one at a time; different queues run in parallel."
+              action={
+                <button
+                  type="button"
+                  className="h-auto p-0 text-xs leading-none text-accent hover:underline"
+                  onClick={() => setQueuesOpen(true)}
+                >
+                  Manage queues…
+                </button>
+              }
             >
               <select id="target-queue" className={inputClass} value={selectedQueueId}
                 onChange={(e) => setQueueId(Number(e.target.value))}>
                 {(queues.data ?? []).map((q) => <option key={q.id} value={q.id}>{q.name}</option>)}
               </select>
-              <button
-                type="button"
-                className="mt-1 text-left text-xs text-accent hover:underline"
-                onClick={() => setQueuesOpen(true)}
-              >
-                Manage queues…
-              </button>
             </FormField>
           </div>
 

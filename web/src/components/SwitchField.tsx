@@ -1,3 +1,4 @@
+import { HintTip } from '@/components/HintTip';
 import { Switch } from '@/components/ui/switch';
 
 interface Props {
@@ -15,9 +16,9 @@ interface Props {
 export function SwitchField({ id, label, checked, onCheckedChange, disabled, hint }: Props) {
   return (
     <div className="flex items-center justify-between gap-3">
-      <div className="grid gap-0.5">
+      <div className="flex items-center gap-1.5">
         <label htmlFor={id} className="text-sm text-muted">{label}</label>
-        {hint && <p className="text-xs text-faint">{hint}</p>}
+        {hint && <HintTip hint={hint} />}
       </div>
       <Switch id={id} checked={checked} onCheckedChange={onCheckedChange} disabled={disabled} />
     </div>
