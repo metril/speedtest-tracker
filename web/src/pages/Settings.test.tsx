@@ -9,9 +9,9 @@ import type { NotifyChannel, Settings as SettingsType } from '../lib/api';
 import { Settings } from './Settings';
 import { GeneralSection } from '../features/settings/GeneralSection';
 import { EnginesSection } from '../features/settings/EnginesSection';
-import { IntegrationsSection } from '../features/settings/IntegrationsSection';
+import { ExportersSection } from '../features/settings/ExportersSection';
 import { NotificationsSection } from '../features/settings/NotificationsSection';
-import { AuthSettingsSection } from '../features/settings/AuthSettingsSection';
+import { AccessSection } from '../features/settings/AccessSection';
 
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
@@ -114,6 +114,19 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** saveBar/saveBarButton/discardButton locate the sticky "Unsaved
+ * changes" region and its actions -- absent entirely while a section is
+ * clean, per SettingsSaveBar. */
+function saveBar() {
+  return screen.queryByRole('region', { name: 'Unsaved changes' });
+}
+function saveButton() {
+  return within(saveBar()!).getByRole('button', { name: 'Save changes' });
+}
+function discardButton() {
+  return within(saveBar()!).getByRole('button', { name: 'Discard' });
+}
+
 /** renderSettings mounts the same nested-route tree App.tsx wires up for
  * /settings/*, so each test can deep-link straight to the tab it's
  * exercising (matching how a real reload or bookmark behaves). */
@@ -152,9 +165,11 @@ function renderSettings(opts: {
               <Route index element={<Navigate to="general" replace />} />
               <Route path="general" element={<GeneralSection />} />
               <Route path="engines" element={<EnginesSection />} />
-              <Route path="integrations" element={<IntegrationsSection />} />
+              <Route path="exporters" element={<ExportersSection />} />
+              <Route path="integrations" element={<Navigate to="/settings/exporters" replace />} />
               <Route path="notifications" element={<NotificationsSection />} />
-              <Route path="auth" element={<AuthSettingsSection />} />
+              <Route path="access" element={<AccessSection />} />
+              <Route path="auth" element={<Navigate to="/settings/access" replace />} />
             </Route>
           </Routes>
         </MemoryRouter>
@@ -170,13 +185,52 @@ describe('Settings page', () => {
     expect(await screen.findByLabelText('Timezone')).toBeInTheDocument();
   });
 
+  it('redirects the old /settings/integrations path to /settings/exporters', async () => {
+    renderSettings({ path: '/settings/integrations' });
+    expect(await screen.findByLabelText('VictoriaMetrics URL')).toBeInTheDocument();
+  });
+
+  it('redirects the old /settings/auth path to /settings/access', async () => {
+    renderSettings({ path: '/settings/auth' });
+    expect(await screen.findByLabelText('Auth mode')).toBeInTheDocument();
+  });
+
   it('renders the section tabs and marks the active one', async () => {
     renderSettings({ path: '/settings/engines' });
     await screen.findByLabelText('iperf3 server list URL');
     const tabs = screen.getAllByRole('tab');
-    expect(tabs.map((t) => t.textContent)).toEqual(['General', 'Engines', 'Integrations', 'Notifications', 'Auth']);
+    expect(tabs.map((t) => t.textContent)).toEqual(['General', 'Engines', 'Exporters', 'Notifications', 'Access']);
     expect(screen.getByRole('tab', { name: 'Engines' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('tab', { name: 'General' })).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('shows no save bar while the section is clean', async () => {
+    renderSettings();
+    await screen.findByLabelText('Timezone');
+    expect(saveBar()).not.toBeInTheDocument();
+  });
+
+  it('shows the save bar after an edit and hides it again after saving', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await screen.findByLabelText('Timezone');
+    await userEvent.clear(screen.getByLabelText('Results retention (days)'));
+    await userEvent.type(screen.getByLabelText('Results retention (days)'), '30');
+    expect(saveBar()).toBeInTheDocument();
+    await userEvent.click(saveButton());
+    expect(put).toHaveBeenCalledWith({ general: expect.objectContaining({ retention_days_results: 30 }) });
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(saveBar()).not.toBeInTheDocument();
+  });
+
+  it('hides the save bar after Discard, restoring the server value', async () => {
+    renderSettings();
+    const tz = await screen.findByLabelText('Timezone');
+    await userEvent.selectOptions(tz, 'Asia/Kolkata');
+    expect(saveBar()).toBeInTheDocument();
+    await userEvent.click(discardButton());
+    expect(saveBar()).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Timezone')).toHaveValue('UTC');
   });
 
   it('saves only the edited section', async () => {
@@ -185,9 +239,7 @@ describe('Settings page', () => {
     await screen.findByLabelText('Timezone');
     await userEvent.clear(screen.getByLabelText('Results retention (days)'));
     await userEvent.type(screen.getByLabelText('Results retention (days)'), '30');
-    await userEvent.click(
-      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
-    );
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ general: expect.objectContaining({ retention_days_results: 30 }) });
     expect(put.mock.calls[0][0].integrations).toBeUndefined();
   });
@@ -198,9 +250,7 @@ describe('Settings page', () => {
     await screen.findByLabelText('Timezone');
     await userEvent.type(screen.getByLabelText('Plan download (Mbps)'), '1000');
     await userEvent.type(screen.getByLabelText('Plan upload (Mbps)'), '50');
-    await userEvent.click(
-      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
-    );
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({
       general: expect.objectContaining({ sla_download_mbps: 1000, sla_upload_mbps: 50 }),
     });
@@ -216,9 +266,7 @@ describe('Settings page', () => {
     // Two "Clear" buttons exist (download, upload); the download field's
     // one is the first in DOM order.
     await userEvent.click(screen.getAllByRole('button', { name: 'Clear' })[0]);
-    await userEvent.click(
-      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
-    );
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({
       general: expect.objectContaining({ sla_download_mbps: 0 }),
     });
@@ -235,9 +283,7 @@ describe('Settings page', () => {
     await userEvent.clear(downloadField);
     expect(downloadField).toHaveValue(null);
 
-    await userEvent.click(
-      within(screen.getByRole('region', { name: 'General' })).getByRole('button', { name: 'Save General' }),
-    );
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({
       general: expect.objectContaining({ sla_download_mbps: 0 }),
     });
@@ -248,23 +294,27 @@ describe('Settings page', () => {
     renderSettings({ put, path: '/settings/engines' });
     const urlField = await screen.findByLabelText('iperf3 server list URL');
     await userEvent.clear(urlField);
-    await userEvent.click(
-      within(screen.getByRole('region', { name: 'Engines' })).getByRole('button', { name: 'Save Engines' }),
-    );
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ engines: expect.objectContaining({ iperf3_list_url: '' }) });
   });
 
   it('keeps a stored secret when the field is left untouched', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put, settings: settingsFixture({ vm_auth_header: '***' }), path: '/settings/integrations' });
-    await userEvent.click(await screen.findByRole('button', { name: 'Save Integrations' }));
+    renderSettings({ put, settings: settingsFixture({ vm_auth_header: '***' }), path: '/settings/exporters' });
+    await screen.findByLabelText('VictoriaMetrics URL');
+    // Untouched, masked secrets never register as a change: no save bar.
+    expect(saveBar()).not.toBeInTheDocument();
+    await userEvent.type(screen.getByLabelText('VictoriaMetrics URL'), '/extra');
+    await userEvent.click(saveButton());
     expect(put.mock.calls[0][0].integrations.vm_auth_header).toBe('***');
   });
 
   it('shows the server validation message inline', async () => {
     const put = vi.fn().mockRejectedValue(new ApiError(400, 'invalid_request', 'vm_url must be http or https'));
-    renderSettings({ put, path: '/settings/integrations' });
-    await userEvent.click(await screen.findByRole('button', { name: 'Save Integrations' }));
+    renderSettings({ put, path: '/settings/exporters' });
+    const urlField = await screen.findByLabelText('VictoriaMetrics URL');
+    await userEvent.type(urlField, '/x');
+    await userEvent.click(saveButton());
     expect(await screen.findByRole('alert')).toHaveTextContent('vm_url must be http or https');
   });
 
@@ -282,14 +332,14 @@ describe('Settings page', () => {
 
   it('reports a connection test result inline', async () => {
     const test = vi.fn().mockResolvedValue({ ok: false, error: 'connection refused' });
-    renderSettings({ test, path: '/settings/integrations' });
+    renderSettings({ test, path: '/settings/exporters' });
     await userEvent.click(await screen.findByRole('button', { name: 'Test VictoriaMetrics' }));
     expect(await screen.findByText(/connection refused/)).toBeInTheDocument();
   });
 
   it('sends a structured auth payload with the connection test', async () => {
     const test = vi.fn().mockResolvedValue({ ok: true, latency_ms: 5 });
-    renderSettings({ test, path: '/settings/integrations' });
+    renderSettings({ test, path: '/settings/exporters' });
     await userEvent.selectOptions(await screen.findByLabelText('VictoriaMetrics auth'), 'bearer');
     await userEvent.type(screen.getByLabelText('VictoriaMetrics auth token'), 'tok123');
     await userEvent.click(screen.getByRole('button', { name: 'Test VictoriaMetrics' }));
@@ -305,8 +355,7 @@ describe('Settings page', () => {
     await screen.findByLabelText('Cooldown (minutes)');
     await userEvent.clear(screen.getByLabelText('Cooldown (minutes)'));
     await userEvent.type(screen.getByLabelText('Cooldown (minutes)'), '15');
-    await userEvent.click(within(screen.getByRole('region', { name: 'Notifications' }))
-      .getByRole('button', { name: 'Save Notifications' }));
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ notifications: expect.objectContaining({ cooldown_minutes: 15 }) });
     expect(put.mock.calls[0][0].general).toBeUndefined();
   });
@@ -323,7 +372,7 @@ describe('Settings page', () => {
       }),
     });
     await userEvent.click(await screen.findByRole('button', { name: 'Add channel' }));
-    await userEvent.click(screen.getByRole('button', { name: 'Save Notifications' }));
+    await userEvent.click(saveButton());
     const sent = put.mock.calls[0][0].notifications.channels;
     expect(sent).toHaveLength(2);
     expect(sent[0].urls).toEqual(['***']);
@@ -416,13 +465,12 @@ describe('Settings page', () => {
     expect(screen.queryByLabelText('Headers')).not.toBeInTheDocument();
   });
 
-  it('saves only the auth section', async () => {
+  it('saves only the access section', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put, path: '/settings/auth' });
+    renderSettings({ put, path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     await userEvent.type(screen.getByLabelText('Trusted proxy CIDRs'), '10.0.0.0/8');
-    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
-      .getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
       mode: 'forward_auth', trusted_proxies: ['10.0.0.0/8'],
     }) });
@@ -431,42 +479,52 @@ describe('Settings page', () => {
 
   it('drops a trailing newline and blank lines from trusted proxy CIDRs before saving', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put, path: '/settings/auth' });
+    renderSettings({ put, path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
     const textarea = screen.getByLabelText('Trusted proxy CIDRs');
     await userEvent.type(textarea, '10.0.0.0/8{enter}{enter}192.168.0.0/16{enter}');
-    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
-      .getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
       mode: 'forward_auth', trusted_proxies: ['10.0.0.0/8', '192.168.0.0/16'],
     }) });
   });
 
   it('disables a field that is set by the environment', async () => {
-    renderSettings({ settings: settingsFixture({ locked: ['auth.mode'] }), path: '/settings/auth' });
-    expect(await screen.findByLabelText('Auth mode')).toBeDisabled();
-    expect(within(screen.getByRole('region', { name: 'Auth' }))
-      .getByText('set by environment')).toBeInTheDocument();
+    renderSettings({
+      settings: settingsFixture({
+        locked: ['auth.mode'], auth: { mode: 'forward_auth', trusted_proxies: ['10.0.0.0/8'] },
+      }),
+      path: '/settings/access',
+    });
+    expect(await screen.findByLabelText('Auth mode', { exact: false })).toBeDisabled();
+    expect(screen.getByText('set by environment')).toBeInTheDocument();
     expect(screen.getByLabelText('Admin group')).not.toBeDisabled();
   });
 
   it('blocks a forward_auth switch with no trusted proxies before calling the API', async () => {
     const put = vi.fn();
-    renderSettings({ put, path: '/settings/auth' });
+    renderSettings({ put, path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
-    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(put).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(/at least one trusted proxy/i);
   });
 
+  it('shows the forward_auth validation error on the trusted-proxies field too', async () => {
+    renderSettings({ path: '/settings/access' });
+    await userEvent.selectOptions(await screen.findByLabelText('Auth mode', { exact: false }), 'forward_auth');
+    await userEvent.click(saveButton());
+    // Once in the save bar, once inline under the offending row.
+    expect(screen.getAllByText(/at least one trusted proxy/i)).toHaveLength(2);
+  });
+
   it('saves the oidc mode settings', async () => {
     const put = vi.fn().mockResolvedValue(settingsFixture());
-    renderSettings({ put, path: '/settings/auth' });
+    renderSettings({ put, path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
     await userEvent.type(screen.getByLabelText('Issuer'), 'https://idp.example.com');
     await userEvent.type(screen.getByLabelText('Client ID'), 'client-1');
-    await userEvent.click(within(screen.getByRole('region', { name: 'Auth' }))
-      .getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ auth: expect.objectContaining({
       mode: 'oidc', oidc_issuer: 'https://idp.example.com', oidc_client_id: 'client-1',
     }) });
@@ -474,9 +532,9 @@ describe('Settings page', () => {
 
   it('blocks saving oidc mode with no issuer or client id', async () => {
     const put = vi.fn();
-    renderSettings({ put, path: '/settings/auth' });
+    renderSettings({ put, path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
-    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(put).not.toHaveBeenCalled();
     expect(screen.getByRole('alert')).toHaveTextContent(/issuer/i);
   });
@@ -484,7 +542,7 @@ describe('Settings page', () => {
   it('tests OIDC discovery with the in-progress form values', async () => {
     const testOIDC = vi.fn().mockResolvedValue({ ok: true, latency_ms: 42 });
     vi.spyOn(api, 'testOIDC').mockImplementation(testOIDC);
-    renderSettings({ path: '/settings/auth' });
+    renderSettings({ path: '/settings/access' });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'oidc');
     await userEvent.type(screen.getByLabelText('Issuer'), 'https://idp.example.com');
     await userEvent.type(screen.getByLabelText('Client ID'), 'client-1');
@@ -501,31 +559,33 @@ describe('Settings page', () => {
     );
     renderSettings({
       put,
-      path: '/settings/auth',
+      path: '/settings/access',
       settings: settingsFixture({ auth: { mode: 'open', trusted_proxies: ['10.0.0.0/8'] } }),
     });
     await userEvent.selectOptions(await screen.findByLabelText('Auth mode'), 'forward_auth');
-    await userEvent.click(screen.getByRole('button', { name: 'Save Auth' }));
+    await userEvent.click(saveButton());
     expect(await screen.findByRole('alert')).toHaveTextContent(/Remote-User/);
   });
 
-  it('disables Save and Test with a read-only hint for a non-admin viewer', async () => {
+  it('disables every field and Test with a read-only hint for a non-admin viewer', async () => {
     renderSettings({
-      path: '/settings/integrations',
+      path: '/settings/exporters',
       me: { mode: 'oidc', user: 'bob', groups: [], is_admin: false },
     });
-    expect(await screen.findByRole('button', { name: 'Save Integrations' })).toBeDisabled();
+    expect(await screen.findByLabelText('VictoriaMetrics URL')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Test VictoriaMetrics' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Test VictoriaLogs' })).toBeDisabled();
     expect(screen.getAllByText('Read-only: admin group required').length).toBeGreaterThan(0);
+    // A read-only viewer can't dirty any field, so no save bar ever appears.
+    expect(saveBar()).not.toBeInTheDocument();
   });
 
-  it('leaves Save and Test enabled for an admin viewer', async () => {
+  it('leaves every field and Test enabled for an admin viewer', async () => {
     renderSettings({
-      path: '/settings/integrations',
+      path: '/settings/exporters',
       me: { mode: 'oidc', user: 'alice', groups: ['admin'], is_admin: true },
     });
-    expect(await screen.findByRole('button', { name: 'Save Integrations' })).toBeEnabled();
+    expect(await screen.findByLabelText('VictoriaMetrics URL')).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Test VictoriaMetrics' })).toBeEnabled();
   });
 
@@ -534,10 +594,20 @@ describe('Settings page', () => {
     const tz = await screen.findByLabelText('Timezone');
     await userEvent.selectOptions(tz, 'Asia/Kolkata');
 
+    // Leaving a dirty tab opens the confirm dialog; Keep editing stays put.
     await userEvent.click(screen.getByRole('tab', { name: 'Engines' }));
+    const dialog = await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+    expect(dialog).toHaveTextContent('Your edits to General have not been saved.');
+    await userEvent.click(within(dialog).getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
+
+    // Discard clears the edit and completes the navigation.
+    await userEvent.click(screen.getByRole('tab', { name: 'Engines' }));
+    const dialog2 = await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+    await userEvent.click(within(dialog2).getByRole('button', { name: 'Discard' }));
     await screen.findByLabelText('iperf3 server list URL');
 
     await userEvent.click(screen.getByRole('tab', { name: 'General' }));
-    expect(await screen.findByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
+    expect(await screen.findByLabelText('Timezone')).toHaveValue('UTC');
   });
 });

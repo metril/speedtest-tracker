@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent, SheetTitle } from '@/components/ui/sheet';
 import { LivePanel } from '../features/live/LivePanel';
 import { LiveRunProvider } from '../features/live/LiveRunProvider';
+import { useNavigationGuard } from '../features/settings/NavigationGuardContext';
 import { useLogout, useMe } from '../lib/queries';
 import { OpenModeBanner } from './OpenModeBanner';
 import { ThemeToggle } from './ThemeToggle';
@@ -21,6 +22,9 @@ const NAV: { to: string; label: string; icon: ComponentType<{ className?: string
 ];
 
 function NavLinks({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?: () => void }) {
+  const { guard } = useNavigationGuard();
+  const navigate = useNavigate();
+
   return (
     <nav className="flex flex-col gap-1">
       {NAV.map(({ to, label, icon: Icon }) => (
@@ -28,7 +32,11 @@ function NavLinks({ collapsed, onNavigate }: { collapsed?: boolean; onNavigate?:
           key={to}
           to={to}
           end={to === '/'}
-          onClick={onNavigate}
+          onClick={(e) => {
+            e.preventDefault();
+            guard(() => navigate(to));
+            onNavigate?.();
+          }}
           title={collapsed ? label : undefined}
           className={({ isActive }) =>
             `flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors ${

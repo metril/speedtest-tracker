@@ -92,7 +92,8 @@ function SwitchRowField({ checked, onChange }: { checked: boolean; onChange: (v:
  * headers, OIDC provider config, authorization rules and API tokens as
  * SettingsCards instead of one long field list. */
 export function AccessSection() {
-  const { auth, setAuth, readOnly } = useSettingsSection('auth');
+  const { auth, setAuth, readOnly, fieldError } = useSettingsSection('access');
+  const rowError = (id: string) => (fieldError?.field === id ? fieldError.message : undefined);
   const [testing, setTesting] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
 
@@ -143,6 +144,7 @@ export function AccessSection() {
           <SettingsRow
             label="Trusted proxy CIDRs" htmlFor="auth-trusted-proxies" lockKey="auth.trusted_proxies"
             description="Required. Identity headers are ignored unless the connecting peer is inside one of these ranges."
+            error={rowError('auth-trusted-proxies')}
           >
             <ListField
               value={auth.trusted_proxies} onChange={(v) => setAuth({ ...auth, trusted_proxies: v })}
@@ -162,10 +164,16 @@ export function AccessSection() {
             />
           )}
         >
-          <SettingsRow label="Issuer" htmlFor="auth-oidc-issuer" lockKey="auth.oidc_issuer">
+          <SettingsRow
+            label="Issuer" htmlFor="auth-oidc-issuer" lockKey="auth.oidc_issuer"
+            error={rowError('auth-oidc-issuer')}
+          >
             <TextField value={auth.oidc_issuer} onChange={(v) => setAuth({ ...auth, oidc_issuer: v })} />
           </SettingsRow>
-          <SettingsRow label="Client ID" htmlFor="auth-oidc-client-id" lockKey="auth.oidc_client_id">
+          <SettingsRow
+            label="Client ID" htmlFor="auth-oidc-client-id" lockKey="auth.oidc_client_id"
+            error={rowError('auth-oidc-client-id')}
+          >
             <TextField value={auth.oidc_client_id} onChange={(v) => setAuth({ ...auth, oidc_client_id: v })} />
           </SettingsRow>
           <SettingsRow label="Client secret" htmlFor="auth-oidc-client-secret" lockKey="auth.oidc_client_secret">

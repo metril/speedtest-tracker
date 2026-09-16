@@ -8,13 +8,15 @@ import {
  * Controlled by the caller so it can be reused per-row without one
  * instance per item. */
 export function ConfirmDialog({
-  open, onOpenChange, title, description, confirmLabel = 'Delete', onConfirm, destructive = true,
+  open, onOpenChange, title, description, confirmLabel = 'Delete', cancelLabel = 'Cancel', onConfirm,
+  destructive = true,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   description?: string;
   confirmLabel?: string;
+  cancelLabel?: string;
   onConfirm: () => void;
   destructive?: boolean;
 }) {
@@ -26,7 +28,7 @@ export function ConfirmDialog({
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{cancelLabel}</Button>
           <Button
             type="button"
             variant={destructive ? 'destructive' : 'default'}
