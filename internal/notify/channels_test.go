@@ -11,6 +11,7 @@ import (
 
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/settings"
+	"github.com/metril/speedtest-tracker/internal/store"
 )
 
 func TestDeliverWebhookPostsJSONWithHeaders(t *testing.T) {
@@ -210,5 +211,40 @@ func TestBuildMessage(t *testing.T) {
 		notify.Eval{Metric: notify.MetricFailure, Breached: true}, time.Now(), "dial tcp: refused")
 	if !strings.Contains(fail.Body, "dial tcp: refused") {
 		t.Errorf("failure body = %q, want the engine error", fail.Body)
+	}
+}
+
+func TestBuildResultMessage(t *testing.T) {
+	ok := notify.BuildResultMessage("Home", 3, 7, &store.Result{
+		Status: "ok", DownloadBps: 812300000, UploadBps: 41200000,
+		PingMs: 12, JitterMs: 1.4, PacketLossPct: 0,
+	}, time.Now())
+	if ok.Title != "Home: test complete" {
+		t.Errorf("title = %q", ok.Title)
+	}
+	if !strings.Contains(ok.Body, "812.3 Mbps") || !strings.Contains(ok.Body, "41.2 Mbps") ||
+		!strings.Contains(ok.Body, "ping 12.0 ms") || !strings.Contains(ok.Body, "jitter 1.4 ms") ||
+		!strings.Contains(ok.Body, "loss 0.0%") {
+		t.Errorf("body = %q", ok.Body)
+	}
+
+	noPing := notify.BuildResultMessage("Home", 3, 7, &store.Result{
+		Status: "ok", DownloadBps: 1e9, UploadBps: 1e8,
+	}, time.Now())
+	if strings.Contains(noPing.Body, "ping") || strings.Contains(noPing.Body, "jitter") {
+		t.Errorf("body = %q, want ping/jitter omitted when zero", noPing.Body)
+	}
+
+	failed := notify.BuildResultMessage("Home", 3, 7, &store.Result{
+		Status: "failed", Error: "dial tcp: refused",
+	}, time.Now())
+	if failed.Title != "Home: test failed" {
+		t.Errorf("failure title = %q", failed.Title)
+	}
+	if failed.Metric != notify.MetricFailure {
+		t.Errorf("failure metric = %q, want MetricFailure", failed.Metric)
+	}
+	if !strings.Contains(failed.Body, "dial tcp: refused") {
+		t.Errorf("failure body = %q", failed.Body)
 	}
 }

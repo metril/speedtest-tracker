@@ -79,6 +79,7 @@ var nullableFields = map[string]func(*settings.Thresholds){
 	"jitter_ms_max":     func(t *settings.Thresholds) { t.JitterMsMax = nil },
 	"loss_pct_max":      func(t *settings.Thresholds) { t.LossPctMax = nil },
 	"notify_on_failure": func(t *settings.Thresholds) { t.NotifyOnFailure = nil },
+	"notify_always":     func(t *settings.Thresholds) { t.NotifyAlways = nil },
 }
 
 // Merge layers override on top of base: any field set (non-nil) in override
@@ -105,6 +106,9 @@ func Merge(base, override settings.Thresholds, nulled map[string]bool) settings.
 	}
 	if override.NotifyOnFailure != nil {
 		merged.NotifyOnFailure = override.NotifyOnFailure
+	}
+	if override.NotifyAlways != nil {
+		merged.NotifyAlways = override.NotifyAlways
 	}
 	for k := range nulled {
 		if clear, ok := nullableFields[k]; ok {

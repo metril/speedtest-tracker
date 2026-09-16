@@ -221,6 +221,7 @@ type Thresholds struct {
 	JitterMsMax     *float64 `json:"jitter_ms_max,omitempty"`
 	LossPctMax      *float64 `json:"loss_pct_max,omitempty"`
 	NotifyOnFailure *bool    `json:"notify_on_failure,omitempty"`
+	NotifyAlways    *bool    `json:"notify_always,omitempty"`
 
 	// SLADownloadMbps/SLAUploadMbps override the general SLA plan
 	// (General.SLADownloadMbps/SLAUploadMbps) for this target only, per

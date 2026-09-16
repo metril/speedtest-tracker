@@ -222,6 +222,33 @@ func (n *Notifier) process(ctx context.Context, res *store.Result) {
 		n.handleEval(ctx, conf, tgt, res, e, now, quiet, cooldown)
 	}
 	n.clearStaleState(ctx, tgt, evals)
+
+	// NotifyAlways delivers a summary for every result, independent of
+	// thresholds, cooldown or firing state: each result is its own event,
+	// not a breach that can recover. A failed result whose failure alert
+	// is already handled above would produce a second, identical "test
+	// failed" message, so the summary is skipped in that case.
+	if th.NotifyAlways != nil && *th.NotifyAlways && !failureAlertCovers(res, evals) {
+		if quiet {
+			n.suppressed.Add(1)
+		} else {
+			n.deliver(ctx, conf, BuildResultMessage(tgt.Name, tgt.ID, res.ID, res, now))
+		}
+	}
+}
+
+// failureAlertCovers reports whether a failed result already produced a
+// MetricFailure eval this round, i.e. the notify-on-failure alert speaks for it.
+func failureAlertCovers(res *store.Result, evals []Eval) bool {
+	if res.Status == "ok" {
+		return false
+	}
+	for _, e := range evals {
+		if e.Metric == MetricFailure && e.Breached {
+			return true
+		}
+	}
+	return false
 }
 
 // allMetrics lists every metric Evaluate can produce.

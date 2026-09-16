@@ -25,6 +25,22 @@ func TestMergeOverridesOnlySetFields(t *testing.T) {
 	}
 }
 
+func TestMergeOverridesNotifyAlways(t *testing.T) {
+	yes, no := true, false
+	base := settings.Thresholds{NotifyAlways: &no}
+	over := settings.Thresholds{NotifyAlways: &yes}
+	got := notify.Merge(base, over, nil)
+	if got.NotifyAlways == nil || !*got.NotifyAlways {
+		t.Errorf("notify_always = %v, want true", got.NotifyAlways)
+	}
+
+	nulled := map[string]bool{"notify_always": true}
+	got = notify.Merge(base, settings.Thresholds{}, nulled)
+	if got.NotifyAlways != nil {
+		t.Errorf("notify_always = %v, want nil after null override", got.NotifyAlways)
+	}
+}
+
 func TestMergeNulledFieldDisablesBaseValue(t *testing.T) {
 	f := func(v float64) *float64 { return &v }
 	base := settings.Thresholds{DownloadMbpsMin: f(100), PingMsMax: f(50)}

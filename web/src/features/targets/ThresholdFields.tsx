@@ -244,6 +244,27 @@ export function ThresholdFields({ value, onChange, allowDisable = true, showCust
               <option value="false">Off</option>
             </select>
           </FormField>
+
+          <FormField
+            id="threshold-notify-always" label="Notify on every result"
+            hint="Send a summary after each completed test, regardless of thresholds."
+          >
+            <select
+              id="threshold-notify-always"
+              className={inputClass}
+              value={value.notify_always === undefined ? 'inherit' : String(value.notify_always)}
+              onChange={(e) => {
+                const next: ThresholdSet = { ...value };
+                if (e.target.value === 'inherit') delete next.notify_always;
+                else next.notify_always = e.target.value === 'true';
+                onChange(next);
+              }}
+            >
+              <option value="inherit">Inherit</option>
+              <option value="true">On</option>
+              <option value="false">Off</option>
+            </select>
+          </FormField>
         </>
       )}
     </div>

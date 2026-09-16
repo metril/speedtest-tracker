@@ -285,6 +285,66 @@ func TestFailedResultFiresAndRecovers(t *testing.T) {
 	}
 }
 
+func TestNotifyAlwaysDeliversSummaryForEveryResult(t *testing.T) {
+	n, db, got, _ := newHarness(t, notifications(t, 60))
+	id := seedTarget(t, db, `{"notify_always":true}`)
+	ctx := context.Background()
+
+	n.process(ctx, result(id, 100e6))
+	n.process(ctx, result(id, 100e6))
+	if len(*got) != 2 {
+		t.Fatalf("messages = %+v, want two summaries (no cooldown/firing state applies)", *got)
+	}
+	for _, m := range *got {
+		if m.Kind != "result" {
+			t.Errorf("kind = %q, want result", m.Kind)
+		}
+	}
+}
+
+func TestNotifyAlwaysSuppressedDuringQuietHours(t *testing.T) {
+	cfg := notifications(t, 60)
+	cfg.QuietHoursStart, cfg.QuietHoursEnd = "22:00", "07:00"
+	n, db, got, clock := newHarness(t, cfg)
+	id := seedTarget(t, db, `{"notify_always":true}`)
+	*clock = time.Date(2026, 9, 14, 23, 30, 0, 0, time.UTC)
+
+	n.process(context.Background(), result(id, 100e6))
+	if len(*got) != 0 {
+		t.Fatalf("delivered during quiet hours: %+v", *got)
+	}
+	if n.Stats().Suppressed != 1 {
+		t.Fatalf("suppressed = %d, want 1", n.Stats().Suppressed)
+	}
+}
+
+func TestNotifyAlwaysSkipsSummaryWhenFailureAlertFires(t *testing.T) {
+	n, db, got, _ := newHarness(t, notifications(t, 60))
+	id := seedTarget(t, db, `{"notify_always":true,"notify_on_failure":true}`)
+	res := result(id, 0)
+	res.Status, res.Error = "failed", "boom"
+
+	n.process(context.Background(), res)
+	if len(*got) != 1 {
+		t.Fatalf("messages = %+v, want exactly one failure alert, no duplicate summary", *got)
+	}
+	if (*got)[0].Kind == "result" {
+		t.Fatalf("kind = result, want the failure alert to speak for the failed result")
+	}
+}
+
+func TestNotifyAlwaysStillSummarisesFailureWithoutFailureAlert(t *testing.T) {
+	n, db, got, _ := newHarness(t, notifications(t, 60))
+	id := seedTarget(t, db, `{"notify_always":true}`)
+	res := result(id, 0)
+	res.Status, res.Error = "failed", "boom"
+
+	n.process(context.Background(), res)
+	if len(*got) != 1 || (*got)[0].Kind != "result" {
+		t.Fatalf("messages = %+v, want one result summary", *got)
+	}
+}
+
 func TestOnResultNeverBlocksAndDropsOldest(t *testing.T) {
 	n, db, _, _ := newHarness(t, notifications(t, 60)) // Start() not called
 	id := seedTarget(t, db, `{"download_mbps_min":100}`)

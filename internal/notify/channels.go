@@ -198,6 +198,8 @@ func mapNotifyType(m Message) apprise.NotifyType {
 	switch {
 	case m.Kind == "recovery":
 		return apprise.NotifySuccess
+	case m.Kind == KindResult && m.Metric != MetricFailure:
+		return apprise.NotifyInfo
 	case m.Metric == MetricFailure:
 		return apprise.NotifyFailure
 	default:

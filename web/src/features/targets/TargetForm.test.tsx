@@ -458,4 +458,35 @@ describe('TargetForm', () => {
     }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
     expect(screen.getByLabelText('Notify on failed test')).toHaveValue('false');
   });
+
+  it('submits notify_always: false when the always select is set to Off', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Notify on every result'), 'Off');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({
+      thresholds: { notify_always: false },
+    }));
+  });
+
+  it('omits notify_always when the always select is set back to Inherit', async () => {
+    const onSubmit = vi.fn();
+    wrap(<TargetForm onSubmit={onSubmit} onCancel={() => {}} submitting={false} />);
+    await userEvent.type(screen.getByLabelText('Name'), 'Home');
+    await userEvent.click(screen.getByLabelText('Custom notification'));
+    await userEvent.selectOptions(screen.getByLabelText('Notify on every result'), 'Off');
+    await userEvent.selectOptions(screen.getByLabelText('Notify on every result'), 'Inherit');
+    await userEvent.click(screen.getByRole('button', { name: 'Save target' }));
+    expect(onSubmit).toHaveBeenCalledWith(expect.objectContaining({ thresholds: {} }));
+  });
+
+  it('shows a seeded notify_always: false target with the always select set to Off', async () => {
+    wrap(<TargetForm initial={{
+      id: 5, name: 'Home', engine: 'ookla', enabled: true, queue_id: 1, queue_name: 'wan', options: {},
+      thresholds: { notify_always: false }, created_at: '', updated_at: '',
+    }} onSubmit={() => {}} onCancel={() => {}} submitting={false} />);
+    expect(screen.getByLabelText('Notify on every result')).toHaveValue('false');
+  });
 });

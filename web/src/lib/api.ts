@@ -466,6 +466,7 @@ export interface ThresholdSet {
   jitter_ms_max?: number | null;
   loss_pct_max?: number | null;
   notify_on_failure?: boolean | null;
+  notify_always?: boolean | null;
   /** sla_download_mbps/sla_upload_mbps override the general SLA plan
    * speeds (GeneralSettings.sla_download_mbps/sla_upload_mbps) for this
    * target only, resolved independently per field; omitted (like every
