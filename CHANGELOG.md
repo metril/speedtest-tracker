@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.3](https://github.com/metril/speedtest-tracker/compare/v0.8.2...v0.8.3) (2026-09-16)
+
+
+### Bug Fixes
+
+* **web:** align targets form fields and move help text into tooltips ([9ee355a](https://github.com/metril/speedtest-tracker/commit/9ee355a81b20802052f0704071756b0f4dfc1827))
+
 ## [0.8.2](https://github.com/metril/speedtest-tracker/compare/v0.8.1...v0.8.2) (2026-09-16)
 
 
