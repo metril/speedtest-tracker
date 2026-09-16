@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.8.2](https://github.com/metril/speedtest-tracker/compare/v0.8.1...v0.8.2) (2026-09-16)
+
+
+### Features
+
+* **web:** access settings as row cards ([6308fa1](https://github.com/metril/speedtest-tracker/commit/6308fa10cd76598c07cef2137d1c5e0c9a7c1940))
+* **web:** add settings layout primitives ([5fed3b7](https://github.com/metril/speedtest-tracker/commit/5fed3b75878d18fd7374a90080a952531730a4e6))
+* **web:** engines settings as row cards ([c84cbaf](https://github.com/metril/speedtest-tracker/commit/c84cbaf8fb21a92a4f5b00019ad1bbc610f3d989))
+* **web:** exporters settings as row cards ([84198cc](https://github.com/metril/speedtest-tracker/commit/84198cc1a57f102856a0e82683ce674ada0b3178))
+* **web:** general settings as row cards ([259a8d3](https://github.com/metril/speedtest-tracker/commit/259a8d3fb027649735b7b3e79deb7a76bc2b4845))
+* **web:** notifications settings as row cards ([ff483ba](https://github.com/metril/speedtest-tracker/commit/ff483baebce702436f70fa4fc1058dc4243d5bd6))
+* **web:** rename integrations and access settings tabs ([6a75dc2](https://github.com/metril/speedtest-tracker/commit/6a75dc28559d2001b882ca128941e843513e205c))
+* **web:** settings shell with sticky save bar and unsaved guard ([8c376f8](https://github.com/metril/speedtest-tracker/commit/8c376f8c65cb8c7364420ee673ebc12aa88f1514))
+
+
+### Bug Fixes
+
+* **web:** settings save state, nav guard and narrow layout ([109083e](https://github.com/metril/speedtest-tracker/commit/109083e7308c9fac7ae52ccde3913346e5eb606e))
+* **web:** size settings column with an explicit grid track ([ad481fb](https://github.com/metril/speedtest-tracker/commit/ad481fb04368595debb9066ebb66aaa47ac89ae7))
+
 ## [0.8.1](https://github.com/metril/speedtest-tracker/compare/v0.8.0...v0.8.1) (2026-09-15)
 
 
