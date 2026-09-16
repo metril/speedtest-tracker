@@ -130,6 +130,16 @@ describe('AccessSection', () => {
     renderSection(['auth.mode']);
     expect(screen.getByRole('combobox')).toBeDisabled();
   });
+
+  it('flags the trusted-proxies input as invalid when the row has an error', () => {
+    mockSection({ ...baseAuth, mode: 'forward_auth' }, {
+      fieldError: { field: 'auth-trusted-proxies', message: 'forward_auth requires at least one trusted proxy CIDR.' },
+    });
+    renderSection();
+    const input = screen.getByLabelText('Trusted proxy CIDRs');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'auth-trusted-proxies-error');
+  });
 });
 
 describe('validateAuthSettings', () => {

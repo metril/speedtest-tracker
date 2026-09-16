@@ -280,8 +280,11 @@ export function Settings() {
   const activeDirtyKeys = settings.data ? changedKeys(active) : [];
   const anyDirty = settings.data ? TABS.some((tab) => changedKeys(tab.key).length > 0) : false;
 
-  const { confirmOpen, requestNavigate, confirmDiscard, cancel } = useUnsavedGuard(
-    anyDirty, activeDirtyKeys.length > 0, () => discard(active),
+  const { confirmOpen, confirmKind, requestNavigate, confirmDiscard, cancel } = useUnsavedGuard(
+    anyDirty,
+    activeDirtyKeys.length > 0,
+    () => discard(active),
+    () => TABS.forEach((tab) => discard(tab.key)),
   );
 
   if (settings.isLoading || !general || !engines || !integrations || !notifications || !auth) {
@@ -311,22 +314,24 @@ export function Settings() {
   };
 
   return (
-    <div className="grid gap-4">
-      <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
+    <div className="grid min-w-0 gap-4">
+      <div className="mx-auto grid w-full min-w-0 max-w-[880px] gap-4">
+        <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
-      <Tabs
-        value={active}
-        onValueChange={(key) => requestNavigate(() => navigate(`/settings/${key}`, { replace: true }))}
-      >
-        <TabsList className="w-full justify-start overflow-x-auto">
-          {TABS.map((tab) => (
-            <TabsTrigger key={tab.key} value={tab.key} aria-controls={undefined}>{tab.label}</TabsTrigger>
-          ))}
-        </TabsList>
-      </Tabs>
+        <Tabs
+          value={active}
+          onValueChange={(key) => requestNavigate(() => navigate(`/settings/${key}`, { replace: true }))}
+        >
+          <div className="min-w-0 overflow-x-auto">
+            <TabsList className="w-max min-w-full justify-start">
+              {TABS.map((tab) => (
+                <TabsTrigger key={tab.key} value={tab.key} aria-controls={undefined}>{tab.label}</TabsTrigger>
+              ))}
+            </TabsList>
+          </div>
+        </Tabs>
 
-      <SettingsFormProvider readOnly={readOnly} locked={locked}>
-        <div className="mx-auto w-full max-w-[880px] min-w-0 space-y-4">
+        <SettingsFormProvider readOnly={readOnly} locked={locked}>
           <div className="grid gap-4">
             <Outlet context={context} />
           </div>
@@ -338,16 +343,18 @@ export function Settings() {
             onDiscard={() => discard(active)}
             error={errors[active]}
             readOnly={readOnly}
+            savedFlash={saved[active]}
           />
-          {saved[active] && <p className="text-sm text-ok">Saved</p>}
-        </div>
-      </SettingsFormProvider>
+        </SettingsFormProvider>
+      </div>
 
       <ConfirmDialog
         open={confirmOpen}
         onOpenChange={(open) => { if (!open) cancel(); }}
-        title="Discard unsaved changes?"
-        description={`Your edits to ${activeLabel} have not been saved.`}
+        title={confirmKind === 'leave' ? 'Leave Settings?' : 'Discard unsaved changes?'}
+        description={confirmKind === 'leave'
+          ? 'Your unsaved settings changes will be lost.'
+          : `Your edits to ${activeLabel} have not been saved.`}
         confirmLabel="Discard"
         cancelLabel="Keep editing"
         onConfirm={confirmDiscard}

@@ -5,16 +5,24 @@ import { useNavigationGuard } from './NavigationGuardContext';
  * being lost three ways: a browser close/reload (`beforeunload`), an
  * in-page tab switch, and a sidebar navigation click (via
  * NavigationGuardContext, registered for as long as this hook is
- * mounted). `anyDirty` gates the beforeunload prompt (any section);
- * `navDirty` gates the in-app confirm dialog (normally just the active
- * section, since that's the one the confirm copy names). `discard` reset
- * that section back to its last-saved state.
+ * mounted).
  *
- * Callers drive navigation through `requestNavigate(action)`: `action`
- * runs immediately when clean, or is held until the dialog is resolved
- * when dirty. */
-export function useUnsavedGuard(anyDirty: boolean, navDirty: boolean, discard: () => void) {
+ * The tab-switch path (`requestNavigate`) and the sidebar path (guarded
+ * externally, through the registered function) use different gates and
+ * different recovery: a tab switch is only blocked -- and only discards
+ * -- the active section (`navDirty`/`discardActive`), naming that
+ * section in the confirm copy, while leaving Settings entirely is
+ * blocked by *any* dirty section (`anyDirty`) and discards all of them
+ * (`discardAll`) on confirm. `confirmKind` tells the caller which of the
+ * two triggered the open dialog, so it can pick the right copy. */
+export function useUnsavedGuard(
+  anyDirty: boolean,
+  navDirty: boolean,
+  discardActive: () => void,
+  discardAll: () => void = discardActive,
+) {
   const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmKind, setConfirmKind] = useState<'tab' | 'leave'>('tab');
   const pending = useRef<(() => void) | null>(null);
   const { register } = useNavigationGuard();
 
@@ -33,22 +41,33 @@ export function useUnsavedGuard(anyDirty: boolean, navDirty: boolean, discard: (
       action();
       return;
     }
+    setConfirmKind('tab');
     pending.current = action;
     setConfirmOpen(true);
   }, [navDirty]);
 
+  const requestLeave = useCallback((action: () => void) => {
+    if (!anyDirty) {
+      action();
+      return;
+    }
+    setConfirmKind('leave');
+    pending.current = action;
+    setConfirmOpen(true);
+  }, [anyDirty]);
+
   useEffect(() => {
-    register(requestNavigate);
+    register(requestLeave);
     return () => register(null);
-  }, [register, requestNavigate]);
+  }, [register, requestLeave]);
 
   const confirmDiscard = useCallback(() => {
-    discard();
+    if (confirmKind === 'leave') discardAll(); else discardActive();
     setConfirmOpen(false);
     const action = pending.current;
     pending.current = null;
     action?.();
-  }, [discard]);
+  }, [confirmKind, discardActive, discardAll]);
 
   // Only hides the dialog. It deliberately leaves `pending` alone: the
   // dialog's Discard button calls onOpenChange(false) (closing the
@@ -61,5 +80,5 @@ export function useUnsavedGuard(anyDirty: boolean, navDirty: boolean, discard: (
     setConfirmOpen(false);
   }, []);
 
-  return { confirmOpen, requestNavigate, confirmDiscard, cancel };
+  return { confirmOpen, confirmKind, requestNavigate, confirmDiscard, cancel };
 }

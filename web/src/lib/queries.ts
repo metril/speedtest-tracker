@@ -324,8 +324,14 @@ export function useUpdateSettings() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (patch: api.SettingsPatch) => api.updateSettings(patch),
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: queryKeys.settings });
+    onSuccess: (result) => {
+      // Seed the cache with the mutation's own response instead of just
+      // invalidating: a refetch may be slow or never resolve (offline,
+      // request coalescing, etc.), and until it lands `settings.data`
+      // would stay stale, making dirty-tracking compare the freshly
+      // saved draft against the old server value -- a transient
+      // false-dirty right after a successful save.
+      qc.setQueryData(queryKeys.settings, result);
       qc.invalidateQueries({ queryKey: queryKeys.me });
     },
   });

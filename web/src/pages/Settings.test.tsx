@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { MemoryRouter, Navigate, Route, Routes } from 'react-router';
+import { MemoryRouter, Navigate, Route, Routes, useNavigate } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as api from '../lib/api';
 import { ApiError } from '../lib/api';
@@ -12,6 +12,20 @@ import { EnginesSection } from '../features/settings/EnginesSection';
 import { ExportersSection } from '../features/settings/ExportersSection';
 import { NotificationsSection } from '../features/settings/NotificationsSection';
 import { AccessSection } from '../features/settings/AccessSection';
+import { NavigationGuardProvider, useNavigationGuard } from '../features/settings/NavigationGuardContext';
+
+/** DashboardLink stands in for Layout's sidebar NavLink: it routes every
+ * click through the registered NavigationGuardContext guard, same as
+ * the real sidebar does, without pulling in the whole Layout shell. */
+function DashboardLink() {
+  const { guard } = useNavigationGuard();
+  const navigate = useNavigate();
+  return (
+    <button type="button" onClick={() => guard(() => navigate('/'))}>
+      Dashboard
+    </button>
+  );
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return { ok: status < 400, status, statusText: 'ok', text: async () => JSON.stringify(body) } as Response;
@@ -219,6 +233,29 @@ describe('Settings page', () => {
     expect(saveBar()).toBeInTheDocument();
     await userEvent.click(saveButton());
     expect(put).toHaveBeenCalledWith({ general: expect.objectContaining({ retention_days_results: 30 }) });
+    expect(await screen.findByText('Saved')).toBeInTheDocument();
+    expect(saveBar()).not.toBeInTheDocument();
+  });
+
+  it('hides the save bar right after saving even if the settings refetch never resolves', async () => {
+    const put = vi.fn().mockResolvedValue(settingsFixture());
+    renderSettings({ put });
+    await screen.findByLabelText('Timezone');
+
+    // From here on, a GET to /settings (the invalidateQueries refetch
+    // triggered by the save) hangs forever -- only the mutation response
+    // itself should be able to clear the save bar.
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/v1/settings')) return new Promise(() => {});
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    await userEvent.clear(screen.getByLabelText('Results retention (days)'));
+    await userEvent.type(screen.getByLabelText('Results retention (days)'), '30');
+    expect(saveBar()).toBeInTheDocument();
+    await userEvent.click(saveButton());
+
     expect(await screen.findByText('Saved')).toBeInTheDocument();
     expect(saveBar()).not.toBeInTheDocument();
   });
@@ -609,5 +646,57 @@ describe('Settings page', () => {
 
     await userEvent.click(screen.getByRole('tab', { name: 'General' }));
     expect(await screen.findByLabelText('Timezone')).toHaveValue('UTC');
+  });
+
+  it('guards sidebar navigation by any dirty section, with "leave Settings" copy, and completes the navigation on discard', async () => {
+    const settings = settingsFixture();
+    fetchMock = vi.fn().mockImplementation(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith('/api/v1/settings')) return jsonResponse(settings);
+      if (url.startsWith('/api/v1/iperf3/servers')) {
+        return jsonResponse({ fetched_at: '2026-09-13T12:00:00.000Z', servers: [], total: 0 });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter initialEntries={['/settings/general']}>
+          <NavigationGuardProvider>
+            <DashboardLink />
+            <Routes>
+              <Route path="/" element={<p>Dashboard page</p>} />
+              <Route path="/settings" element={<Settings />}>
+                <Route index element={<Navigate to="general" replace />} />
+                <Route path="general" element={<GeneralSection />} />
+                <Route path="engines" element={<EnginesSection />} />
+              </Route>
+            </Routes>
+          </NavigationGuardProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const tz = await screen.findByLabelText('Timezone');
+    await userEvent.selectOptions(tz, 'Asia/Kolkata');
+
+    // Switching tabs while General is dirty opens the tab-switch dialog;
+    // Keep editing leaves the draft (and the dirty state) in place.
+    await userEvent.click(screen.getByRole('tab', { name: 'Engines' }));
+    const tabDialog = await screen.findByRole('dialog', { name: 'Discard unsaved changes?' });
+    await userEvent.click(within(tabDialog).getByRole('button', { name: 'Keep editing' }));
+    expect(screen.getByLabelText('Timezone')).toHaveValue('Asia/Kolkata');
+
+    // The sidebar link is guarded by *any* dirty section (General, even
+    // though it's not the active tab check the tab dialog uses), with
+    // its own "leave Settings" copy.
+    await userEvent.click(screen.getByRole('button', { name: 'Dashboard' }));
+    const leaveDialog = await screen.findByRole('dialog', { name: 'Leave Settings?' });
+    expect(leaveDialog).toHaveTextContent('Your unsaved settings changes will be lost.');
+
+    await userEvent.click(within(leaveDialog).getByRole('button', { name: 'Discard' }));
+    expect(await screen.findByText('Dashboard page')).toBeInTheDocument();
   });
 });

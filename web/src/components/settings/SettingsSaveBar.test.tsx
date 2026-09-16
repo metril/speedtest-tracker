@@ -47,4 +47,19 @@ describe('SettingsSaveBar', () => {
     expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Discard' })).not.toBeInTheDocument();
   });
+
+  it('shows a brief Saved status instead of the bar when clean and flashing', () => {
+    render(
+      <SettingsSaveBar dirtyCount={0} saving={false} onSave={vi.fn()} onDiscard={vi.fn()} savedFlash />,
+    );
+    expect(screen.getByRole('status')).toHaveTextContent('Saved');
+    expect(screen.queryByRole('region', { name: 'Unsaved changes' })).not.toBeInTheDocument();
+  });
+
+  it('renders nothing when clean and not flashing, even if savedFlash was passed false', () => {
+    const { container } = render(
+      <SettingsSaveBar dirtyCount={0} saving={false} onSave={vi.fn()} onDiscard={vi.fn()} savedFlash={false} />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
 });

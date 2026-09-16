@@ -12,6 +12,8 @@ interface Props {
   validate?: (s: string) => string | undefined;
   disabled?: boolean;
   label: string;
+  'aria-invalid'?: boolean;
+  'aria-describedby'?: string;
 }
 
 /** ListInput edits a list of strings as chips inside one bordered field:
@@ -20,7 +22,10 @@ interface Props {
  * fail `validate` stay in the list (so a mistake isn't silently
  * dropped) but are flagged with the message as both a title and
  * aria-invalid. */
-export function ListInput({ id, value, onChange, placeholder, validate, disabled, label }: Props) {
+export function ListInput({
+  id, value, onChange, placeholder, validate, disabled, label,
+  'aria-invalid': ariaInvalid, 'aria-describedby': ariaDescribedby,
+}: Props) {
   const [draft, setDraft] = useState('');
 
   const commit = (raw: string) => {
@@ -82,6 +87,8 @@ export function ListInput({ id, value, onChange, placeholder, validate, disabled
       <input
         id={id}
         aria-label={label}
+        aria-invalid={ariaInvalid}
+        aria-describedby={ariaDescribedby}
         className="min-w-[6rem] flex-1 bg-transparent text-fg outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed"
         placeholder={value.length === 0 ? placeholder : undefined}
         value={draft}

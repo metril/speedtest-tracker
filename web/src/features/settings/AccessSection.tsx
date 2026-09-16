@@ -79,6 +79,7 @@ function ListField({
     <ListInput
       id={props.id} label={label} value={value} onChange={onChange}
       placeholder={placeholder} validate={validate} disabled={props.disabled}
+      aria-invalid={props['aria-invalid']} aria-describedby={props['aria-describedby']}
     />
   );
 }

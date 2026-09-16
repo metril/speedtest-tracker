@@ -103,22 +103,29 @@ describe('useTargetHistory', () => {
 });
 
 describe('useUpdateSettings', () => {
-  it('invalidates the settings query after a successful save', async () => {
-    vi.spyOn(api, 'updateSettings').mockResolvedValue({
+  it('seeds the settings cache with the response and invalidates "me" after a successful save', async () => {
+    const response = {
       general: {} as api.GeneralSettings,
       engines: {} as api.EngineSettings,
       integrations: {} as api.IntegrationSettings,
       notifications: {} as api.NotificationSettings,
       auth: {} as api.AuthSettings,
       locked: [],
-    });
+    };
+    vi.spyOn(api, 'updateSettings').mockResolvedValue(response);
     const client = new QueryClient();
-    const spy = vi.spyOn(client, 'invalidateQueries');
+    const setSpy = vi.spyOn(client, 'setQueryData');
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries');
 
     const { result } = renderHook(() => useUpdateSettings(), { wrapper: wrapper(client) });
     result.current.mutate({ general: { units: 'metric' } });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    expect(spy).toHaveBeenCalledWith({ queryKey: queryKeys.settings });
+    // setQueryData (not invalidateQueries) updates `settings` -- so
+    // settings.data reflects the save immediately, with no dependency on
+    // a refetch that may be slow or never resolve.
+    expect(setSpy).toHaveBeenCalledWith(queryKeys.settings, response);
+    expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.me });
+    expect(invalidateSpy).not.toHaveBeenCalledWith({ queryKey: queryKeys.settings });
   });
 });

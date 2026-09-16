@@ -7,14 +7,21 @@ interface Props {
   onDiscard: () => void;
   error?: string | null;
   readOnly?: boolean;
+  /** True for a few seconds right after a successful save of this
+   * section. Only rendered once the section is clean and there's no
+   * error -- otherwise the ordinary bar takes over. */
+  savedFlash?: boolean;
 }
 
 /** SettingsSaveBar is the sticky footer that appears once a settings
  * form has unsaved changes (or an error to show), letting the user save
- * or discard everything at once. Renders nothing when there's nothing
- * to report. */
-export function SettingsSaveBar({ dirtyCount, saving, onSave, onDiscard, error, readOnly }: Props) {
-  if (dirtyCount === 0 && !error) return null;
+ * or discard everything at once. Once clean, it briefly shows a "Saved"
+ * line instead (via `savedFlash`), then renders nothing. */
+export function SettingsSaveBar({ dirtyCount, saving, onSave, onDiscard, error, readOnly, savedFlash }: Props) {
+  if (dirtyCount === 0 && !error) {
+    if (!savedFlash) return null;
+    return <p role="status" className="mt-4 text-sm text-ok">Saved</p>;
+  }
 
   return (
     <div

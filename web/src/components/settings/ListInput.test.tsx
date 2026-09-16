@@ -70,4 +70,16 @@ describe('ListInput', () => {
     expect(screen.getByLabelText('Tags')).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Remove foo' })).toBeDisabled();
   });
+
+  it('forwards aria-invalid and aria-describedby to the input', () => {
+    render(
+      <ListInput
+        id="l" label="Tags" value={[]} onChange={vi.fn()}
+        aria-invalid aria-describedby="l-error"
+      />,
+    );
+    const input = screen.getByLabelText('Tags');
+    expect(input).toHaveAttribute('aria-invalid', 'true');
+    expect(input).toHaveAttribute('aria-describedby', 'l-error');
+  });
 });
