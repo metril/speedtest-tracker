@@ -314,8 +314,8 @@ export function Settings() {
   };
 
   return (
-    <div className="grid min-w-0 gap-4">
-      <div className="mx-auto grid w-full min-w-0 max-w-[880px] gap-4">
+    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-4">
+      <div className="mx-auto grid w-full min-w-0 max-w-[880px] grid-cols-[minmax(0,1fr)] gap-4">
         <h1 className="text-xl font-semibold tracking-tight">Settings</h1>
 
         <Tabs
