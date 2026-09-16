@@ -18,16 +18,23 @@ export function sparkPath(samples: number[], width: number, height: number): str
     .join(' ');
 }
 
+import { PHASE_STROKE, type GaugePhase } from './Gauge';
+
 interface SparklineProps {
   samples: number[];
+  /** Current run phase; the line takes the same accent as the gauge dial. */
+  phase?: GaugePhase;
   width?: number;
   height?: number;
 }
 
 /** Sparkline draws the last ~60 instantaneous throughput samples. It is
  * decoration for the gauge, so it is hidden from assistive tech. */
-export function Sparkline({ samples, width = 320, height = 48 }: SparklineProps) {
+export function Sparkline({
+  samples, phase = 'download', width = 320, height = 48,
+}: SparklineProps) {
   const d = sparkPath(samples, width, height);
+  const stroke = PHASE_STROKE[phase];
   if (!d) return null;
   return (
     <svg
@@ -37,7 +44,7 @@ export function Sparkline({ samples, width = 320, height = 48 }: SparklineProps)
       aria-hidden="true"
       focusable="false"
     >
-      <path d={d} fill="none" stroke="var(--color-series-download)" strokeWidth={1.5} strokeLinejoin="round" />
+      <path d={d} fill="none" stroke={stroke} strokeWidth={1.5} strokeLinejoin="round" />
     </svg>
   );
 }

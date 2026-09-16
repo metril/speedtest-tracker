@@ -30,3 +30,10 @@ describe('Sparkline', () => {
     expect(container.querySelector('path')).not.toBeNull();
   });
 });
+
+describe('Sparkline phase colour', () => {
+  it('matches the gauge accent for the current phase', () => {
+    const { container } = render(<Sparkline samples={[1, 2, 3]} phase="upload" />);
+    expect(container.querySelector('path')?.getAttribute('stroke')).toBe('var(--color-series-upload)');
+  });
+});

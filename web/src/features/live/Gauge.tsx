@@ -10,7 +10,7 @@ export type GaugePhase = 'connecting' | 'ping' | 'download' | 'upload' | 'done' 
  * when the theme's palette swaps between light and dark. The dial is the
  * one loud element in the live panel, so the phase is carried by colour
  * rather than another label. */
-const PHASE_STROKE: Record<GaugePhase, string> = {
+export const PHASE_STROKE: Record<GaugePhase, string> = {
   connecting: 'var(--color-faint)',
   ping: 'var(--color-series-ping)',
   download: 'var(--color-series-download)',

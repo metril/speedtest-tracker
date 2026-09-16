@@ -108,7 +108,7 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
           <Gauge bps={live.bps} phase={live.phase as GaugePhase} />
         </div>
 
-        <Sparkline samples={live.samples} />
+        <Sparkline samples={live.samples} phase={live.phase as GaugePhase} />
 
         <div className="grid grid-cols-3 gap-2">
           <Tile label="Ping" value={formatMs(live.pingMs)} />
