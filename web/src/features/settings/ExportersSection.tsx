@@ -14,7 +14,7 @@ const READ_ONLY_REASON = 'Read-only: admin group required';
 export function ExportersSection() {
   const {
     integrations, setIntegrations, testPending, vmResult, vlResult, runTest, readOnly, locked,
-  } = useSettingsSection('integrations');
+  } = useSettingsSection('exporters');
   const isLocked = (key: string) => locked.includes(`integrations.${key}`);
 
   return (

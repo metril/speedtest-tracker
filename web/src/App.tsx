@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { Layout } from './components/Layout';
+import { NavigationGuardProvider } from './features/settings/NavigationGuardContext';
 import { ApiError } from './lib/api';
 import { useMe } from './lib/queries';
 import { ThemeProvider } from './lib/theme';
@@ -16,12 +17,12 @@ const GeneralSection = lazy(() =>
   import('./features/settings/GeneralSection').then((m) => ({ default: m.GeneralSection })));
 const EnginesSection = lazy(() =>
   import('./features/settings/EnginesSection').then((m) => ({ default: m.EnginesSection })));
-const IntegrationsSection = lazy(() =>
-  import('./features/settings/IntegrationsSection').then((m) => ({ default: m.IntegrationsSection })));
+const ExportersSection = lazy(() =>
+  import('./features/settings/ExportersSection').then((m) => ({ default: m.ExportersSection })));
 const NotificationsSection = lazy(() =>
   import('./features/settings/NotificationsSection').then((m) => ({ default: m.NotificationsSection })));
-const AuthSettingsSection = lazy(() =>
-  import('./features/settings/AuthSettingsSection').then((m) => ({ default: m.AuthSettingsSection })));
+const AccessSection = lazy(() =>
+  import('./features/settings/AccessSection').then((m) => ({ default: m.AccessSection })));
 
 /** RequireAuth gates the main app shell behind an identity check: while
  * useMe() is loading it renders nothing, a 401 sends the caller to /login
@@ -50,25 +51,29 @@ export function App() {
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
-          <Suspense fallback={<div className="p-6 text-muted">Loading…</div>}>
-            <Routes>
-              <Route path="/login" element={<Login />} />
-              <Route element={<RequireAuth><Layout /></RequireAuth>}>
-                <Route index element={<Dashboard />} />
-                <Route path="results" element={<Results />} />
-                <Route path="targets" element={<Targets />} />
-                <Route path="schedules" element={<Schedules />} />
-                <Route path="settings" element={<Settings />}>
-                  <Route index element={<Navigate to="general" replace />} />
-                  <Route path="general" element={<GeneralSection />} />
-                  <Route path="engines" element={<EnginesSection />} />
-                  <Route path="integrations" element={<IntegrationsSection />} />
-                  <Route path="notifications" element={<NotificationsSection />} />
-                  <Route path="auth" element={<AuthSettingsSection />} />
+          <NavigationGuardProvider>
+            <Suspense fallback={<div className="p-6 text-muted">Loading…</div>}>
+              <Routes>
+                <Route path="/login" element={<Login />} />
+                <Route element={<RequireAuth><Layout /></RequireAuth>}>
+                  <Route index element={<Dashboard />} />
+                  <Route path="results" element={<Results />} />
+                  <Route path="targets" element={<Targets />} />
+                  <Route path="schedules" element={<Schedules />} />
+                  <Route path="settings" element={<Settings />}>
+                    <Route index element={<Navigate to="general" replace />} />
+                    <Route path="general" element={<GeneralSection />} />
+                    <Route path="engines" element={<EnginesSection />} />
+                    <Route path="exporters" element={<ExportersSection />} />
+                    <Route path="integrations" element={<Navigate to="/settings/exporters" replace />} />
+                    <Route path="notifications" element={<NotificationsSection />} />
+                    <Route path="access" element={<AccessSection />} />
+                    <Route path="auth" element={<Navigate to="/settings/access" replace />} />
+                  </Route>
                 </Route>
-              </Route>
-            </Routes>
-          </Suspense>
+              </Routes>
+            </Suspense>
+          </NavigationGuardProvider>
         </BrowserRouter>
       </QueryClientProvider>
     </ThemeProvider>

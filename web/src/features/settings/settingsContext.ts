@@ -3,18 +3,30 @@ import type {
   NotifyChannel,
 } from '../../lib/api';
 
-export type SectionKey = 'general' | 'engines' | 'integrations' | 'notifications' | 'auth';
+/** SectionKey names the five settings tabs. Two of them (exporters,
+ * access) are UI-only renames: the API request/response bodies still use
+ * the older `integrations`/`auth` keys, mapped at the save boundary in
+ * pages/Settings.tsx. */
+export type SectionKey = 'general' | 'engines' | 'exporters' | 'notifications' | 'access';
 
 export interface TestResult {
   ok: boolean;
   message: string;
 }
 
+/** A field-level validation error, keyed by the htmlFor id of the
+ * offending SettingsRow so the section can render it inline in addition
+ * to the save bar's summary message. */
+export interface FieldError {
+  field: string;
+  message: string;
+}
+
 /** SettingsOutletContext is the bundle the Settings shell (pages/Settings.tsx)
  * owns and hands down to each tab's <Outlet/> content via React Router's
  * useOutletContext, so all five sections share one fetch, one seed-once
- * effect and one save/error/saved-flash cycle regardless of which tab is
- * currently mounted. */
+ * effect and one save/discard/error/saved-flash cycle regardless of which
+ * tab is currently mounted. */
 export interface SettingsOutletContext {
   locked: string[];
   /** readOnly is true for a signed-in, non-admin viewer (oidc/forward_auth
@@ -23,6 +35,7 @@ export interface SettingsOutletContext {
   readOnly: boolean;
   saving: boolean;
   errors: Partial<Record<SectionKey, string>>;
+  fieldErrors: Partial<Record<SectionKey, FieldError>>;
   saved: Record<SectionKey, boolean>;
   save: (key: SectionKey, patch: Record<string, unknown>) => void;
 
@@ -48,9 +61,7 @@ export interface SettingsOutletContext {
   runChannelTest: (channel: NotifyChannel) => void;
   channelResults: Record<string, TestResult>;
   testingChannelId: string | null;
-  saveNotifications: () => void;
 
   auth: AuthSettings;
   setAuth: (next: AuthSettings) => void;
-  saveAuth: () => void;
 }
