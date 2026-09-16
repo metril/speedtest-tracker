@@ -5,7 +5,7 @@ import { ErrorDialog } from '@/components/ErrorDialog';
 import { formatBps, formatLoss, formatMs } from '../../lib/format';
 import { useCancelRun } from '../../lib/queries';
 import type { LiveRun } from '../../lib/useLiveRun';
-import { Gauge, type GaugePhase } from './Gauge';
+import { Gauge, PHASE_STROKE, type GaugePhase } from './Gauge';
 import { Sparkline } from './Sparkline';
 import { useLivePanel } from './LiveRunProvider';
 import { HIDE_DELAY_MS } from './constants';
@@ -162,13 +162,14 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
 
 function CompactBar({ live, onExpand }: { live: LiveRun; onExpand: () => void }) {
   const pct = Math.round(Math.min(Math.max(live.progress, 0), 1) * 100);
+  const stroke = PHASE_STROKE[live.phase as GaugePhase] ?? PHASE_STROKE.connecting;
   return (
     <div className="border-b border-accent/30 bg-accent/10">
       <div className="mx-auto flex max-w-6xl items-center gap-4 px-4 py-2 text-sm">
         <span className="rounded bg-accent/20 px-1.5 py-0.5 font-mono text-xs uppercase text-accent">
           {live.engine}
         </span>
-        <span className="w-24 capitalize text-muted" aria-live="polite">{live.phase}</span>
+        <span className="w-24 capitalize" style={{ color: stroke }} aria-live="polite">{live.phase}</span>
         <div
           className="h-1 flex-1 overflow-hidden rounded bg-raised"
           role="progressbar"
@@ -176,7 +177,10 @@ function CompactBar({ live, onExpand }: { live: LiveRun; onExpand: () => void })
           aria-valuemin={0}
           aria-valuemax={100}
         >
-          <div className="h-full bg-accent transition-[width] duration-150" style={{ width: `${pct}%` }} />
+          <div
+            className="h-full transition-[width] duration-150"
+            style={{ width: `${pct}%`, backgroundColor: stroke }}
+          />
         </div>
         <span className="w-28 text-right font-mono tabular-nums text-fg">{formatBps(live.bps)}</span>
         <button
