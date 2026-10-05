@@ -42,9 +42,21 @@ const resultColumns = `id,run_id,target_id,target_name,engine,options_snapshot,s
 	started_at,duration_ms,download_bps,upload_bps,ping_ms,jitter_ms,packet_loss_pct,
 	bytes_down,bytes_up,server_id,server_name,server_host,isp,external_ip,result_url,raw`
 
+// resultListColumns is resultColumns without the (potentially large) raw
+// engine output; list endpoints don't serve it.
+const resultListColumns = `id,run_id,target_id,target_name,engine,options_snapshot,status,error,
+	started_at,duration_ms,download_bps,upload_bps,ping_ms,jitter_ms,packet_loss_pct,
+	bytes_down,bytes_up,server_id,server_name,server_host,isp,external_ip,result_url`
+
 // scanResultWithTags scans resultColumns, plus one trailing group_concat
 // column when extra is non-nil.
 func scanResultWithTags(sc interface{ Scan(...any) error }, extra *string) (*Result, error) {
+	return scanResultCols(sc, extra, true)
+}
+
+// scanResultCols scans resultColumns (withRaw) or resultListColumns
+// (!withRaw), plus one trailing column when extra is non-nil.
+func scanResultCols(sc interface{ Scan(...any) error }, extra *string, withRaw bool) (*Result, error) {
 	var (
 		r                                  Result
 		snapshot                           string
@@ -57,7 +69,10 @@ func scanResultWithTags(sc interface{ Scan(...any) error }, extra *string) (*Res
 	)
 	dest := []any{&r.ID, &r.RunID, &r.TargetID, &r.TargetName, &r.Engine, &snapshot,
 		&r.Status, &errMsg, &r.StartedAt, &dur, &down, &up, &ping, &jitter, &loss,
-		&bdown, &bup, &sid, &sname, &shost, &isp, &extIP, &url, &raw}
+		&bdown, &bup, &sid, &sname, &shost, &isp, &extIP, &url}
+	if withRaw {
+		dest = append(dest, &raw)
+	}
 	if extra != nil {
 		dest = append(dest, extra)
 	}
@@ -184,7 +199,7 @@ func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int6
 		where = append(where, `id<?`)
 		args = append(args, f.Cursor)
 	}
-	q := `SELECT ` + resultColumns + ` FROM results`
+	q := `SELECT ` + resultListColumns + ` FROM results`
 	if len(where) > 0 {
 		q += ` WHERE ` + strings.Join(where, ` AND `)
 	}
@@ -198,7 +213,7 @@ func (s *Store) ListResults(ctx context.Context, f ResultFilter) ([]Result, int6
 	defer rows.Close()
 	out := []Result{}
 	for rows.Next() {
-		r, err := scanResult(rows)
+		r, err := scanResultCols(rows, nil, false)
 		if err != nil {
 			return nil, 0, fmt.Errorf("scan result: %w", err)
 		}
@@ -285,7 +300,7 @@ func (s *Store) PruneResultsBefore(ctx context.Context, cutoff string, batch int
 // LatestResults returns the newest result per target.
 func (s *Store) LatestResults(ctx context.Context) ([]Result, error) {
 	rows, err := s.Read.QueryContext(ctx, `
-		SELECT `+resultColumns+` FROM results
+		SELECT `+resultListColumns+` FROM results
 		WHERE id IN (
 			SELECT id FROM results r2
 			WHERE r2.target_id IS NOT NULL
@@ -300,7 +315,7 @@ func (s *Store) LatestResults(ctx context.Context) ([]Result, error) {
 	defer rows.Close()
 	out := []Result{}
 	for rows.Next() {
-		r, err := scanResult(rows)
+		r, err := scanResultCols(rows, nil, false)
 		if err != nil {
 			return nil, fmt.Errorf("scan result: %w", err)
 		}

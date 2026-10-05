@@ -50,7 +50,7 @@ func TestStatsSummaryReturnsTargetsAndCacheHeader(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
 	}
-	if got := rec.Header().Get("Cache-Control"); got != "max-age=30" {
+	if got := rec.Header().Get("Cache-Control"); got != "private, max-age=30" {
 		t.Errorf("Cache-Control = %q", got)
 	}
 	var body store.SummaryStats
@@ -274,5 +274,21 @@ func TestSummaryCacheEvictsOldestBeyondCap(t *testing.T) {
 	}
 	if _, ok := c.get("k99"); !ok {
 		t.Error("newest entry k99 should still be cached")
+	}
+}
+
+// TestStatsSummaryCacheControlOnlyOnSuccess: the header rides on the miss
+// and the cached-hit success paths, and never on a 400.
+func TestStatsSummaryCacheControlOnlyOnSuccess(t *testing.T) {
+	h, _, _ := newTestAPI(t)
+	for i := 0; i < 2; i++ { // miss, then hit
+		rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=24h", nil)
+		if rec.Code != http.StatusOK || rec.Header().Get("Cache-Control") != "private, max-age=30" {
+			t.Fatalf("request %d: status %d, Cache-Control %q", i, rec.Code, rec.Header().Get("Cache-Control"))
+		}
+	}
+	rec := do(t, h, http.MethodGet, "/api/v1/stats/summary?range=bogus", nil)
+	if rec.Code == http.StatusOK || rec.Header().Get("Cache-Control") != "" {
+		t.Fatalf("error response: status %d, Cache-Control %q", rec.Code, rec.Header().Get("Cache-Control"))
 	}
 }

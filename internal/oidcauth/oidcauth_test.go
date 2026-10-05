@@ -108,6 +108,29 @@ func TestExchangeMissingGroupsClaim(t *testing.T) {
 	}
 }
 
+func TestExchangeEmailVerified(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	p := newProvider(t, idp, Config{})
+	for name, tc := range map[string]struct {
+		claims     map[string]any
+		wantForbid bool
+	}{
+		"false":   {map[string]any{"sub": "u", "email": "a@example.com", "email_verified": false}, true},
+		"true":    {map[string]any{"sub": "u", "email": "a@example.com", "email_verified": true}, false},
+		"missing": {map[string]any{"sub": "u", "email": "a@example.com"}, false},
+	} {
+		idp.Issue("code-"+name, tc.claims)
+		cl, err := p.Exchange(context.Background(), "code-"+name, "v", "https://app.example/auth/oidc/callback")
+		if err != nil {
+			t.Fatalf("%s: Exchange: %v", name, err)
+		}
+		_, err = p.Config().Authorize(cl)
+		if (err == ErrForbidden) != tc.wantForbid {
+			t.Fatalf("%s: Authorize err = %v, wantForbid %v", name, err, tc.wantForbid)
+		}
+	}
+}
+
 func TestExchangeUnknownCode(t *testing.T) {
 	idp := oidctest.NewIDP(t)
 	p := newProvider(t, idp, Config{})
@@ -130,6 +153,7 @@ func TestAuthorizeMatrix(t *testing.T) {
 		{"allowed groups matched", Config{AllowedGroups: []string{"users"}}, Claims{Groups: []string{"users"}}, true, false},
 		{"allowed groups not matched", Config{AllowedGroups: []string{"users"}}, Claims{Groups: []string{"other"}}, false, true},
 		{"allowed emails matched case-insensitive", Config{AllowedEmails: []string{"A@Example.com"}}, Claims{Email: "a@example.com"}, true, false},
+		{"email explicitly unverified", Config{}, Claims{Email: "a@example.com", EmailUnverified: true}, false, true},
 		{"allowed emails not matched", Config{AllowedEmails: []string{"a@example.com"}}, Claims{Email: "b@example.com"}, false, true},
 	}
 	for _, tc := range tests {

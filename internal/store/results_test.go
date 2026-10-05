@@ -209,3 +209,27 @@ func TestLatestResults(t *testing.T) {
 		t.Errorf("LatestResults = %+v, want %d and %d", all, newestA, newestB)
 	}
 }
+
+// TestListResultsOmitsRaw verifies list/latest queries skip the raw column
+// while a single GetResult still returns it.
+func TestListResultsOmitsRaw(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	tid, _ := s.CreateTarget(ctx, &Target{Name: "home", Engine: "ookla", Enabled: true, QueueID: 1})
+	id := insertResultAt(t, s, tid, "ookla", "ok", "2026-09-13T10:00:00.000Z")
+
+	list, _, err := s.ListResults(ctx, ResultFilter{})
+	if err != nil || len(list) != 1 {
+		t.Fatalf("ListResults = %+v, %v", list, err)
+	}
+	if list[0].Raw != nil || list[0].PingMs != 12.5 {
+		t.Errorf("list row = %+v, want no raw and ping 12.5", list[0])
+	}
+	latest, err := s.LatestResults(ctx)
+	if err != nil || len(latest) != 1 || latest[0].Raw != nil {
+		t.Fatalf("LatestResults = %+v, %v", latest, err)
+	}
+	got, err := s.GetResult(ctx, id)
+	if err != nil || string(got.Raw) != `{"ok":true}` {
+		t.Fatalf("GetResult raw = %s, %v", got.Raw, err)
+	}
+}

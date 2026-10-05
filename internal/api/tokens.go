@@ -33,6 +33,12 @@ func (d Deps) createToken(w http.ResponseWriter, r *http.Request) {
 		errForbidden(w, "admin access required")
 		return
 	}
+	// A token must not be able to mint further tokens: that would let a
+	// leaked token outlive its own revocation.
+	if requestAuthIsToken(r) {
+		errForbidden(w, "creating tokens requires a forward-auth or open-mode session")
+		return
+	}
 	var body struct {
 		Name string `json:"name"`
 	}

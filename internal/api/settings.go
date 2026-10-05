@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/netip"
 	"net/url"
+	"path"
 	"regexp"
 	"slices"
 	"strings"
@@ -304,6 +305,14 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	// (a human, or no auth configured) may write here.
 	if body.Auth != nil && requestAuthIsToken(r) {
 		errForbidden(w, "auth settings require a forward-auth or open-mode session")
+		return
+	}
+
+	// Likewise an API token must not repoint the engine binaries: those
+	// paths are executed by the server, so letting a token set them would
+	// turn a leaked token into command execution.
+	if e := body.Engines; e != nil && (e.SpeedtestBin != nil || e.Iperf3Bin != nil) && requestAuthIsToken(r) {
+		errForbidden(w, "engine binary paths require a forward-auth or open-mode session")
 		return
 	}
 
@@ -1233,7 +1242,52 @@ func setSecret(ctx context.Context, s *settings.Store, key string, v *string) er
 // validateSettings checks the full partial document against the current
 // Integrations section (used to resolve the enabled/URL cross-field rule
 // for whichever of vm/vl the body does not touch).
+// minServerListTTLSeconds is the smallest accepted Ookla server-list cache
+// lifetime; anything lower would hammer speedtest.net.
+const minServerListTTLSeconds = 60
+
+// validateEngineBin accepts a bare executable name (resolved via PATH) or
+// an absolute path, with no whitespace or arguments.
+func validateEngineBin(field, v string) error {
+	if v == "" || strings.TrimSpace(v) != v || strings.ContainsAny(v, " \t\r\n\x00") {
+		return fmt.Errorf("%s must be an executable name or absolute path without spaces or arguments", field)
+	}
+	if strings.ContainsAny(v, `/\`) && !path.IsAbs(v) {
+		return fmt.Errorf("%s must be a bare executable name or an absolute path", field)
+	}
+	return nil
+}
+
+func validateEngines(e *enginesBody) error {
+	if e.SpeedtestBin != nil {
+		if err := validateEngineBin("speedtest_bin", *e.SpeedtestBin); err != nil {
+			return err
+		}
+	}
+	if e.Iperf3Bin != nil {
+		if err := validateEngineBin("iperf3_bin", *e.Iperf3Bin); err != nil {
+			return err
+		}
+	}
+	if e.ServerListTTLSeconds != nil && *e.ServerListTTLSeconds < minServerListTTLSeconds {
+		return fmt.Errorf("server_list_ttl_seconds must be at least %d", minServerListTTLSeconds)
+	}
+	// An empty iperf3_list_url is valid: it disables the list refresh.
+	if e.Iperf3ListURL != nil && *e.Iperf3ListURL != "" {
+		u, err := url.Parse(*e.Iperf3ListURL)
+		if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+			return fmt.Errorf("iperf3_list_url must be an http(s) URL")
+		}
+	}
+	return nil
+}
+
 func validateSettings(body settingsBody, current settings.Integrations) error {
+	if e := body.Engines; e != nil {
+		if err := validateEngines(e); err != nil {
+			return err
+		}
+	}
 	if g := body.General; g != nil {
 		if g.LogLevel != nil {
 			switch *g.LogLevel {
@@ -1576,7 +1630,7 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		AuthHeader *string       `json:"auth_header"` // deprecated: use Auth
 		Auth       *testAuthBody `json:"auth"`
 	}
-	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+	if !decodeOptionalJSON(w, r, &body) {
 		return
 	}
 	cur, err := d.Settings.Integrations(r.Context())
@@ -1654,7 +1708,7 @@ func (d Deps) testOIDC(w http.ResponseWriter, r *http.Request) {
 		ClientID     *string `json:"client_id"`
 		ClientSecret *string `json:"client_secret"`
 	}
-	if r.ContentLength > 0 && !decodeJSON(w, r, &body) {
+	if !decodeOptionalJSON(w, r, &body) {
 		return
 	}
 	cur, err := d.Settings.Auth(r.Context())

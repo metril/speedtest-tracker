@@ -86,3 +86,21 @@ func TestDeleteExpiredSessions(t *testing.T) {
 		t.Fatal("live session removed")
 	}
 }
+
+func TestDeleteAllSessions(t *testing.T) {
+	db := newTestStore(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	for _, id := range []string{"a", "b", "c"} {
+		if err := db.CreateSession(ctx, Session{ID: id, Subject: "s", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n, err := db.DeleteAllSessions(ctx)
+	if err != nil || n != 3 {
+		t.Fatalf("DeleteAllSessions = %d, %v, want 3, nil", n, err)
+	}
+	if _, ok, _ := db.LookupSession(ctx, "a", now); ok {
+		t.Fatal("session survived DeleteAllSessions")
+	}
+}

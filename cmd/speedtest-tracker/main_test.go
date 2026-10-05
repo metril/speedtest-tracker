@@ -519,8 +519,12 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger, db)
 
+	now := time.Now().UTC()
+	if err := db.CreateSession(ctx, store.Session{ID: "s1", Subject: "u", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeToken); err != nil {
 		t.Fatal(err)
 	}
@@ -530,6 +534,9 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	}
 	if am.Mode() != settings.AuthModeToken {
 		t.Errorf("mode = %q, want %q", am.Mode(), settings.AuthModeToken)
+	}
+	if _, ok, _ := db.LookupSession(ctx, "s1", now); ok {
+		t.Error("session survived an auth.* change")
 	}
 }
 
@@ -578,5 +585,76 @@ func TestWatchSettingsStopsOnContextCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("watchSettings did not stop after context cancel")
+	}
+}
+
+func TestHealthcheckHandlesWildcardAndIPv6Listen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	for _, listen := range []string{":" + port, "0.0.0.0:" + port, "[::]:" + port} {
+		if err := healthcheck(listen); err != nil {
+			t.Errorf("healthcheck(%q): %v", listen, err)
+		}
+	}
+
+	l6, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback")
+	}
+	s6 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	s6.Listener.Close()
+	s6.Listener = l6
+	s6.Start()
+	defer s6.Close()
+	if err := healthcheck(l6.Addr().String()); err != nil {
+		t.Errorf("healthcheck(%q): %v", l6.Addr(), err)
+	}
+}
+
+func TestAuthAdapterSeedMode(t *testing.T) {
+	am := newAuthAdapter(auth.New(slog.Default(), noTokens{}, time.Now))
+	if am.Mode() != settings.AuthModeOpen {
+		t.Fatalf("initial mode = %q", am.Mode())
+	}
+	am.seedMode(settings.AuthModeToken)
+	if am.Mode() != settings.AuthModeToken {
+		t.Errorf("mode = %q, want %q", am.Mode(), settings.AuthModeToken)
+	}
+}
+
+func TestRetryOIDCBuildEventuallySucceeds(t *testing.T) {
+	st := newTestSettings(t)
+	ctx := context.Background()
+	idp := oidctest.NewIDP(t)
+	for k, v := range map[string]any{
+		settings.KeyAuthMode:         settings.AuthModeOIDC,
+		settings.KeyAuthOIDCIssuer:   "http://127.0.0.1:1", // unreachable
+		settings.KeyAuthOIDCClientID: "client",
+	} {
+		if err := st.Set(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &oidcProviderHolder{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		retryOIDCBuild(ctx, st, h, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond, 40*time.Millisecond)
+	}()
+	time.Sleep(100 * time.Millisecond) // several failed attempts
+	if h.Load() != nil {
+		t.Fatal("provider built against an unreachable issuer")
+	}
+	if err := st.Set(ctx, settings.KeyAuthOIDCIssuer, idp.URL); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("retry did not stop after the issuer became reachable")
+	}
+	if h.Load() == nil {
+		t.Fatal("provider not built after retry")
 	}
 }

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -367,14 +368,14 @@ type Store struct {
 	db *store.Store
 
 	mu     sync.Mutex
-	subs   map[int]chan string
+	subs   map[int]*subscriber
 	next   int
 	locked map[string]bool
 }
 
 // New returns a Store and seeds any General key that is not yet present.
 func New(ctx context.Context, db *store.Store) (*Store, error) {
-	s := &Store{db: db, subs: map[int]chan string{}}
+	s := &Store{db: db, subs: map[int]*subscriber{}}
 	for key, val := range defaults {
 		encoded, err := json.Marshal(val)
 		if err != nil {
@@ -647,23 +648,77 @@ func (s *Store) Auth(ctx context.Context) (Auth, error) {
 	return a, nil
 }
 
-// Subscribe returns a channel of changed keys and a cancel function. Sends
-// are non-blocking: a subscriber that falls behind loses notifications
-// rather than stalling the writer.
+// subscriber coalesces change notifications: keys accumulate in dirty and
+// a 1-slot wake channel tells the pump goroutine to flush them, so a burst
+// of writes never drops a key (a repeated key is delivered once).
+type subscriber struct {
+	mu    sync.Mutex
+	dirty map[string]struct{}
+	wake  chan struct{}
+	done  chan struct{}
+	out   chan string
+}
+
+func (sub *subscriber) mark(key string) {
+	sub.mu.Lock()
+	sub.dirty[key] = struct{}{}
+	sub.mu.Unlock()
+	select {
+	case sub.wake <- struct{}{}:
+	default:
+	}
+}
+
+func (sub *subscriber) pump() {
+	defer close(sub.out)
+	for {
+		select {
+		case <-sub.done:
+			return
+		case <-sub.wake:
+		}
+		sub.mu.Lock()
+		keys := make([]string, 0, len(sub.dirty))
+		for k := range sub.dirty {
+			keys = append(keys, k)
+		}
+		clear(sub.dirty)
+		sub.mu.Unlock()
+		sort.Strings(keys)
+		for _, k := range keys {
+			select {
+			case sub.out <- k:
+			case <-sub.done:
+				return
+			}
+		}
+	}
+}
+
+// Subscribe returns a channel of changed keys and a cancel function. The
+// writer never blocks and no changed key is ever dropped: changes that
+// arrive while the subscriber is behind are coalesced per key and
+// delivered once it catches up. cancel closes the channel.
 func (s *Store) Subscribe() (<-chan string, func()) {
-	ch := make(chan string, 16)
+	sub := &subscriber{
+		dirty: map[string]struct{}{},
+		wake:  make(chan struct{}, 1),
+		done:  make(chan struct{}),
+		out:   make(chan string, 16),
+	}
+	go sub.pump()
 	s.mu.Lock()
 	id := s.next
 	s.next++
-	s.subs[id] = ch
+	s.subs[id] = sub
 	s.mu.Unlock()
 
-	return ch, func() {
+	return sub.out, func() {
 		s.mu.Lock()
 		defer s.mu.Unlock()
-		if c, ok := s.subs[id]; ok {
+		if _, ok := s.subs[id]; ok {
 			delete(s.subs, id)
-			close(c)
+			close(sub.done)
 		}
 	}
 }
@@ -671,10 +726,7 @@ func (s *Store) Subscribe() (<-chan string, func()) {
 func (s *Store) notify(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, ch := range s.subs {
-		select {
-		case ch <- key:
-		default:
-		}
+	for _, sub := range s.subs {
+		sub.mark(key)
 	}
 }

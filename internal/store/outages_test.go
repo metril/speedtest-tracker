@@ -2,6 +2,8 @@ package store
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -163,5 +165,32 @@ func TestOutagesSeparatesTargetsAndIncludesSkippedRuns(t *testing.T) {
 	}
 	if results != 2 || skipped != 1 {
 		t.Fatalf("results=%d skipped=%d (%+v)", results, skipped, inc)
+	}
+}
+
+// TestOutagesNullTargetSplitsByName verifies that failures of two deleted
+// targets (target_id NULL) do not merge into one incident.
+func TestOutagesNullTargetSplitsByName(t *testing.T) {
+	s, ctx := openTemp(t), context.Background()
+	for i, name := range []string{"gone-a", "gone-b", "gone-a", "gone-b"} {
+		at := fmt.Sprintf("2026-09-13T10:%02d:00.000Z", i*5)
+		if _, err := s.InsertResult(ctx, &Result{
+			TargetName: name, Engine: "fake", Status: "failed", StartedAt: at,
+			OptionsSnapshot: json.RawMessage("{}"),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	inc, err := s.Outages(ctx, "2026-09-13T00:00:00.000Z", "2026-09-14T00:00:00.000Z", 1800)
+	if err != nil {
+		t.Fatalf("Outages: %v", err)
+	}
+	if len(inc) != 2 {
+		t.Fatalf("incidents = %d, want 2 (one per name): %+v", len(inc), inc)
+	}
+	for _, in := range inc {
+		if in.Count != 2 {
+			t.Errorf("incident %+v: count = %d, want 2", in, in.Count)
+		}
 	}
 }

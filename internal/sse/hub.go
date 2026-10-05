@@ -31,6 +31,7 @@ type Hub struct {
 	subs    map[int]chan Event
 	next    int
 	dropped int64
+	closed  bool
 }
 
 // NewHub returns an empty Hub.
@@ -43,6 +44,11 @@ func NewHub() *Hub {
 func (h *Hub) Subscribe() (<-chan Event, func()) {
 	ch := make(chan Event, bufferSize)
 	h.mu.Lock()
+	if h.closed {
+		h.mu.Unlock()
+		close(ch)
+		return ch, func() {}
+	}
 	id := h.next
 	h.next++
 	h.subs[id] = ch
@@ -58,6 +64,19 @@ func (h *Hub) Subscribe() (<-chan Event, func()) {
 				close(c)
 			}
 		})
+	}
+}
+
+// Close closes every subscriber channel (ending SSE stream handlers) and
+// makes later Subscribe calls return an already-closed channel. Publish
+// after Close is a no-op. Close is idempotent.
+func (h *Hub) Close() {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.closed = true
+	for id, ch := range h.subs {
+		delete(h.subs, id)
+		close(ch)
 	}
 }
 

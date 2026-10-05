@@ -40,7 +40,7 @@ func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([
 		SELECT target_id, target_name, status, started_at, COALESCE(error,'')
 		FROM results
 		WHERE started_at >= ? AND started_at <= ?
-		ORDER BY target_id, started_at`, from, to)
+		ORDER BY target_id, CASE WHEN target_id IS NULL THEN target_name END, started_at`, from, to)
 	if err != nil {
 		return nil, fmt.Errorf("outage results: %w", err)
 	}
@@ -70,7 +70,9 @@ func (s *Store) Outages(ctx context.Context, from, to string, gapSeconds int) ([
 		if err != nil {
 			return nil, fmt.Errorf("parse outage time %q: %w", startedAt, err)
 		}
-		sameTarget := cur != nil && ((cur.TargetID == nil && !tid.Valid) ||
+		// Rows with no target_id (deleted targets) are told apart by name,
+		// so two deleted targets' failures never merge into one incident.
+		sameTarget := cur != nil && ((cur.TargetID == nil && !tid.Valid && cur.TargetName == name) ||
 			(cur.TargetID != nil && tid.Valid && *cur.TargetID == tid.Int64))
 		if status == "ok" {
 			// A recovery closes any open incident for this target; a later

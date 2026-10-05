@@ -16,7 +16,7 @@ import (
 )
 
 // Store holds two pools over the same database file. Read is sized to
-// NumCPU (WAL allows concurrent readers); Write is capped at one
+// max(4, NumCPU) (WAL allows concurrent readers); Write is capped at one
 // connection so writers never collide with SQLITE_BUSY.
 type Store struct {
 	Read  *sql.DB
@@ -68,8 +68,9 @@ func Open(path string) (*Store, error) {
 		write.Close()
 		return nil, fmt.Errorf("open read pool: %w", err)
 	}
-	read.SetMaxOpenConns(runtime.NumCPU())
-	read.SetMaxIdleConns(runtime.NumCPU())
+	readConns := max(4, runtime.NumCPU())
+	read.SetMaxOpenConns(readConns)
+	read.SetMaxIdleConns(readConns)
 
 	s := &Store{Read: read, Write: write, Path: path}
 	if err := migrate(context.Background(), write); err != nil {

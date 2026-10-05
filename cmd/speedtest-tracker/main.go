@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"os"
 	"os/signal"
 	"reflect"
@@ -81,11 +82,11 @@ func healthcheck(listen string) error {
 	if err != nil {
 		return fmt.Errorf("parse listen address %q: %w", listen, err)
 	}
-	if host == "" {
+	if ip, perr := netip.ParseAddr(host); host == "" || (perr == nil && ip.IsUnspecified()) {
 		host = "127.0.0.1"
 	}
 	client := &http.Client{Timeout: 3 * time.Second}
-	resp, err := client.Get(fmt.Sprintf("http://%s:%s/healthz", host, port))
+	resp, err := client.Get("http://" + net.JoinHostPort(host, port) + "/healthz")
 	if err != nil {
 		return err
 	}
@@ -209,6 +210,39 @@ func (h *oidcProviderHolder) apply(ctx context.Context, a settings.Auth) error {
 	return nil
 }
 
+// Backoff bounds for retrying a failed boot-time OIDC discovery.
+const (
+	oidcRetryInitial = 10 * time.Second
+	oidcRetryMax     = 5 * time.Minute
+)
+
+// retryOIDCBuild keeps trying to build the OIDC provider after a failed
+// boot-time discovery, doubling the delay from initial up to max, and logs
+// each failure. It returns once the provider is built, auth mode is no
+// longer oidc (the settings watcher owns it from then on), or ctx is done.
+func retryOIDCBuild(ctx context.Context, st *settings.Store, h *oidcProviderHolder, logger *slog.Logger, initial, max time.Duration) {
+	delay := initial
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(delay):
+		}
+		a, err := st.Auth(ctx)
+		if err != nil {
+			logger.Error("oidc retry: load auth settings", "error", err)
+		} else if a.Mode != settings.AuthModeOIDC || h.Load() != nil {
+			return
+		} else if err := h.apply(ctx, a); err != nil {
+			logger.Error("build oidc provider (retrying)", "error", err, "retry_in", min(delay*2, max))
+		} else {
+			logger.Info("oidc provider built after retry")
+			return
+		}
+		delay = min(delay*2, max)
+	}
+}
+
 // authConfigurer is the subset of *auth.Middleware that applyAuth needs.
 // It exists so authAdapter (below) can also satisfy it: *auth.Middleware
 // has no way to report its own configured mode, so production code routes
@@ -237,6 +271,15 @@ func (a *authAdapter) Handler(next http.Handler) http.Handler { return a.mw.Hand
 func (a *authAdapter) Mode() string {
 	mode, _ := a.mode.Load().(string)
 	return mode
+}
+
+// seedMode reports mode as the adapter's mode without configuring the
+// middleware. It is for boot, when applying the stored config failed: the
+// adapter should still report the stored mode rather than "open".
+func (a *authAdapter) seedMode(mode string) {
+	if mode != "" {
+		a.mode.Store(mode)
+	}
 }
 
 func (a *authAdapter) Configure(cfg settings.Auth) error {
@@ -288,6 +331,12 @@ func parseLevel(s string) slog.Level {
 	}
 }
 
+// sessionPurger is the part of *store.Store watchSettings uses to drop
+// every login session when an auth.* setting changes.
+type sessionPurger interface {
+	DeleteAllSessions(ctx context.Context) (int64, error)
+}
+
 // watchSettings applies live settings changes: general.log_level retunes
 // the logger in place and any engines.* change rebuilds the engine
 // registry, invalidates the Ookla server-list cache, and kicks the iperf3
@@ -303,7 +352,7 @@ func parseLevel(s string) slog.Level {
 func watchSettings(ctx context.Context, st *settings.Store, changes <-chan string, level *slog.LevelVar,
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
 	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, oidcHolder *oidcProviderHolder, metricsEnabled *atomic.Bool,
-	ir *iperf3list.Refresher, logger *slog.Logger) {
+	ir *iperf3list.Refresher, logger *slog.Logger, sessions ...sessionPurger) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -361,6 +410,14 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 				}
 				logger.Info("integrations reloaded", "changed_key", key)
 			case strings.HasPrefix(key, "auth."):
+				// Any auth change invalidates every existing session, so
+				// nobody stays logged in under a config that no longer
+				// admits them.
+				for _, sp := range sessions {
+					if _, err := sp.DeleteAllSessions(ctx); err != nil {
+						logger.Error("delete sessions after auth change", "error", err)
+					}
+				}
 				if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
 					logger.Error("reload auth", "error", err)
 					continue
@@ -522,6 +579,9 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	// instead keeps whatever config was last successfully applied.
 	if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
 		logger.Error("apply auth settings", "error", err)
+		if stored, serr := st.Auth(ctx); serr == nil {
+			am.seedMode(stored.Mode)
+		}
 	}
 
 	engineCfg, err := st.Engines(ctx)
@@ -608,8 +668,11 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	watchDone := make(chan struct{})
 	go func() {
 		defer close(watchDone)
-		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, oidcHolder, &metricsEnabled, iperf3Refresher, logger)
+		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, oidcHolder, &metricsEnabled, iperf3Refresher, logger, db)
 	}()
+	if a, err := st.Auth(ctx); err == nil && a.Mode == settings.AuthModeOIDC && oidcHolder.Load() == nil {
+		go retryOIDCBuild(watchCtx, st, oidcHolder, logger, oidcRetryInitial, oidcRetryMax)
+	}
 	go pj.Run(watchCtx)
 	go iperf3Refresher.Run(watchCtx)
 
@@ -643,6 +706,10 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
+	// SSE streams never go idle, so Shutdown would wait on them for the
+	// full timeout; closing the hub ends every stream handler.
+	srv.RegisterOnShutdown(hub.Close)
+
 	errCh := make(chan error, 1)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -663,6 +730,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		defer cancelHTTP()
 		if err := srv.Shutdown(httpCtx); err != nil {
 			logger.Error("http shutdown", "error", err)
+			srv.Close()
 		}
 		authMW.Close()
 		stopWatch()

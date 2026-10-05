@@ -71,7 +71,8 @@ func (d Deps) refreshIperf3Servers(w http.ResponseWriter, r *http.Request) {
 				"iperf3 server list refresh is disabled: set Engines > iperf3 server list in Settings to enable it")
 			return
 		}
-		writeError(w, http.StatusBadGateway, "refresh_failed", err.Error())
+		d.Logger.Warn("iperf3 server list refresh failed", "error", err)
+		writeError(w, http.StatusBadGateway, "refresh_failed", "refreshing the iperf3 server list failed; see server logs")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

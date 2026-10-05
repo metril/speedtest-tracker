@@ -176,7 +176,7 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if q != "" && localErr != nil && (!remoteAttempted || remoteErr != nil) {
-		writeError(w, http.StatusBadGateway, "server_list_failed", localErr.Error())
+		writeError(w, http.StatusBadGateway, "server_list_failed", "loading the server list failed; see server logs")
 		return
 	}
 
