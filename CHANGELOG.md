@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.8](https://github.com/metril/speedtest-tracker/compare/v0.8.7...v0.8.8) (2026-10-05)
+
+
+### Bug Fixes
+
+* **oidc:** read groups from userinfo when absent from the ID token ([#18](https://github.com/metril/speedtest-tracker/issues/18)) ([12978ba](https://github.com/metril/speedtest-tracker/commit/12978ba8d9c960bde11041c89d9cb65124a978ec))
+
 ## [0.8.7](https://github.com/metril/speedtest-tracker/compare/v0.8.6...v0.8.7) (2026-10-05)
 
 
