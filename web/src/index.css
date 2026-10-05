@@ -30,6 +30,14 @@
   --color-series-upload: #7c3aed;
   --color-series-ping: #b45309;
   --color-series-jitter: #0f766e;
+  --color-series-5: #be123c;
+  --color-series-6: #4d7c0f;
+  --color-series-7: #1d4ed8;
+  --color-series-8: #a21caf;
+  --color-series-9: #475569;
+  --color-series-10: #be185d;
+  --color-series-11: #15803d;
+  --color-series-12: #9a3412;
 
   /* shadcn/ui aliases, mapped onto the tokens above. No second palette. */
   --background: var(--color-app);
@@ -73,6 +81,14 @@
   --color-series-upload: #c084fc;
   --color-series-ping: #fbbf24;
   --color-series-jitter: #2dd4bf;
+  --color-series-5: #fb7185;
+  --color-series-6: #a3e635;
+  --color-series-7: #60a5fa;
+  --color-series-8: #e879f9;
+  --color-series-9: #94a3b8;
+  --color-series-10: #f472b6;
+  --color-series-11: #4ade80;
+  --color-series-12: #fb923c;
 
   /* shadcn/ui aliases, mapped onto the tokens above. No second palette. */
   --background: var(--color-app);

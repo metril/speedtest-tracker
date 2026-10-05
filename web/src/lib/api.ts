@@ -219,7 +219,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (res.status === 204) return undefined as T;
   const text = await res.text();
-  const body = text ? JSON.parse(text) : undefined;
+  let body: { error?: { code?: string; message?: string } } | undefined;
+  try {
+    body = text ? JSON.parse(text) : undefined;
+  } catch {
+    // Non-JSON body (e.g. a proxy's HTML 502 page): fall through to the
+    // status-based error below, or an undefined result on 2xx.
+    body = undefined;
+  }
   if (!res.ok) {
     const envelope = body?.error;
     throw new ApiError(res.status, envelope?.code ?? 'unknown', envelope?.message ?? res.statusText);

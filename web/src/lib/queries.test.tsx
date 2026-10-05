@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as api from './api';
 import {
-  queryKeys, useCronPreview, useReexecute, useRunTarget, useTargetHistory, useUpdateSettings,
+  queryKeys, useCronPreview, useDeleteResult, useDeleteTarget, useReexecute, useRunTarget, useTargetHistory, useUpdateSettings, useUpdateTarget,
 } from './queries';
 
 function wrapper(client: QueryClient) {
@@ -50,6 +50,24 @@ describe('run-triggering mutations invalidate the runs cache', () => {
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(spy).toHaveBeenCalledWith({ queryKey: ['runs'] });
+  });
+});
+
+describe('mutations that change result aggregates', () => {
+  const keys = [['summary'], ['history'], ['outages']];
+
+  it.each([
+    ['useDeleteResult', () => useDeleteResult(), 'deleteResult', 1],
+    ['useDeleteTarget', () => useDeleteTarget(), 'deleteTarget', 1],
+    ['useUpdateTarget', () => useUpdateTarget(), 'updateTarget', { id: 1, target: {} }],
+  ] as const)('%s invalidates summary, history and outages', async (_n, hook, fn, arg) => {
+    vi.spyOn(api, fn as 'deleteResult').mockResolvedValue(undefined as never);
+    const client = new QueryClient();
+    const spy = vi.spyOn(client, 'invalidateQueries');
+    const { result } = renderHook(hook as () => { mutate: (v: unknown) => void }, { wrapper: wrapper(client) });
+    result.current.mutate(arg);
+    await waitFor(() => expect(spy).toHaveBeenCalledWith({ queryKey: ['outages'] }));
+    for (const queryKey of keys) expect(spy).toHaveBeenCalledWith({ queryKey });
   });
 });
 

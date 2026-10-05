@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { ErrorDialog } from '@/components/ErrorDialog';
@@ -67,12 +67,19 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
   live: LiveRun; onClose: () => void; onCancel: () => void; canceling: boolean;
 }) {
   const [errorOpen, setErrorOpen] = useState(false);
-  // Escape closes the dialog, and focus returns to whatever had it before
-  // the dialog opened (the "Expand live test" / "Run now" button).
+  const panelRef = useRef<HTMLElement>(null);
+  // onClose's identity changes as the run progresses; the listener below is
+  // registered once, so it reads the latest through a ref.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
+  // Escape closes the dialog (unless a nested dialog already consumed it),
+  // focus moves into the panel, and returns to whatever had it before the
+  // dialog opened (the "Expand live test" / "Run now" button).
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
+    panelRef.current?.focus();
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose();
+      if (e.key === 'Escape' && !e.defaultPrevented) onCloseRef.current();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => {
@@ -86,10 +93,12 @@ function ExpandedPanel({ live, onClose, onCancel, canceling }: {
     <div className="fixed inset-0 z-40 flex justify-end bg-app/70">
       <button type="button" aria-label="Close" className="absolute inset-0 cursor-default" onClick={onClose} />
       <aside
+        ref={panelRef}
+        tabIndex={-1}
         role="dialog"
         aria-modal="true"
         aria-label="Live test"
-        className="relative flex h-full w-full max-w-md flex-col gap-5 overflow-y-auto border-l border-line bg-app p-6"
+        className="relative flex h-full w-full max-w-md outline-none flex-col gap-5 overflow-y-auto border-l border-line bg-app p-6"
       >
         <header className="flex items-start justify-between">
           <div>

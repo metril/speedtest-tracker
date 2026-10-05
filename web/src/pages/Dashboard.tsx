@@ -1,5 +1,5 @@
 import { useQueries } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -11,16 +11,16 @@ import { OutageStrip } from '../features/dashboard/OutageStrip';
 import { RangePicker } from '../features/dashboard/RangePicker';
 import { SummaryTiles, type DashboardSpark } from '../features/dashboard/SummaryTiles';
 import { TargetCard } from '../features/dashboard/TargetCard';
-import { useLivePanel } from '../features/live/LiveRunProvider';
+import { useLiveControls } from '../features/live/LiveRunProvider';
 import * as api from '../lib/api';
 import type { History, HistoryPoint, Range, TargetSummary, ThresholdSet } from '../lib/api';
-import { SERIES } from '../lib/chart';
+import { SERIES, SERIES_EXTRA } from '../lib/chart';
 import { formatBps, formatMs } from '../lib/format';
 import {
   queryKeys, useOutages, usePreviousSummary, useRunTarget, useSettings, useSummary, useTargetHistory, useTargets,
 } from '../lib/queries';
 
-const COLOR_CYCLE = [SERIES.download, SERIES.upload, SERIES.ping, SERIES.jitter];
+const COLOR_CYCLE = [SERIES.download, SERIES.upload, SERIES.ping, SERIES.jitter, ...SERIES_EXTRA];
 
 /** mergeByBucket combines several targets' histories into one row per
  * bucket_start, keyed per target (`<key>_<id>`), so multiple targets'
@@ -142,90 +142,74 @@ function aggregateSpark(targets: TargetSummary[], queries: ReturnType<typeof use
  * timeline in its own Card. Split out so its history queries only run
  * once targets exist. */
 function HistorySection({ targets, range }: { targets: TargetSummary[]; range: Range }) {
-  const [visible, setVisible] = useState<Set<number>>(
-    () => new Set(targets.map((t) => t.target_id)),
-  );
+  // Track what the user hid (not what they saw at mount) so a target that
+  // gains its first result later shows up instead of staying invisible.
+  const [hidden, setHidden] = useState<Set<number>>(() => new Set());
+  const isVisible = (id: number) => !hidden.has(id);
   const outages = useOutages(range);
   const historyQueries = useAllTargetHistories(targets, range);
   const [compare, setCompare] = useState(false);
   const prevHistoryQueries = useAllTargetHistories(targets, range, { offset: 1, enabled: compare });
 
-  const histories = new Map<number, HistoryPoint[]>();
-  targets.forEach((t, i) => histories.set(t.target_id, historyQueries[i].data?.points ?? []));
-  const historyByTarget = new Map<number, History>();
-  targets.forEach((t, i) => {
-    const h = historyQueries[i].data;
-    if (h) historyByTarget.set(t.target_id, h);
-  });
-  const prevHistoryByTarget = new Map<number, History>();
-  targets.forEach((t, i) => {
-    const h = prevHistoryQueries[i].data;
-    if (h) prevHistoryByTarget.set(t.target_id, h);
-  });
-
-  const visibleTargets = targets.filter((t) => visible.has(t.target_id));
-  const visibleIds = visibleTargets.map((t) => t.target_id);
-
   const toggle = (id: number) => {
-    setVisible((prev) => {
+    setHidden((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id); else next.add(id);
       return next;
     });
   };
 
-  let throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
-  let latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
-  if (compare) {
-    throughputPoints = mergePrevByOffset(
-      throughputPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_download_bps', 'avg_upload_bps'],
-    );
-    latencyPoints = mergePrevByOffset(
-      latencyPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_ping_ms', 'avg_jitter_ms'],
-    );
-  }
+  // useQueries returns a fresh array every render, so key the memo on the
+  // queries' update stamps instead.
+  const historySig = historyQueries.map((q) => q.dataUpdatedAt).join(',');
+  const prevHistorySig = prevHistoryQueries.map((q) => q.dataUpdatedAt).join(',');
+  const { throughputPoints, latencyPoints, throughputSeries, latencySeries } = useMemo(() => {
+    const histories = new Map<number, HistoryPoint[]>();
+    const historyByTarget = new Map<number, History>();
+    const prevHistoryByTarget = new Map<number, History>();
+    targets.forEach((t, i) => {
+      const h = historyQueries[i].data;
+      histories.set(t.target_id, h?.points ?? []);
+      if (h) historyByTarget.set(t.target_id, h);
+      const prev = prevHistoryQueries[i].data;
+      if (prev) prevHistoryByTarget.set(t.target_id, prev);
+    });
+    const visibleIds = targets.filter((t) => !hidden.has(t.target_id)).map((t) => t.target_id);
 
-  const throughputSeries: Series[] = visibleTargets.flatMap((t, i) => {
-    const downloadColor = COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length];
-    const uploadColor = COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length];
-    const base: Series[] = [
-      { key: `avg_download_bps_${t.target_id}`, label: `${t.target_name} download`, color: downloadColor, unit: formatBps },
-      { key: `avg_upload_bps_${t.target_id}`, label: `${t.target_name} upload`, color: uploadColor, unit: formatBps },
-    ];
-    if (!compare) return base;
-    return [
-      ...base,
-      {
-        key: `avg_download_bps_${t.target_id}_prev`, label: `${t.target_name} download (prev)`,
-        color: downloadColor, unit: formatBps, dashed: true,
-      },
-      {
-        key: `avg_upload_bps_${t.target_id}_prev`, label: `${t.target_name} upload (prev)`,
-        color: uploadColor, unit: formatBps, dashed: true,
-      },
-    ];
-  });
+    let throughputPoints = mergeByBucket(histories, visibleIds, ['avg_download_bps', 'avg_upload_bps']);
+    let latencyPoints = mergeByBucket(histories, visibleIds, ['avg_ping_ms', 'avg_jitter_ms']);
+    if (compare) {
+      throughputPoints = mergePrevByOffset(
+        throughputPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_download_bps', 'avg_upload_bps'],
+      );
+      latencyPoints = mergePrevByOffset(
+        latencyPoints, historyByTarget, prevHistoryByTarget, visibleIds, ['avg_ping_ms', 'avg_jitter_ms'],
+      );
+    }
 
-  const latencySeries: Series[] = visibleTargets.flatMap((t, i) => {
-    const pingColor = COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length];
-    const jitterColor = COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length];
-    const base: Series[] = [
-      { key: `avg_ping_ms_${t.target_id}`, label: `${t.target_name} ping`, color: pingColor, unit: formatMs },
-      { key: `avg_jitter_ms_${t.target_id}`, label: `${t.target_name} jitter`, color: jitterColor, unit: formatMs },
-    ];
-    if (!compare) return base;
-    return [
-      ...base,
-      {
-        key: `avg_ping_ms_${t.target_id}_prev`, label: `${t.target_name} ping (prev)`,
-        color: pingColor, unit: formatMs, dashed: true,
-      },
-      {
-        key: `avg_jitter_ms_${t.target_id}_prev`, label: `${t.target_name} jitter (prev)`,
-        color: jitterColor, unit: formatMs, dashed: true,
-      },
-    ];
-  });
+    // Colours follow the target's position in the full list, so toggling
+    // another target never recolours the rest.
+    const pairSeries = (
+      keys: [string, string], labels: [string, string], units: [Series['unit'], Series['unit']],
+    ): Series[] => targets.flatMap((t, i) => {
+      if (hidden.has(t.target_id)) return [];
+      const colors = [COLOR_CYCLE[(i * 2) % COLOR_CYCLE.length], COLOR_CYCLE[(i * 2 + 1) % COLOR_CYCLE.length]];
+      const base = [0, 1].map((k): Series => ({
+        key: `${keys[k]}_${t.target_id}`, label: `${t.target_name} ${labels[k]}`, color: colors[k], unit: units[k],
+      }));
+      if (!compare) return base;
+      return [...base, ...base.map((b, k): Series => ({
+        ...b, key: `${keys[k]}_${t.target_id}_prev`, label: `${t.target_name} ${labels[k]} (prev)`, dashed: true,
+      }))];
+    });
+    return {
+      throughputPoints,
+      latencyPoints,
+      throughputSeries: pairSeries(['avg_download_bps', 'avg_upload_bps'], ['download', 'upload'], [formatBps, formatBps]),
+      latencySeries: pairSeries(['avg_ping_ms', 'avg_jitter_ms'], ['ping', 'jitter'], [formatMs, formatMs]),
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [targets, hidden, compare, historySig, prevHistorySig]);
 
   return (
     <div className="grid gap-4">
@@ -239,10 +223,10 @@ function HistorySection({ targets, range }: { targets: TargetSummary[]; range: R
                   <button
                     key={t.target_id}
                     type="button"
-                    aria-pressed={visible.has(t.target_id)}
+                    aria-pressed={isVisible(t.target_id)}
                     onClick={() => toggle(t.target_id)}
                     className={`rounded-full border px-2.5 py-0.5 text-xs transition-colors ${
-                      visible.has(t.target_id)
+                      isVisible(t.target_id)
                         ? 'border-accent bg-accent/10 text-accent'
                         : 'border-line text-faint hover:text-muted'
                     }`}
@@ -318,7 +302,7 @@ export function Dashboard() {
   const targetsQuery = useTargets();
   const settingsQuery = useSettings();
   const run = useRunTarget();
-  const { open } = useLivePanel();
+  const { open } = useLiveControls();
   const runningTargetID = run.isPending ? run.variables : undefined;
 
   const targets = summary.data?.targets ?? [];
@@ -337,6 +321,12 @@ export function Dashboard() {
         <h1 className="text-xl font-semibold tracking-tight">Dashboard</h1>
         <RangePicker value={range} onChange={setRange} />
       </header>
+
+      {run.error && (
+        <p role="alert" className="text-sm text-bad">
+          {run.error instanceof api.ApiError ? run.error.message : String(run.error)}
+        </p>
+      )}
 
       {summary.isLoading && <DashboardSkeleton />}
 

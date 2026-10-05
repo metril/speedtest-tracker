@@ -3,16 +3,19 @@ const DASH = '—';
 /** Renders bits per second as Kbps / Mbps / Gbps. */
 export function formatBps(bps: number): string {
   if (!Number.isFinite(bps) || bps <= 0) return DASH;
+  // Round first, then promote the unit, so 999_999 bps reads "1.0 Mbps"
+  // rather than "1000 Kbps".
+  const kbps = Math.round(bps / 1000);
+  if (kbps < 1000) return `${kbps} Kbps`;
   const mbps = bps / 1_000_000;
-  if (mbps < 1) return `${Math.round(bps / 1000)} Kbps`;
-  if (mbps >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
+  if (Math.round(mbps * 10) / 10 >= 1000) return `${(mbps / 1000).toFixed(2)} Gbps`;
   return `${mbps.toFixed(1)} Mbps`;
 }
 
 /** Renders milliseconds, keeping a decimal only where it matters. */
 export function formatMs(ms: number): string {
   if (!Number.isFinite(ms) || ms <= 0) return DASH;
-  return ms < 100 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`;
+  return Math.round(ms * 10) / 10 < 100 ? `${ms.toFixed(1)} ms` : `${Math.round(ms)} ms`;
 }
 
 /** Renders a packet-loss percentage. */

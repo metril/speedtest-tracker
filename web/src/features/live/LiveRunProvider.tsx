@@ -1,11 +1,12 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { queryKeys } from '../../lib/queries';
 import { useLiveRun, type LiveRun, type LiveRunEvent } from '../../lib/useLiveRun';
 import { HIDE_DELAY_MS } from './constants';
 
-export interface LivePanelValue {
-  live: LiveRun | null;
+/** LiveControls is the stable half of the live-run state: pages that only
+ * open the panel consume this, so progress events never re-render them. */
+export interface LiveControls {
   expanded: boolean;
   /** hidden is true once the user has closed a run they started themselves
    * (via `open(runId)`); LivePanel renders nothing for that run at all,
@@ -19,14 +20,33 @@ export interface LivePanelValue {
   close: () => void;
 }
 
-export const LivePanelContext = createContext<LivePanelValue>({
-  live: null, expanded: false, hidden: false, open: () => {}, close: () => {},
+export type LivePanelValue = LiveControls & { live: LiveRun | null };
+
+export const LiveControlsContext = createContext<LiveControls>({
+  expanded: false, hidden: false, open: () => {}, close: () => {},
 });
 
-/** useLivePanel gives pages the live run and the slide-over controls, so a
- * "Run now" button can open the panel it just started. */
+/** The live run itself; changes on every progress event, so only LivePanel
+ * (and tests) should consume it. */
+export const LiveDataContext = createContext<LiveRun | null>(null);
+
+/** useLiveControls gives pages the slide-over controls without subscribing
+ * them to progress events. */
+export function useLiveControls(): LiveControls {
+  return useContext(LiveControlsContext);
+}
+
+/** useLiveData is the current (or most recently finished) run. */
+export function useLiveData(): LiveRun | null {
+  return useContext(LiveDataContext);
+}
+
+/** useLivePanel gives both halves together; it re-renders on every progress
+ * event, so prefer useLiveControls unless the live run is needed. */
 export function useLivePanel(): LivePanelValue {
-  return useContext(LivePanelContext);
+  const controls = useLiveControls();
+  const live = useLiveData();
+  return { ...controls, live };
 }
 
 /**
@@ -53,7 +73,7 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
       qc.invalidateQueries({ queryKey: ['outages'] });
       return;
     }
-    if (event.type === 'run' && event.status) {
+    if (event.type === 'resync' || (event.type === 'run' && event.status)) {
       qc.invalidateQueries({ queryKey: ['results'] });
       qc.invalidateQueries({ queryKey: queryKeys.runs });
       qc.invalidateQueries({ queryKey: queryKeys.targets });
@@ -93,23 +113,32 @@ export function LiveRunProvider({ children }: { children: ReactNode }) {
     setExpanded(true);
   }, []);
 
+  // close reads the latest run/started ids through refs so its identity
+  // stays stable across progress events.
+  const liveRunIdRef = useRef<number | null>(null);
+  liveRunIdRef.current = live?.runId ?? null;
+  const startedRunIdRef = useRef<number | null>(null);
+  startedRunIdRef.current = startedRunId;
+
   const close = useCallback(() => {
     setExpanded(false);
     setHiddenRunId((prev) => {
-      if (live && live.runId === startedRunId) return live.runId;
+      const id = liveRunIdRef.current;
+      if (id !== null && id === startedRunIdRef.current) return id;
       return prev;
     });
-  }, [live, startedRunId]);
+  }, []);
 
   const hidden = live !== null && live.runId === hiddenRunId;
 
-  const value = useMemo<LivePanelValue>(() => ({
-    live,
-    expanded,
-    hidden,
-    open,
-    close,
-  }), [live, expanded, hidden, open, close]);
+  const controls = useMemo<LiveControls>(
+    () => ({ expanded, hidden, open, close }),
+    [expanded, hidden, open, close],
+  );
 
-  return <LivePanelContext.Provider value={value}>{children}</LivePanelContext.Provider>;
+  return (
+    <LiveControlsContext.Provider value={controls}>
+      <LiveDataContext.Provider value={live}>{children}</LiveDataContext.Provider>
+    </LiveControlsContext.Provider>
+  );
 }

@@ -6,7 +6,7 @@ import {
 } from '@/components/ui/table';
 import { ConfirmDialog } from '../components/ConfirmDialog';
 import { ScheduleForm } from '../features/schedules/ScheduleForm';
-import { useLivePanel } from '../features/live/LiveRunProvider';
+import { useLiveControls } from '../features/live/LiveRunProvider';
 import type { Schedule, ScheduleInput, ScheduleRun, ScheduleSaved } from '../lib/api';
 import { ApiError } from '../lib/api';
 import { formatDateTime, formatRelative } from '../lib/format';
@@ -39,7 +39,7 @@ export function Schedules() {
   const update = useUpdateSchedule();
   const remove = useDeleteSchedule();
   const run = useRunSchedule();
-  const { open } = useLivePanel();
+  const { open } = useLiveControls();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [warnings, setWarnings] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
@@ -99,6 +99,10 @@ export function Schedules() {
           submitting={create.isPending || update.isPending}
           error={message(create.error ?? update.error)}
         />
+      )}
+
+      {(remove.error || run.error) && (
+        <p role="alert" className="text-sm text-bad">{message(remove.error ?? run.error)}</p>
       )}
 
       {schedules.isLoading && <p className="text-sm text-muted">Loading schedules…</p>}

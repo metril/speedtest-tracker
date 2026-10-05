@@ -1,10 +1,10 @@
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { Layout } from './components/Layout';
 import { NavigationGuardProvider } from './features/settings/NavigationGuardContext';
 import { ApiError } from './lib/api';
-import { useMe } from './lib/queries';
+import { createQueryClient, useMe } from './lib/queries';
 import { ThemeProvider } from './lib/theme';
 
 const Login = lazy(() => import('./pages/Login').then((m) => ({ default: m.Login })));
@@ -43,9 +43,7 @@ function RequireAuth({ children }: { children: ReactNode }) {
 export function App() {
   // Created per mount (not module scope) so each <App/> instance -- and
   // each test render -- starts from a clean query cache.
-  const [queryClient] = useState(() => new QueryClient({
-    defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
-  }));
+  const [queryClient] = useState(createQueryClient);
 
   return (
     <ThemeProvider>

@@ -5,7 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { describe, expect, it, vi } from 'vitest';
 import type { LiveRun } from '../../lib/useLiveRun';
 import { LivePanel } from './LivePanel';
-import { LivePanelContext } from './LiveRunProvider';
+import { LiveControlsContext, LiveDataContext, type LivePanelValue } from './LiveRunProvider';
 
 function live(overrides: Partial<LiveRun> = {}): LiveRun {
   return {
@@ -17,19 +17,26 @@ function live(overrides: Partial<LiveRun> = {}): LiveRun {
   };
 }
 
-function renderPanel(
-  value: Omit<Parameters<typeof LivePanelContext.Provider>[0]['value'], 'hidden'> & { hidden?: boolean },
-) {
-  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+type PanelValue = Omit<LivePanelValue, 'hidden'> & { hidden?: boolean };
+
+function tree(qc: QueryClient, { live: liveRun, ...controls }: PanelValue) {
+  return (
     <MemoryRouter>
       <QueryClientProvider client={qc}>
-        <LivePanelContext.Provider value={{ hidden: false, ...value }}>
-          <LivePanel />
-        </LivePanelContext.Provider>
+        <LiveControlsContext.Provider value={{ hidden: false, ...controls }}>
+          <LiveDataContext.Provider value={liveRun}>
+            <LivePanel />
+          </LiveDataContext.Provider>
+        </LiveControlsContext.Provider>
       </QueryClientProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderPanel(value: PanelValue) {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const rendered = render(tree(qc, value));
+  return { ...rendered, rerenderPanel: (v: PanelValue) => rendered.rerender(tree(qc, v)) };
 }
 
 describe('LivePanel', () => {
@@ -140,5 +147,32 @@ describe('LivePanel', () => {
 
     expect(document.activeElement).toBe(trigger);
     trigger.remove();
+  });
+
+  it('focuses the dialog on mount', () => {
+    renderPanel({ live: live(), expanded: true, open: vi.fn(), close: vi.fn() });
+    expect(screen.getByRole('dialog', { name: /live test/i })).toHaveFocus();
+  });
+
+  it('calls the latest onClose on Escape, not the first render\'s', async () => {
+    const first = vi.fn();
+    const latest = vi.fn();
+    const { rerenderPanel } = renderPanel({ live: live(), expanded: true, open: vi.fn(), close: first });
+    rerenderPanel({ live: live({ progress: 0.9 }), expanded: true, open: vi.fn(), close: latest });
+    await userEvent.keyboard('{Escape}');
+    expect(latest).toHaveBeenCalledTimes(1);
+    expect(first).not.toHaveBeenCalled();
+  });
+
+  it('ignores an Escape that a nested dialog already handled', async () => {
+    const close = vi.fn();
+    renderPanel({
+      live: live({ finished: true, status: 'failed', error: 'boom' }),
+      expanded: true, open: vi.fn(), close,
+    });
+    await userEvent.click(screen.getByRole('button', { name: /view error/i }));
+    await screen.findByText('boom');
+    await userEvent.keyboard('{Escape}');
+    expect(close).not.toHaveBeenCalled();
   });
 });

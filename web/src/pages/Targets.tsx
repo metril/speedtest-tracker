@@ -9,7 +9,7 @@ import { ConfirmDialog } from '../components/ConfirmDialog';
 import { TargetForm } from '../features/targets/TargetForm';
 import { HistoryDialog } from '../features/targets/HistoryDialog';
 import { QueuesDialog } from '../features/queues/QueuesDialog';
-import { useLivePanel } from '../features/live/LiveRunProvider';
+import { useLiveControls } from '../features/live/LiveRunProvider';
 import type { Target, TargetInput } from '../lib/api';
 import { ApiError } from '../lib/api';
 import {
@@ -109,7 +109,7 @@ export function Targets() {
   const update = useUpdateTarget();
   const remove = useDeleteTarget();
   const run = useRunTarget();
-  const { open } = useLivePanel();
+  const { open } = useLiveControls();
   const [editing, setEditing] = useState<Editing>({ mode: 'none' });
   const [confirmDelete, setConfirmDelete] = useState<Target | null>(null);
   const [queuesOpen, setQueuesOpen] = useState(false);
@@ -168,6 +168,10 @@ export function Targets() {
       {targets.isLoading && <p className="text-sm text-muted">Loading targets…</p>}
       {targets.isError && (
         <p className="text-sm text-bad">{mutationError(targets.error)}</p>
+      )}
+
+      {(remove.error || run.error) && (
+        <p role="alert" className="text-sm text-bad">{mutationError(remove.error ?? run.error)}</p>
       )}
 
       {targets.data && targets.data.length === 0 && (

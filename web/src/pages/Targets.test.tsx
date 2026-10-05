@@ -116,6 +116,27 @@ describe('Targets page delete confirmation', () => {
     });
   });
 
+  it('shows an error when delete fails', async () => {
+    const targets = [target()];
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/targets/1') && init?.method === 'DELETE') {
+        return jsonResponse({ error: { code: 'conflict', message: 'target is in use' } }, 409);
+      }
+      if (url.endsWith('/targets/deleted')) return jsonResponse([]);
+      if (url.endsWith('/schedules')) return jsonResponse({ schedules: [] });
+      return jsonResponse(targets);
+    });
+
+    wrap(<Targets />);
+    await screen.findByText('home');
+    fireEvent.click(screen.getByRole('button', { name: 'Delete' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Delete' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('target is in use');
+  });
+
   it('shows the deleted target in Recently deleted right after deleting it', async () => {
     const targets = [target()];
     let isDeleted = false;

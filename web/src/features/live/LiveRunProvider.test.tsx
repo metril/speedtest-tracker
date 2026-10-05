@@ -4,12 +4,15 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LivePanel } from './LivePanel';
-import { LiveRunProvider, useLivePanel } from './LiveRunProvider';
+import { LiveRunProvider, useLiveControls, useLivePanel } from './LiveRunProvider';
 
 // FakeEventSource lets the test push SSE events, mirroring useLiveRun.test.ts.
 class FakeEventSource {
   static last: FakeEventSource | null = null;
   listeners = new Map<string, ((e: MessageEvent) => void)[]>();
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
   constructor(readonly url: string) {
     FakeEventSource.last = this;
   }
@@ -161,5 +164,34 @@ describe('LiveRunProvider', () => {
     act(() => emit('run', { run_id: 1, status: 'running', targets_total: 1, targets_done: 0 }));
     const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
     expect(keys).not.toEqual(expect.arrayContaining(['summary']));
+  });
+
+  it('invalidates the caches when the stream reopens after a drop', () => {
+    const { qc } = wrap();
+    const spy = vi.spyOn(qc, 'invalidateQueries');
+    // A drop (browser retrying) followed by a reopen reconciles missed events.
+    act(() => FakeEventSource.last!.onerror?.());
+    act(() => FakeEventSource.last!.onopen?.());
+    const keys = spy.mock.calls.map((c) => (c[0] as { queryKey: unknown[] }).queryKey[0]);
+    expect(keys).toEqual(expect.arrayContaining(['results', 'summary', 'history', 'outages']));
+  });
+
+  it('does not re-render controls consumers on progress events', () => {
+    let renders = 0;
+    function Controls() {
+      useLiveControls();
+      renders += 1;
+      return null;
+    }
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <LiveRunProvider><Controls /></LiveRunProvider>
+      </QueryClientProvider>,
+    );
+    const before = renders;
+    act(() => emit('progress', { run_id: 1, target_id: 1, engine: 'fake', phase: 'download', progress: 0.1, bps: 1e6, ping_ms: 1 }));
+    act(() => emit('progress', { run_id: 1, target_id: 1, engine: 'fake', phase: 'download', progress: 0.2, bps: 2e6, ping_ms: 1 }));
+    expect(renders).toBe(before);
   });
 });

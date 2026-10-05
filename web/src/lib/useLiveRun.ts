@@ -9,6 +9,11 @@ const MAX_SAMPLES = 60;
  * marked finished with status "stale" rather than spinning forever. */
 const STALE_TIMEOUT_MS = 60_000;
 
+/** EventSource reconnect backoff bounds; reset once a connection opens. */
+const RECONNECT_MIN_MS = 1_000;
+const RECONNECT_MAX_MS = 30_000;
+const EVENT_SOURCE_CLOSED = 2;
+
 export interface LiveRun {
   runId: number;
   targetId: number;
@@ -35,7 +40,9 @@ export interface LiveRun {
 }
 
 export interface LiveRunEvent {
-  type: 'result' | 'run';
+  /** 'resync' fires when the stream reopens after a drop, so listeners can
+   * reconcile result/run events missed in the gap. */
+  type: 'result' | 'run' | 'resync';
   status?: string;
   result?: Result;
 }
@@ -70,7 +77,8 @@ const TERMINAL = new Set(['done', 'failed', 'canceled', 'skipped']);
 
 /**
  * useLiveRun subscribes to /api/v1/events and exposes the current (or most
- * recently finished) run. The browser reconnects an EventSource on its own.
+ * recently finished) run. The browser retries dropped connections itself;
+ * a permanently closed one is recreated here with exponential backoff.
  * Deliberately provider-less so it stays trivial to unit test; pass
  * `onEvent` to react to result rows and terminal runs from a component that
  * does sit under a QueryClientProvider.
@@ -79,14 +87,13 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
   const [live, setLive] = useState<LiveRun | null>(null);
   const onEventRef = useRef(options?.onEvent);
   onEventRef.current = options?.onEvent;
-  // Mirrors `live` synchronously so the staleness timer (which fires
-  // outside React's render cycle) can check "still unfinished?" without a
-  // stale closure over state.
-  const liveRef = useRef<LiveRun | null>(null);
-  liveRef.current = live;
 
   useEffect(() => {
-    const source = new EventSource('/api/v1/events');
+    let source: EventSource | undefined;
+    let disposed = false;
+    let dropped = false;
+    let backoff = RECONNECT_MIN_MS;
+    let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
     let staleTimer: ReturnType<typeof setTimeout> | undefined;
 
     const armStaleTimer = () => {
@@ -157,16 +164,17 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
       if (TERMINAL.has(r.status)) {
         onEventRef.current?.({ type: 'run', status: r.status });
       }
-      const prevBefore = liveRef.current;
-      if (prevBefore && prevBefore.runId !== r.run_id && !prevBefore.finished
-        && r.status !== 'running' && !TERMINAL.has(r.status)) {
-        // A queued/pending event for some other run must not stomp the run
-        // currently in flight; e.g. the next cron fire being queued while
-        // this one still streams progress.
-        return;
-      }
-      armStaleTimer();
+      // Only a running run can go quiet; a queued one may legitimately wait
+      // longer than the stale timeout.
+      if (r.status === 'running') armStaleTimer();
       setLive((prev) => {
+        if (prev && prev.runId !== r.run_id && !prev.finished
+          && r.status !== 'running' && !TERMINAL.has(r.status)) {
+          // A queued/pending event for some other run must not stomp the run
+          // currently in flight; e.g. the next cron fire being queued while
+          // this one still streams progress.
+          return prev;
+        }
         if (!prev || prev.runId !== r.run_id) {
           // A `run` event can arrive before the first `progress` event (or
           // for a different run than the one previously tracked); create
@@ -206,15 +214,48 @@ export function useLiveRun(options?: UseLiveRunOptions): LiveRun | null {
       });
     };
 
-    source.addEventListener('progress', onProgress);
-    source.addEventListener('result', onResult);
-    source.addEventListener('run', onRun);
+    const detach = (s: EventSource) => {
+      s.removeEventListener('progress', onProgress);
+      s.removeEventListener('result', onResult);
+      s.removeEventListener('run', onRun);
+      s.onopen = null;
+      s.onerror = null;
+    };
+
+    const connect = () => {
+      const s = new EventSource('/api/v1/events');
+      source = s;
+      s.addEventListener('progress', onProgress);
+      s.addEventListener('result', onResult);
+      s.addEventListener('run', onRun);
+      s.onopen = () => {
+        backoff = RECONNECT_MIN_MS;
+        if (dropped) {
+          dropped = false;
+          onEventRef.current?.({ type: 'resync' });
+        }
+      };
+      s.onerror = () => {
+        dropped = true;
+        // CONNECTING means the browser is retrying on its own; CLOSED (e.g.
+        // a non-200 such as an expired session) is permanent, so recreate.
+        if (s.readyState !== EVENT_SOURCE_CLOSED || disposed) return;
+        detach(s);
+        s.close();
+        reconnectTimer = setTimeout(connect, backoff);
+        backoff = Math.min(backoff * 2, RECONNECT_MAX_MS);
+      };
+    };
+    connect();
+
     return () => {
+      disposed = true;
       clearTimeout(staleTimer);
-      source.removeEventListener('progress', onProgress);
-      source.removeEventListener('result', onResult);
-      source.removeEventListener('run', onRun);
-      source.close();
+      clearTimeout(reconnectTimer);
+      if (source) {
+        detach(source);
+        source.close();
+      }
     };
   }, []);
 
