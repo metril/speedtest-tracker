@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.8.9](https://github.com/metril/speedtest-tracker/compare/v0.8.8...v0.8.9) (2026-10-05)
+
+
+### Bug Fixes
+
+* **oidc:** only enforce email_verified for the allowed-emails rule ([#20](https://github.com/metril/speedtest-tracker/issues/20)) ([46d567e](https://github.com/metril/speedtest-tracker/commit/46d567e8b98f2055f49495cca99cbd5a450c6428))
+
 ## [0.8.8](https://github.com/metril/speedtest-tracker/compare/v0.8.7...v0.8.8) (2026-10-05)
 
 
