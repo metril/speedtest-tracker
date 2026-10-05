@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.7](https://github.com/metril/speedtest-tracker/compare/v0.8.6...v0.8.7) (2026-10-05)
+
+
+### Bug Fixes
+
+* **api:** atomic settings PUT; ci: image tagged with the commit built ([49e4f2e](https://github.com/metril/speedtest-tracker/commit/49e4f2e004298175a540086e1be17a0e4295a8ba))
+* **api:** write a settings PUT in one transaction ([022fa0f](https://github.com/metril/speedtest-tracker/commit/022fa0fc61ec8c964e43e1f6b36ab56c039215b2))
+
 ## [0.8.6](https://github.com/metril/speedtest-tracker/compare/v0.8.5...v0.8.6) (2026-10-05)
 
 
