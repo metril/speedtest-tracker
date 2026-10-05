@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.8.6](https://github.com/metril/speedtest-tracker/compare/v0.8.5...v0.8.6) (2026-10-05)
+
+
+### Bug Fixes
+
+* **api:** harden settings, auth and shutdown paths ([f924cb0](https://github.com/metril/speedtest-tracker/commit/f924cb08084ba3fe0ee8ddedf0d07d87d55f4839))
+* **api:** refine token guards, auth degradation and session purge ([70212f2](https://github.com/metril/speedtest-tracker/commit/70212f227b2e04438070c10c0c88316e50ba93ef))
+* audit fixes across API, engines and UI; automatic release cutting ([06a5387](https://github.com/metril/speedtest-tracker/commit/06a53874657212241a965df1322888018393f668))
+* **engine:** correct alerting, logging and runner robustness ([498b22e](https://github.com/metril/speedtest-tracker/commit/498b22ee55b42174fc315044e0795726766a4e05))
+* **web:** error handling, cache invalidation and live panel ([5dee5ca](https://github.com/metril/speedtest-tracker/commit/5dee5cad825c062b3d4b7792a8651f255a6d5f68))
+
 ## [0.8.5](https://github.com/metril/speedtest-tracker/compare/v0.8.4...v0.8.5) (2026-09-16)
 
 
