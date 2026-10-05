@@ -69,3 +69,32 @@ func TestSummaryCacheCountersAndGaugeFuncs(t *testing.T) {
 		}
 	}
 }
+
+func TestRenamedTargetLeavesNoStaleSeries(t *testing.T) {
+	m := metrics.New()
+	id := int64(3)
+	m.ObserveResult(&store.Result{TargetID: &id, TargetName: "wan", Engine: "ookla", Status: "ok", DownloadBps: 1e9}, "old")
+	m.ObserveResult(&store.Result{TargetID: &id, TargetName: "wan2", Engine: "ookla", Status: "ok", DownloadBps: 2e9}, "new")
+	body := scrape(t, m)
+	if strings.Contains(body, `target="wan",`) || strings.Contains(body, `schedule="old"`) {
+		t.Fatalf("stale series for the renamed target/schedule remain:\n%s", body)
+	}
+	if !strings.Contains(body, `target="wan2"`) {
+		t.Fatalf("new series missing:\n%s", body)
+	}
+}
+
+func TestForgetTargetDeletesOnlyThatTarget(t *testing.T) {
+	m := metrics.New()
+	a, b := int64(1), int64(2)
+	m.ObserveResult(&store.Result{TargetID: &a, TargetName: "a", Engine: "ookla", Status: "ok", DownloadBps: 1, PingMs: 1}, "")
+	m.ObserveResult(&store.Result{TargetID: &b, TargetName: "b", Engine: "ookla", Status: "ok", DownloadBps: 1, PingMs: 1}, "")
+	m.ForgetTarget("1")
+	body := scrape(t, m)
+	if strings.Contains(body, `target_id="1"`) {
+		t.Fatalf("target 1 series remain:\n%s", body)
+	}
+	if !strings.Contains(body, `target_id="2"`) {
+		t.Fatalf("target 2 series wrongly removed:\n%s", body)
+	}
+}

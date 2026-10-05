@@ -221,7 +221,11 @@ func (n *Notifier) process(ctx context.Context, res *store.Result) {
 	for _, e := range evals {
 		n.handleEval(ctx, conf, tgt, res, e, now, quiet, cooldown)
 	}
-	n.clearStaleState(ctx, tgt, evals)
+	if res.Status == "ok" {
+		// A failed result only evaluates the failure metric; clearing the
+		// rest would wipe their Firing/cooldown state.
+		n.clearStaleState(ctx, tgt, evals)
+	}
 
 	// NotifyAlways delivers a summary for every result, independent of
 	// thresholds, cooldown or firing state: each result is its own event,

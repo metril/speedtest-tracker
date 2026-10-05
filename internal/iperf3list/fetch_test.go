@@ -128,9 +128,12 @@ func TestParsePortRange(t *testing.T) {
 		{"0", 0, 0, false},
 		{"-5", 0, 0, false},
 		{" 5201 ", 5201, 0, true},
-		{"5201-abc", 5201, 0, true},     // malformed end still leaves the start usable
-		{"5240-5205", 5240, 0, true},    // end < start: fall back to single port
-		{"5201-70000", 5201, 0, true},   // end > 65535: fall back to single port
+		{"5201-abc", 5201, 0, true},   // malformed end still leaves the start usable
+		{"5240-5205", 5240, 0, true},  // end < start: fall back to single port
+		{"5201-70000", 5201, 0, true}, // end > 65535: fall back to single port
+		{"70000", 0, 0, false},        // start > 65535 is rejected outright
+		{"65536-65540", 0, 0, false},
+		{"65535", 65535, 0, true},
 		{"5201-5201", 5201, 5201, true}, // end == start is a valid (degenerate) range
 	}
 	for _, c := range cases {

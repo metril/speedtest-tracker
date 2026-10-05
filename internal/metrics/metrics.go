@@ -93,11 +93,24 @@ func (m *Registry) ObserveResult(res *store.Result, schedule string) {
 		"engine":    res.Engine,
 		"schedule":  schedule,
 	}
+	// A renamed target or schedule changes the other labels; drop the
+	// target's older series so they don't linger as stale duplicates.
+	m.ForgetTarget(l["target_id"])
 	m.latestDownload.With(l).Set(res.DownloadBps)
 	m.latestUpload.With(l).Set(res.UploadBps)
 	m.latestPing.With(l).Set(res.PingMs)
 	m.latestJitter.With(l).Set(res.JitterMs)
 	m.latestLoss.With(l).Set(res.PacketLossPct)
+}
+
+// ForgetTarget deletes every latest_* series for the target with the given
+// target_id label (all name/engine/schedule combinations), e.g. when the
+// target is deleted.
+func (m *Registry) ForgetTarget(id string) {
+	match := prometheus.Labels{"target_id": id}
+	for _, g := range []*prometheus.GaugeVec{m.latestDownload, m.latestUpload, m.latestPing, m.latestJitter, m.latestLoss} {
+		g.DeletePartialMatch(match)
+	}
 }
 
 // SummaryCacheHit records a /stats/summary request served from cache.

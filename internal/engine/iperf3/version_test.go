@@ -42,3 +42,27 @@ func TestSupportsJSONStream(t *testing.T) {
 		t.Error("want error for missing binary")
 	}
 }
+
+func TestSupportsConnectTimeout(t *testing.T) {
+	for _, c := range []struct {
+		maj, min int
+		want     bool
+	}{{3, 9, false}, {3, 10, true}, {3, 17, true}, {4, 0, true}, {2, 99, false}} {
+		if got := supportsConnectTimeout(c.maj, c.min); got != c.want {
+			t.Errorf("supportsConnectTimeout(%d.%d) = %v, want %v", c.maj, c.min, got, c.want)
+		}
+	}
+}
+
+func TestProbeCachesOnlyOnSuccess(t *testing.T) {
+	bad := exectest.Build(t, "iperf3", `echo garbage`)
+	e := &Engine{Bin: bad}
+	if s, c := e.probe(); s || c || e.probed {
+		t.Fatalf("failed probe = %v %v probed=%v, want false false and not cached", s, c, e.probed)
+	}
+	good := exectest.Build(t, "iperf3", `echo "iperf 3.17.1 (cJSON 1.7.15)"`)
+	e.Bin = good
+	if s, c := e.probe(); !s || !c || !e.probed {
+		t.Fatalf("retry probe = %v %v probed=%v, want true true cached", s, c, e.probed)
+	}
+}

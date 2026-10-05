@@ -488,3 +488,22 @@ func TestSuppressedAlertDoesNotDelayFirstRealAlert(t *testing.T) {
 		t.Fatalf("first real alert was delayed by the suppressed attempt's cooldown: %+v", *got)
 	}
 }
+
+func TestFailedResultKeepsOtherMetricsFiringState(t *testing.T) {
+	cfg := notifications(t, 60)
+	max := 50.0
+	cfg.DefaultThresholds = settings.Thresholds{PingMsMax: &max}
+	n, db, _, _ := newHarness(t, cfg)
+	ctx := context.Background()
+	id := seedTarget(t, db, `{"notify_on_failure":true}`)
+
+	breach := result(id, 100e6)
+	breach.PingMs = 200
+	n.process(ctx, breach)
+	failed := result(id, 0)
+	failed.Status, failed.Error = "failed", "boom"
+	n.process(ctx, failed)
+	if st, ok, _ := db.GetNotifyState(ctx, id, "ping"); !ok || !st.Firing {
+		t.Fatalf("ping state = %+v ok %v, want still firing after a failed result", st, ok)
+	}
+}

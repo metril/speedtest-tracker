@@ -12,7 +12,7 @@ func args(t *testing.T, raw string, stream bool) string {
 	if err != nil {
 		t.Fatalf("parseOptions(%s): %v", raw, err)
 	}
-	return strings.Join(buildArgs(o, stream), " ")
+	return strings.Join(buildArgs(o, stream, false), " ")
 }
 
 func TestBuildArgsTCPDefaults(t *testing.T) {
@@ -135,5 +135,19 @@ func TestParseOptionsPortRangeEndValid(t *testing.T) {
 	// port_range_end == port is fine (a no-op range).
 	if _, err := parseOptions(json.RawMessage(`{"host":"h","port":5201,"port_range_end":5201}`)); err != nil {
 		t.Errorf("parseOptions with port_range_end==port: %v", err)
+	}
+}
+
+func TestBuildArgsConnectTimeout(t *testing.T) {
+	o, err := parseOptions(json.RawMessage(`{"host":"h"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(buildArgs(o, false, true), " ")
+	if want := "-c h -p 5201 -J --connect-timeout 10000 -t 10 -P 1"; got != want {
+		t.Errorf("args = %q, want %q", got, want)
+	}
+	if strings.Contains(strings.Join(buildArgs(o, false, false), " "), "--connect-timeout") {
+		t.Error("--connect-timeout must be gated off for old iperf3")
 	}
 }

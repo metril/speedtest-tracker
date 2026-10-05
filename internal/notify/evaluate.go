@@ -139,12 +139,15 @@ func Evaluate(res *store.Result, t settings.Thresholds) []Eval {
 		return evals
 	}
 
-	if t.DownloadMbpsMin != nil {
+	// iperf3 runs one direction at a time (-R or not): a zero in the other
+	// direction means "not measured", not "0 Mbps".
+	iperfDir := res.Engine == "iperf3"
+	if t.DownloadMbpsMin != nil && !(iperfDir && res.DownloadBps == 0) {
 		v := res.DownloadBps / 1e6
 		evals = append(evals, Eval{Metric: MetricDownload, Breached: v < *t.DownloadMbpsMin,
 			Value: v, Limit: *t.DownloadMbpsMin, Unit: "Mbps"})
 	}
-	if t.UploadMbpsMin != nil {
+	if t.UploadMbpsMin != nil && !(iperfDir && res.UploadBps == 0) {
 		v := res.UploadBps / 1e6
 		evals = append(evals, Eval{Metric: MetricUpload, Breached: v < *t.UploadMbpsMin,
 			Value: v, Limit: *t.UploadMbpsMin, Unit: "Mbps"})

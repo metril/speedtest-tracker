@@ -56,6 +56,12 @@ type Writer struct {
 	// worker via the happens-before edge on that channel close/recv.
 	flushCtx context.Context
 
+	// reqCtx bounds in-flight posts from deliver; Close cancels it so a
+	// stalled POST cannot outlive stop (the payload is then handed to
+	// deliverBounded under flushCtx instead of being dropped).
+	reqCtx    context.Context
+	reqCancel context.CancelFunc
+
 	pushed, failed, dropped atomic.Int64
 }
 
@@ -76,11 +82,14 @@ func New(cfg Config) *Writer {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	reqCtx, reqCancel := context.WithCancel(context.Background())
 	return &Writer{
-		cfg:  cfg,
-		in:   make(chan []byte, cfg.RingSize),
-		stop: make(chan struct{}),
-		done: make(chan struct{}),
+		cfg:       cfg,
+		in:        make(chan []byte, cfg.RingSize),
+		stop:      make(chan struct{}),
+		done:      make(chan struct{}),
+		reqCtx:    reqCtx,
+		reqCancel: reqCancel,
 	}
 }
 
@@ -155,6 +164,7 @@ func (w *Writer) Close(ctx context.Context) error {
 	w.stopOnce.Do(func() {
 		w.flushCtx = ctx
 		close(w.stop)
+		w.reqCancel()
 	})
 	select {
 	case <-w.done:
@@ -184,11 +194,7 @@ func (w *Writer) run() {
 // so a caller that forgets to bound Close's ctx can never turn a dead
 // endpoint into a Close that hangs forever.
 func (w *Writer) drainAndFlush() {
-	parent := w.flushCtx
-	if parent == nil {
-		parent = context.Background()
-	}
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
+	ctx, cancel := w.flushContext()
 	defer cancel()
 	for {
 		select {
@@ -198,6 +204,16 @@ func (w *Writer) drainAndFlush() {
 			return
 		}
 	}
+}
+
+// flushContext returns the shutdown delivery context: flushCtx capped at
+// 10s. Only valid after stop is closed.
+func (w *Writer) flushContext() (context.Context, context.CancelFunc) {
+	parent := w.flushCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	return context.WithTimeout(parent, 10*time.Second)
 }
 
 // deliverBounded retries a batch with exponential backoff until it
@@ -254,9 +270,17 @@ func (w *Writer) deliver(b []byte) {
 			return
 		}
 
-		status, err := w.post(context.Background(), url, auth, b)
+		status, err := w.post(w.reqCtx, url, auth, b)
 		if err == nil && status < 300 {
 			w.pushed.Add(1)
+			return
+		}
+		if w.reqCtx.Err() != nil {
+			// Close cancelled the in-flight post: inconclusive, not a
+			// failure. Hand the batch to the bounded flush instead.
+			ctx, cancel := w.flushContext()
+			defer cancel()
+			w.deliverBounded(ctx, b)
 			return
 		}
 		w.failed.Add(1)
@@ -267,6 +291,11 @@ func (w *Writer) deliver(b []byte) {
 
 		select {
 		case <-w.stop:
+			// Shutdown during backoff: still try to deliver within the
+			// bounded flush window rather than dropping silently.
+			ctx, cancel := w.flushContext()
+			defer cancel()
+			w.deliverBounded(ctx, b)
 			return
 		case <-time.After(backoff):
 		}

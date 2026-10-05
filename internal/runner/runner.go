@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -350,7 +351,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.mu.Unlock()
 
 	if queueFull {
-		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "queue full")
+		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "failed", "queue full")
 		r.publishRun(runID, "failed", "queue full", len(targets), 0)
 		return 0, ErrQueueFull
 	}
@@ -419,6 +420,19 @@ func (r *Runner) execute(j job) {
 	total := st.total
 	r.mu.Unlock()
 
+	// A panic (engine, sink, store) must not strand the run in "running"
+	// or leave the queue's pending count unreleased.
+	finished := false
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.cfg.Logger.Error("runner: panic in queue job", "panic", rec, "run_id", j.runID,
+				"queue", j.queueName, "stack", string(debug.Stack()))
+			if !finished {
+				r.finishQueue(j.runID, true, false)
+			}
+		}
+	}()
+
 	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
 		r.publishRun(j.runID, "running", "", total, r.doneCount(j.runID))
 	}
@@ -436,6 +450,7 @@ func (r *Runner) execute(j job) {
 			r.publishRun(j.runID, "running", "", total, done)
 		}
 	}
+	finished = true
 	r.finishQueue(j.runID, queueFailed, ctx.Err() != nil)
 }
 

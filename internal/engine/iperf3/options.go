@@ -105,12 +105,15 @@ func parseOptions(opts json.RawMessage) (Options, error) {
 
 // buildArgs renders the iperf3 client arguments. stream selects
 // --json-stream (iperf3 >= 3.17) over the single -J summary document.
-func buildArgs(o Options, stream bool) []string {
+func buildArgs(o Options, stream, connTO bool) []string {
 	args := []string{"-c", o.Host, "-p", strconv.Itoa(o.Port)}
 	if stream {
 		args = append(args, "--json-stream")
 	} else {
 		args = append(args, "-J")
+	}
+	if connTO {
+		args = append(args, "--connect-timeout", strconv.Itoa(connectTimeoutMs))
 	}
 	args = append(args, "-t", strconv.Itoa(o.DurationS), "-P", strconv.Itoa(o.Parallel))
 	if o.Reverse {

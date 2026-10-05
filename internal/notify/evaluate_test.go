@@ -173,3 +173,20 @@ func TestParseThresholdsDetectsExplicitNull(t *testing.T) {
 		t.Errorf("nulled = %v, download_mbps_min should not be marked null", nulled)
 	}
 }
+
+func TestEvaluateIperf3SkipsUnmeasuredDirection(t *testing.T) {
+	f := func(v float64) *float64 { return &v }
+	th := settings.Thresholds{DownloadMbpsMin: f(100), UploadMbpsMin: f(100)}
+	evals := notify.Evaluate(&store.Result{Status: "ok", Engine: "iperf3", DownloadBps: 500e6}, th)
+	if len(evals) != 1 || evals[0].Metric != notify.MetricDownload {
+		t.Fatalf("iperf3 download-only = %+v, want only download", evals)
+	}
+	evals = notify.Evaluate(&store.Result{Status: "ok", Engine: "iperf3", UploadBps: 5e6}, th)
+	if len(evals) != 1 || evals[0].Metric != notify.MetricUpload || !evals[0].Breached {
+		t.Fatalf("iperf3 upload-only = %+v, want only a breached upload", evals)
+	}
+	evals = notify.Evaluate(&store.Result{Status: "ok", Engine: "librespeed"}, th)
+	if len(evals) != 2 || !evals[0].Breached {
+		t.Fatalf("other engines keep zero evaluation, got %+v", evals)
+	}
+}

@@ -211,3 +211,64 @@ func TestWithAttrsAndGroupAreCarried(t *testing.T) {
 		t.Fatal("no batch")
 	}
 }
+
+type strer struct{}
+
+func (strer) String() string { return "stringer-text" }
+
+func TestAttrKindsGroupsAndWithGroupOrder(t *testing.T) {
+	bodies := make(chan string, 1)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		bodies <- string(b)
+	}))
+	defer srv.Close()
+	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
+		BatchSize: 1, FlushInterval: 10 * time.Millisecond})
+	h.Configure(true, srv.URL, settings.ExportAuth{}, nil)
+	h.Start()
+	defer h.Close(context.Background())
+	slog.New(h).With("a", 1).WithGroup("g").Info("m",
+		"err", io.EOF, "s", strer{}, slog.Group("grp", "x", 2), "d", time.Second, "b", "c")
+	select {
+	case body := <-bodies:
+		var line map[string]any
+		if err := json.Unmarshal([]byte(strings.TrimSpace(body)), &line); err != nil {
+			t.Fatal(err)
+		}
+		want := map[string]any{"a": float64(1), "g.err": "EOF", "g.s": "stringer-text",
+			"g.grp.x": float64(2), "g.d": "1s", "g.b": "c"}
+		for k, v := range want {
+			if line[k] != v {
+				t.Errorf("line[%q] = %v, want %v (line %v)", k, line[k], v, line)
+			}
+		}
+		if _, ok := line["g.a"]; ok {
+			t.Errorf("With(a).WithGroup(g) must not emit g.a: %v", line)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no batch")
+	}
+}
+
+func TestDisabledAfterQueueingDropsBatchWithoutPost(t *testing.T) {
+	posts := make(chan struct{}, 4)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		posts <- struct{}{}
+	}))
+	defer srv.Close()
+	h := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil),
+		BatchSize: 100, FlushInterval: time.Hour})
+	h.Configure(true, srv.URL, settings.ExportAuth{}, nil)
+	h.Start()
+	slog.New(h).Info("queued")
+	h.Configure(false, srv.URL, settings.ExportAuth{}, nil)
+	if err := h.Close(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-posts:
+		t.Fatal("batch POSTed although shipping was disabled")
+	default:
+	}
+}

@@ -193,3 +193,16 @@ func TestPercentile(t *testing.T) {
 		t.Errorf("p90 of empty = %v, want 0", got)
 	}
 }
+
+func TestJitterDiscardsWarmupSample(t *testing.T) {
+	// The 100ms first sample is TLS/DNS warmup; jitter is over 10,12,10.
+	if got, want := jitterOf([]float64{100, 10, 12, 10}), 2.0; got != want {
+		t.Errorf("jitterOf = %v, want %v", got, want)
+	}
+	if got := jitterOf([]float64{5}); got != 0 {
+		t.Errorf("single sample jitter = %v, want 0", got)
+	}
+	if got := jitterOf([]float64{10, 14}); got != 4 {
+		t.Errorf("two samples jitter = %v, want 4 (nothing left to compare if the first were dropped)", got)
+	}
+}

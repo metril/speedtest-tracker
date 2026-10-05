@@ -239,17 +239,34 @@ func (c *Client) Search(ctx context.Context, req SearchRequest) (SearchResult, e
 		return res, nil
 	}
 
-	res, err := c.sf.Do(key, func() (SearchResult, error) {
-		// Re-check: a concurrent call for the same key may have already
-		// populated the cache while this call waited to become the
-		// leader (or waited on another leader that has since finished).
-		if res, ok := c.cacheGet(key); ok {
-			return res, nil
+	type outcome struct {
+		res SearchResult
+		err error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		res, err := c.sf.Do(key, func() (SearchResult, error) {
+			// Re-check: a concurrent call for the same key may have already
+			// populated the cache while this call waited to become the
+			// leader (or waited on another leader that has since finished).
+			if res, ok := c.cacheGet(key); ok {
+				return res, nil
+			}
+			return c.searchAndCache(q, country, key)
+		})
+		done <- outcome{res, err}
+	}()
+	var res SearchResult
+	select {
+	case o := <-done:
+		if o.err != nil {
+			return SearchResult{}, o.err
 		}
-		return c.searchAndCache(q, country, key)
-	})
-	if err != nil {
-		return SearchResult{}, err
+		res = o.res
+	case <-ctx.Done():
+		// The shared flight keeps running for its other callers; this
+		// caller just stops waiting.
+		return SearchResult{}, ctx.Err()
 	}
 	res.Servers = capServers(res.Servers, req.Limit)
 	return res, nil
@@ -271,9 +288,11 @@ func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 	}
 
 	var point *geoPoint
+	degraded := false // a geocode/near-search failure must not be cached for cacheTTL
 	if looksLikePostcode(q) {
 		gp, gerr := c.geocodePostcode(ctx, q, country)
 		if gerr != nil {
+			degraded = true
 			c.logDebug("ooklaweb: nominatim geocode failed", "query", q, "country", country, "error", gerr)
 		} else if gp != nil {
 			point = gp
@@ -282,6 +301,7 @@ func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 	if point == nil && len(servers) < geocodeHitThreshold {
 		gp, gerr := c.geocode(ctx, q)
 		if gerr != nil {
+			degraded = true
 			c.logDebug("ooklaweb: geocode failed", "query", q, "error", gerr)
 		} else if gp != nil {
 			point = gp
@@ -297,6 +317,7 @@ func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 		// zero servers even though Near was successfully resolved).
 		// speedtest.net's servers API supports lat=/lon= directly.
 		if more, merr := c.searchNear(ctx, point.Lat, point.Lon); merr != nil {
+			degraded = true
 			c.logDebug("ooklaweb: geocoded coordinate re-search failed", "query", q, "lat", point.Lat, "lon", point.Lon, "error", merr)
 		} else {
 			servers = mergeServers(servers, more)
@@ -309,7 +330,9 @@ func (c *Client) searchAndCache(q, country, key string) (SearchResult, error) {
 	if point != nil {
 		res.Near = nearName(point.Name)
 	}
-	c.cacheSet(key, res)
+	if !degraded {
+		c.cacheSet(key, res)
+	}
 	return res, nil
 }
 
