@@ -1305,6 +1305,8 @@ func TestPutSettingsEnginesValidationAndTokenBlock(t *testing.T) {
 		{"list url garbage", false, map[string]any{"iperf3_list_url": "not a url"}, 400},
 		{"token sets speedtest_bin", true, map[string]any{"speedtest_bin": "/tmp/evil"}, 403},
 		{"token sets iperf3_bin", true, map[string]any{"iperf3_bin": "iperf3"}, 403},
+		{"token sets list url", true, map[string]any{"iperf3_list_url": "http://169.254.169.254/x.json"}, 403},
+		{"token unchanged bins and list url", true, map[string]any{"speedtest_bin": "speedtest", "iperf3_bin": "/usr/bin/iperf3", "iperf3_list_url": ""}, 200},
 		{"token sets other engine field", true, map[string]any{"server_list_ttl_seconds": 120}, 200},
 	} {
 		req := jsonRequest(t, http.MethodPut, "/api/v1/settings", map[string]any{"engines": tc.body})

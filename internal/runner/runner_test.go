@@ -1349,6 +1349,10 @@ func TestExecutePanicMarksRunFailed(t *testing.T) {
 	if run := waitForRun(t, db, runID); run.Status != "failed" {
 		t.Errorf("run status = %q, want failed after a panic", run.Status)
 	}
+	results, _, _ := db.ListResults(ctx, store.ResultFilter{TargetID: &tid})
+	if len(results) != 1 || results[0].Status != "failed" || results[0].Error != "internal error: engine blew up" {
+		t.Errorf("panic result rows = %+v, want one failed row with internal error", results)
+	}
 	// The queue worker must have survived: a normal run still completes.
 	if run := waitForRun(t, db, enqueueFakeTarget(t, r, db)); run.Status != "done" {
 		t.Errorf("follow-up run status = %q, want done", run.Status)

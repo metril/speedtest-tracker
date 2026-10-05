@@ -65,6 +65,7 @@ jobs:
 
   build:
     needs: release-please
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

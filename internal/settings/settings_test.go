@@ -523,3 +523,29 @@ func TestSeedFromEnvIntegrationsVMAuthType(t *testing.T) {
 		t.Errorf("vm_auth_type = %q, want the env seed to fill a missing key", got.VMAuthType)
 	}
 }
+
+func TestSetSkipsNotifyWhenUnchanged(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.Set(ctx, "test.k", "a"); err != nil {
+		t.Fatal(err)
+	}
+	ch, cancel := s.Subscribe()
+	defer cancel()
+	if err := s.Set(ctx, "test.k", "a"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case k := <-ch:
+		t.Fatalf("unchanged Set notified %q", k)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := s.Set(ctx, "test.k", "b"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("changed Set did not notify")
+	}
+}

@@ -409,6 +409,10 @@ func (s *Store) Set(ctx context.Context, key string, value any) error {
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
+	// Unchanged values are still written but never notified, so a client
+	// re-saving a whole section does not trigger live reloads.
+	var old string
+	_ = s.db.Read.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&old)
 	if _, err := s.db.Write.ExecContext(ctx, `
 		INSERT INTO settings(key,value) VALUES(?,?)
 		ON CONFLICT(key) DO UPDATE SET
@@ -417,7 +421,9 @@ func (s *Store) Set(ctx context.Context, key string, value any) error {
 		key, string(encoded)); err != nil {
 		return fmt.Errorf("set %s: %w", key, err)
 	}
-	s.notify(key)
+	if old != string(encoded) {
+		s.notify(key)
+	}
 	return nil
 }
 

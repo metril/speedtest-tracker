@@ -158,7 +158,8 @@ func oidcConfigFromAuth(a settings.Auth) oidcauth.Config {
 // narrowing trusted_proxies for forward_auth (an unrelated auth.* change)
 // never triggers a fresh discovery request against the oidc issuer.
 type oidcProviderHolder struct {
-	ptr atomic.Pointer[oidcauth.Provider]
+	ptr      atomic.Pointer[oidcauth.Provider]
+	retrying atomic.Bool // a retryOIDCBuild loop is running
 
 	mu      sync.Mutex
 	applied oidcauth.Config
@@ -214,6 +215,7 @@ func (h *oidcProviderHolder) apply(ctx context.Context, a settings.Auth) error {
 const (
 	oidcRetryInitial = 10 * time.Second
 	oidcRetryMax     = 5 * time.Minute
+	authDebounce     = 50 * time.Millisecond
 )
 
 // retryOIDCBuild keeps trying to build the OIDC provider after a failed
@@ -241,6 +243,18 @@ func retryOIDCBuild(ctx context.Context, st *settings.Store, h *oidcProviderHold
 		}
 		delay = min(delay*2, max)
 	}
+}
+
+// ensureOIDCRetry starts a retryOIDCBuild loop unless one is already
+// running, so boot and the settings watcher can both call it freely.
+func (h *oidcProviderHolder) ensureOIDCRetry(ctx context.Context, st *settings.Store, logger *slog.Logger) {
+	if !h.retrying.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		defer h.retrying.Store(false)
+		retryOIDCBuild(ctx, st, h, logger, oidcRetryInitial, oidcRetryMax)
+	}()
 }
 
 // authConfigurer is the subset of *auth.Middleware that applyAuth needs.
@@ -274,8 +288,10 @@ func (a *authAdapter) Mode() string {
 }
 
 // seedMode reports mode as the adapter's mode without configuring the
-// middleware. It is for boot, when applying the stored config failed: the
-// adapter should still report the stored mode rather than "open".
+// middleware. It is for boot, when applying the stored config failed: an
+// unconfigured auth.Middleware treats its unset mode as unknown and falls
+// back to token auth, so the caller seeds AuthModeToken (the real
+// middleware behavior) rather than the stored mode or "open".
 func (a *authAdapter) seedMode(mode string) {
 	if mode != "" {
 		a.mode.Store(mode)
@@ -353,10 +369,36 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 	reg *engine.Registry, servers *ookla.ServerList, sch *scheduler.Scheduler,
 	vm *vmpush.Writer, vl *vlpush.Handler, nt *notify.Notifier, am authConfigurer, oidcHolder *oidcProviderHolder, metricsEnabled *atomic.Bool,
 	ir *iperf3list.Refresher, logger *slog.Logger, sessions ...sessionPurger) {
+	// auth.* changes are debounced: a PUT writes several keys that arrive
+	// as one coalesced batch, and the purge/apply must run once for it.
+	var authFlush <-chan time.Time
+	var authKeys []string
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-authFlush:
+			authFlush = nil
+			changed := strings.Join(authKeys, ",")
+			authKeys = nil
+			// Any auth change invalidates every existing session, so
+			// nobody stays logged in under a config that no longer
+			// admits them.
+			for _, sp := range sessions {
+				if _, err := sp.DeleteAllSessions(ctx); err != nil {
+					logger.Error("delete sessions after auth change", "error", err)
+				}
+			}
+			if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
+				logger.Error("reload auth", "error", err)
+				continue
+			}
+			if oidcHolder != nil && oidcHolder.Load() == nil {
+				if a, err := st.Auth(ctx); err == nil && a.Mode == settings.AuthModeOIDC {
+					oidcHolder.ensureOIDCRetry(ctx, st, logger)
+				}
+			}
+			logger.Info("auth reloaded", "changed_keys", changed)
 		case key, open := <-changes:
 			if !open {
 				return
@@ -410,19 +452,11 @@ func watchSettings(ctx context.Context, st *settings.Store, changes <-chan strin
 				}
 				logger.Info("integrations reloaded", "changed_key", key)
 			case strings.HasPrefix(key, "auth."):
-				// Any auth change invalidates every existing session, so
-				// nobody stays logged in under a config that no longer
-				// admits them.
-				for _, sp := range sessions {
-					if _, err := sp.DeleteAllSessions(ctx); err != nil {
-						logger.Error("delete sessions after auth change", "error", err)
-					}
+				// Store.Set only notifies on a real value change.
+				authKeys = append(authKeys, key)
+				if authFlush == nil {
+					authFlush = time.After(authDebounce)
 				}
-				if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
-					logger.Error("reload auth", "error", err)
-					continue
-				}
-				logger.Info("auth reloaded", "changed_key", key)
 			}
 		}
 	}
@@ -579,9 +613,8 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	// instead keeps whatever config was last successfully applied.
 	if err := applyAuth(ctx, st, am, oidcHolder, logger); err != nil {
 		logger.Error("apply auth settings", "error", err)
-		if stored, serr := st.Auth(ctx); serr == nil {
-			am.seedMode(stored.Mode)
-		}
+		logger.Warn("auth degraded: stored auth config could not be applied; middleware falls back to token auth until it is fixed")
+		am.seedMode(settings.AuthModeToken)
 	}
 
 	engineCfg, err := st.Engines(ctx)
@@ -671,7 +704,7 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 		watchSettings(watchCtx, st, changes, level, reg, servers, sch, vm, vlHandler, nt, am, oidcHolder, &metricsEnabled, iperf3Refresher, logger, db)
 	}()
 	if a, err := st.Auth(ctx); err == nil && a.Mode == settings.AuthModeOIDC && oidcHolder.Load() == nil {
-		go retryOIDCBuild(watchCtx, st, oidcHolder, logger, oidcRetryInitial, oidcRetryMax)
+		oidcHolder.ensureOIDCRetry(watchCtx, st, logger)
 	}
 	go pj.Run(watchCtx)
 	go iperf3Refresher.Run(watchCtx)

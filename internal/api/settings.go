@@ -308,12 +308,23 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Likewise an API token must not repoint the engine binaries: those
-	// paths are executed by the server, so letting a token set them would
-	// turn a leaked token into command execution.
-	if e := body.Engines; e != nil && (e.SpeedtestBin != nil || e.Iperf3Bin != nil) && requestAuthIsToken(r) {
-		errForbidden(w, "engine binary paths require a forward-auth or open-mode session")
-		return
+	// Likewise an API token must not repoint the engine binaries or the
+	// iperf3 list URL: the binaries are executed and the URL is fetched by
+	// the server, so letting a token set them would turn a leaked token
+	// into command execution or SSRF. Only a changed value is refused, so
+	// a GET-then-PUT round trip of unchanged values still succeeds.
+	if e := body.Engines; e != nil && requestAuthIsToken(r) {
+		cur, err := d.Settings.Engines(ctx)
+		if err != nil {
+			internalError(w, d.Logger, "load engines settings", err)
+			return
+		}
+		if (e.SpeedtestBin != nil && *e.SpeedtestBin != cur.SpeedtestBin) ||
+			(e.Iperf3Bin != nil && *e.Iperf3Bin != cur.Iperf3Bin) ||
+			(e.Iperf3ListURL != nil && *e.Iperf3ListURL != cur.Iperf3ListURL) {
+			errForbidden(w, "engine binary paths and iperf3_list_url require a forward-auth or open-mode session")
+			return
+		}
 	}
 
 	current, err := d.Settings.Integrations(ctx)
