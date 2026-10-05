@@ -179,7 +179,8 @@ func TestExchangeUserInfoSubjectMismatch(t *testing.T) {
 
 func TestExchangeEmailVerified(t *testing.T) {
 	idp := oidctest.NewIDP(t)
-	p := newProvider(t, idp, Config{})
+	// AllowedEmails is set: that is the only rule email_verified gates.
+	p := newProvider(t, idp, Config{AllowedEmails: []string{"a@example.com"}})
 	for name, tc := range map[string]struct {
 		claims     map[string]any
 		wantForbid bool
@@ -225,7 +226,9 @@ func TestAuthorizeMatrix(t *testing.T) {
 		{"admin group matched case-insensitive", Config{AdminGroup: "LocalAdmin"}, Claims{Groups: []string{"localadmin"}}, true, false},
 		{"missing groups with allowed groups", Config{AllowedGroups: []string{"users"}}, Claims{}, false, true},
 		{"allowed emails matched case-insensitive", Config{AllowedEmails: []string{"A@Example.com"}}, Claims{Email: "a@example.com"}, true, false},
-		{"email explicitly unverified", Config{}, Claims{Email: "a@example.com", EmailUnverified: true}, false, true},
+		{"email unverified, no restrictions", Config{}, Claims{Email: "a@example.com", EmailUnverified: true}, true, false},
+		{"email unverified, allowed groups only", Config{AllowedGroups: []string{"localadmin"}, AdminGroup: "localadmin"}, Claims{Email: "a@example.com", EmailUnverified: true, Groups: []string{"localadmin"}}, true, false},
+		{"email unverified with allowed emails", Config{AllowedEmails: []string{"a@example.com"}}, Claims{Email: "a@example.com", EmailUnverified: true}, false, true},
 		{"allowed emails not matched", Config{AllowedEmails: []string{"a@example.com"}}, Claims{Email: "b@example.com"}, false, true},
 	}
 	for _, tc := range tests {
