@@ -172,7 +172,7 @@ provider.
 | `ST_AUTH_OIDC_SCOPES` | `[]` | Extra scopes beyond `openid profile email`, JSON array |
 | `ST_AUTH_OIDC_GROUPS_CLAIM` | `groups` | Claim carrying the user's groups |
 | `ST_AUTH_OIDC_ALLOWED_GROUPS` | `[]` | JSON array; empty allows every group |
-| `ST_AUTH_OIDC_ALLOWED_EMAILS` | `[]` | JSON array; empty allows every email |
+| `ST_AUTH_OIDC_ALLOWED_EMAILS` | `[]` | JSON array; empty allows every email. An email the provider marks `email_verified: false` is refused by this rule only; group-based access ignores that flag |
 | `ST_AUTH_SESSION_TTL_HOURS` | `24` | Session cookie lifetime |
 
 `auth.admin_group` (`ST_AUTH_ADMIN_GROUP`) applies here too: members are

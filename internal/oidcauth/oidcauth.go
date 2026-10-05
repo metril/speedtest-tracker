@@ -44,7 +44,9 @@ type Claims struct {
 
 	// EmailUnverified is true when the ID token carries email_verified
 	// explicitly set to false. A missing claim leaves it false: many
-	// providers omit it.
+	// providers omit it. It only affects Config.Authorize when the
+	// allowed-emails rule is in use, since that is the one rule that trusts
+	// the email address.
 	EmailUnverified bool
 
 	// UserInfoErr is set when the groups claim was absent from the ID
@@ -280,16 +282,15 @@ func extractGroups(raw map[string]any, claim string) []string {
 // reports whether cl belongs to the admin group. It returns ErrForbidden
 // when a non-empty AllowedGroups has no overlap with cl.Groups, or a
 // non-empty AllowedEmails does not contain cl.Email. Group and email
-// comparisons are case-insensitive. It also returns ErrForbidden when the
-// ID token's email_verified is false.
+// comparisons are case-insensitive. When AllowedEmails is in use, an
+// email the provider marked unverified (email_verified: false) is also
+// refused; group-based or unrestricted access ignores that flag, since
+// the groups come from the IdP, not from the self-asserted address.
 func (c Config) Authorize(cl Claims) (isAdmin bool, err error) {
-	if cl.EmailUnverified {
-		return false, ErrForbidden
-	}
 	if len(c.AllowedGroups) > 0 && !intersects(cl.Groups, c.AllowedGroups) {
 		return false, ErrForbidden
 	}
-	if len(c.AllowedEmails) > 0 && !containsFold(c.AllowedEmails, cl.Email) {
+	if len(c.AllowedEmails) > 0 && (cl.EmailUnverified || !containsFold(c.AllowedEmails, cl.Email)) {
 		return false, ErrForbidden
 	}
 	isAdmin = c.AdminGroup == "" || containsFold(cl.Groups, c.AdminGroup)
