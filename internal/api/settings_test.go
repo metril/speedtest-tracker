@@ -1,6 +1,7 @@
 package api
 
 import (
+	"reflect"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -1383,5 +1384,40 @@ func TestOIDCHandlersNilSafeWithoutProvider(t *testing.T) {
 	rec := do(t, h, http.MethodGet, "/auth/oidc/start", nil)
 	if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Location"), "oidc_not_configured") {
 		t.Fatalf("status %d Location %q", rec.Code, rec.Header().Get("Location"))
+	}
+}
+
+func TestPutSettingsIsAtomic(t *testing.T) {
+	h, db, st := newTestAPIWithSettings(t)
+	ctx := context.Background()
+	for _, ev := range []string{"INSERT", "UPDATE"} {
+		if _, err := db.Write.ExecContext(ctx, `CREATE TRIGGER fail_ttl_`+strings.ToLower(ev)+
+			` BEFORE `+ev+` ON settings WHEN NEW.key = 'auth.session_ttl_hours'
+			BEGIN SELECT RAISE(ABORT, 'boom'); END`); err != nil {
+			t.Fatal(err)
+		}
+	}
+	before, _ := st.General(ctx)
+	ch, cancel := st.Subscribe()
+	defer cancel()
+	for len(ch) > 0 {
+		<-ch
+	}
+
+	rec := do(t, h, http.MethodPut, "/api/v1/settings", map[string]any{
+		"general": map[string]any{"log_level": "debug", "units": "MB/s"},
+		"auth":    map[string]any{"session_ttl_hours": 12},
+	})
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status %d, want 500: %s", rec.Code, rec.Body)
+	}
+	after, _ := st.General(ctx)
+	if !reflect.DeepEqual(after, before) {
+		t.Fatalf("general changed despite failed PUT: %+v -> %+v", before, after)
+	}
+	select {
+	case k := <-ch:
+		t.Fatalf("unexpected settings event %q", k)
+	case <-time.After(100 * time.Millisecond):
 	}
 }
