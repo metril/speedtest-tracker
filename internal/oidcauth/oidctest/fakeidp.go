@@ -29,8 +29,10 @@ type IDP struct {
 	server *httptest.Server
 	key    *rsa.PrivateKey
 
-	mu    sync.Mutex
-	codes map[string]map[string]any
+	mu       sync.Mutex
+	codes    map[string]map[string]any
+	userinfo map[string]any // served by /userinfo; nil means 404
+	requests map[string]int // per-path request counts
 }
 
 // NewIDP starts a fake IdP and registers its shutdown with t.Cleanup.
@@ -45,13 +47,15 @@ func NewIDP(t testing.TB) *IDP {
 		ClientSecret: "test-secret",
 		key:          key,
 		codes:        map[string]map[string]any{},
+		requests:     map[string]int{},
 	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/.well-known/openid-configuration", idp.discovery)
 	mux.HandleFunc("/jwks", idp.jwks)
 	mux.HandleFunc("/token", idp.token)
-	idp.server = httptest.NewServer(mux)
+	mux.HandleFunc("/userinfo", idp.userInfo)
+	idp.server = httptest.NewServer(idp.count(mux))
 	t.Cleanup(idp.server.Close)
 	idp.URL = idp.server.URL
 	return idp
@@ -65,6 +69,36 @@ func (idp *IDP) Issue(code string, claims map[string]any) {
 	idp.mu.Lock()
 	defer idp.mu.Unlock()
 	idp.codes[code] = claims
+}
+
+// SetUserInfo sets the claims /userinfo returns for the test access token.
+// Until it is called, /userinfo answers 404 — so a test that never sets
+// it exercises the "ID token only" path. sub defaults to "test-subject"
+// unless claims sets it.
+func (idp *IDP) SetUserInfo(claims map[string]any) {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	merged := map[string]any{"sub": "test-subject"}
+	for k, v := range claims {
+		merged[k] = v
+	}
+	idp.userinfo = merged
+}
+
+// Requests reports how many requests the fake has served for path.
+func (idp *IDP) Requests(path string) int {
+	idp.mu.Lock()
+	defer idp.mu.Unlock()
+	return idp.requests[path]
+}
+
+func (idp *IDP) count(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		idp.mu.Lock()
+		idp.requests[r.URL.Path]++
+		idp.mu.Unlock()
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Client returns an *http.Client that trusts the fake IdP's httptest
@@ -81,6 +115,7 @@ func (idp *IDP) discovery(w http.ResponseWriter, r *http.Request) {
 		"authorization_endpoint":                idp.URL + "/authorize",
 		"token_endpoint":                        idp.URL + "/token",
 		"jwks_uri":                              idp.URL + "/jwks",
+		"userinfo_endpoint":                     idp.URL + "/userinfo",
 		"id_token_signing_alg_values_supported": []string{"RS256"},
 		"response_types_supported":              []string{"code"},
 		"subject_types_supported":               []string{"public"},
@@ -154,6 +189,21 @@ func (idp *IDP) token(w http.ResponseWriter, r *http.Request) {
 		"token_type":   "bearer",
 		"id_token":     idToken,
 	})
+}
+
+func (idp *IDP) userInfo(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Authorization") != "Bearer test-access-token" {
+		http.Error(w, "invalid_token", http.StatusUnauthorized)
+		return
+	}
+	idp.mu.Lock()
+	claims := idp.userinfo
+	idp.mu.Unlock()
+	if claims == nil {
+		http.NotFound(w, r)
+		return
+	}
+	writeJSON(w, claims)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

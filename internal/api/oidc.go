@@ -148,7 +148,19 @@ func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
 
 	isAdmin, err := provider.Config().Authorize(claims)
 	if errors.Is(err, oidcauth.ErrForbidden) {
-		d.logOIDCFailure(r, "forbidden", err, provider, redirectURI)
+		// Log what the provider actually sent next to what was configured:
+		// "forbidden" alone leaves the operator guessing whether the groups
+		// claim was missing, misnamed, or simply did not match.
+		d.logOIDCFailure(r, "forbidden", err, provider, redirectURI,
+			"subject", claims.Subject,
+			"email", claims.Email,
+			"email_unverified", claims.EmailUnverified,
+			"groups", claims.Groups,
+			"groups_claim", provider.Config().GroupsClaim,
+			"allowed_groups", provider.Config().AllowedGroups,
+			"allowed_emails", provider.Config().AllowedEmails,
+			"userinfo_err", claims.UserInfoErr,
+		)
 		redirectLoginError(w, r, "forbidden")
 		return
 	}
@@ -254,8 +266,8 @@ func sanitizeReturnTo(returnTo string) string {
 // logOIDCFailure logs a swallowed OIDC callback failure before the caller
 // redirects the browser to the login page with an opaque error code, so
 // the underlying cause (bad state, exchange failure, forbidden claims,
-// ...) is not lost.
-func (d Deps) logOIDCFailure(r *http.Request, code string, err error, provider *oidcauth.Provider, redirectURI string) {
+// ...) is not lost. extra holds additional slog key/value pairs.
+func (d Deps) logOIDCFailure(r *http.Request, code string, err error, provider *oidcauth.Provider, redirectURI string, extra ...any) {
 	if d.Logger == nil {
 		return
 	}
@@ -263,6 +275,7 @@ func (d Deps) logOIDCFailure(r *http.Request, code string, err error, provider *
 	if err != nil {
 		args = append(args, "err", err)
 	}
+	args = append(args, extra...)
 	d.Logger.Warn("oidc login failed", args...)
 }
 

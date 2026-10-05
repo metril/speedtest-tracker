@@ -98,6 +98,8 @@ func TestExchangeMissingGroupsClaim(t *testing.T) {
 	idp := oidctest.NewIDP(t)
 	p := newProvider(t, idp, Config{GroupsClaim: "groups"})
 
+	// No userinfo configured on the fake: the fallback 404s, which must
+	// not fail the login, only be reported on the claims.
 	idp.Issue("code-none", map[string]any{"sub": "user-3"})
 	claims, err := p.Exchange(context.Background(), "code-none", "verifier-1", "https://app.example/auth/oidc/callback")
 	if err != nil {
@@ -105,6 +107,73 @@ func TestExchangeMissingGroupsClaim(t *testing.T) {
 	}
 	if len(claims.Groups) != 0 {
 		t.Fatalf("groups = %v, want empty", claims.Groups)
+	}
+	if claims.UserInfoErr == nil {
+		t.Fatal("UserInfoErr = nil, want the failed userinfo fetch reported")
+	}
+	if n := idp.Requests("/userinfo"); n != 1 {
+		t.Fatalf("userinfo requests = %d, want 1", n)
+	}
+}
+
+func TestExchangeGroupsFromUserInfo(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	p := newProvider(t, idp, Config{GroupsClaim: "groups"})
+
+	// Authentik with "Include claims in ID token" off: the ID token has
+	// only sub/email, everything else comes from userinfo.
+	idp.Issue("code-ui", map[string]any{"sub": "user-4", "email": "idtoken@example.com"})
+	idp.SetUserInfo(map[string]any{
+		"sub":                "user-4",
+		"email":              "userinfo@example.com",
+		"name":               "User Four",
+		"preferred_username": "user4",
+		"groups":             []any{"localadmin"},
+	})
+	claims, err := p.Exchange(context.Background(), "code-ui", "verifier-1", "https://app.example/auth/oidc/callback")
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if claims.UserInfoErr != nil {
+		t.Fatalf("UserInfoErr = %v", claims.UserInfoErr)
+	}
+	if len(claims.Groups) != 1 || claims.Groups[0] != "localadmin" {
+		t.Fatalf("groups = %v, want [localadmin]", claims.Groups)
+	}
+	if claims.Email != "idtoken@example.com" {
+		t.Fatalf("email = %q, want the ID token value to win", claims.Email)
+	}
+	if claims.Name != "User Four" || claims.PreferredUsername != "user4" {
+		t.Fatalf("claims = %+v, want name/username filled from userinfo", claims)
+	}
+}
+
+func TestExchangeSkipsUserInfoWhenIDTokenHasGroups(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	p := newProvider(t, idp, Config{GroupsClaim: "groups"})
+
+	idp.Issue("code-skip", map[string]any{"sub": "user-5", "groups": []any{}})
+	idp.SetUserInfo(map[string]any{"sub": "user-5", "groups": []any{"localadmin"}})
+	claims, err := p.Exchange(context.Background(), "code-skip", "verifier-1", "https://app.example/auth/oidc/callback")
+	if err != nil {
+		t.Fatalf("Exchange: %v", err)
+	}
+	if len(claims.Groups) != 0 {
+		t.Fatalf("groups = %v, want the (empty) ID token claim", claims.Groups)
+	}
+	if n := idp.Requests("/userinfo"); n != 0 {
+		t.Fatalf("userinfo requests = %d, want 0", n)
+	}
+}
+
+func TestExchangeUserInfoSubjectMismatch(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	p := newProvider(t, idp, Config{GroupsClaim: "groups"})
+
+	idp.Issue("code-sub", map[string]any{"sub": "user-6"})
+	idp.SetUserInfo(map[string]any{"sub": "someone-else", "groups": []any{"localadmin"}})
+	if _, err := p.Exchange(context.Background(), "code-sub", "verifier-1", "https://app.example/auth/oidc/callback"); err == nil {
+		t.Fatal("Exchange accepted a userinfo document for a different subject")
 	}
 }
 
@@ -152,6 +221,9 @@ func TestAuthorizeMatrix(t *testing.T) {
 		{"admin group not matched", Config{AdminGroup: "admins"}, Claims{Groups: []string{"x"}}, false, false},
 		{"allowed groups matched", Config{AllowedGroups: []string{"users"}}, Claims{Groups: []string{"users"}}, true, false},
 		{"allowed groups not matched", Config{AllowedGroups: []string{"users"}}, Claims{Groups: []string{"other"}}, false, true},
+		{"allowed groups matched case-insensitive", Config{AllowedGroups: []string{"LocalAdmin"}}, Claims{Groups: []string{"localadmin"}}, true, false},
+		{"admin group matched case-insensitive", Config{AdminGroup: "LocalAdmin"}, Claims{Groups: []string{"localadmin"}}, true, false},
+		{"missing groups with allowed groups", Config{AllowedGroups: []string{"users"}}, Claims{}, false, true},
 		{"allowed emails matched case-insensitive", Config{AllowedEmails: []string{"A@Example.com"}}, Claims{Email: "a@example.com"}, true, false},
 		{"email explicitly unverified", Config{}, Claims{Email: "a@example.com", EmailUnverified: true}, false, true},
 		{"allowed emails not matched", Config{AllowedEmails: []string{"a@example.com"}}, Claims{Email: "b@example.com"}, false, true},

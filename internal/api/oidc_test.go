@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -41,7 +43,7 @@ type oidcTestEnv struct {
 	setNow func(time.Time)
 }
 
-func newOIDCTestAPI(t *testing.T, cfgOverride func(*oidcauth.Config)) *oidcTestEnv {
+func newOIDCTestAPI(t *testing.T, cfgOverride func(*oidcauth.Config), depsOverride ...func(*Deps)) *oidcTestEnv {
 	t.Helper()
 	idp := oidctest.NewIDP(t)
 	codec, err := oidcauth.NewStateCodec()
@@ -80,6 +82,9 @@ func newOIDCTestAPI(t *testing.T, cfgOverride func(*oidcauth.Config)) *oidcTestE
 			t.Fatal(err)
 		}
 		d.Auth = authAdapter{mw: mw, mode: settings.AuthModeOIDC}
+		for _, fn := range depsOverride {
+			fn(d)
+		}
 	})
 	env.h = h
 	env.db = db
@@ -233,8 +238,11 @@ func TestOIDCCallbackStateMismatch(t *testing.T) {
 }
 
 func TestOIDCCallbackForbiddenGroup(t *testing.T) {
+	var logBuf bytes.Buffer
 	env := newOIDCTestAPI(t, func(cfg *oidcauth.Config) {
 		cfg.AllowedGroups = []string{"staff"}
+	}, func(d *Deps) {
+		d.Logger = slog.New(slog.NewTextHandler(&logBuf, nil))
 	})
 	stateCookie, state := oidcStart(t, env.h, "/dashboard")
 	env.idp.Issue("code-2", map[string]any{"sub": "user-2", "groups": []any{"other"}})
@@ -246,6 +254,51 @@ func TestOIDCCallbackForbiddenGroup(t *testing.T) {
 
 	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/login?error=forbidden" {
 		t.Fatalf("callback = %d %q, want 302 /login?error=forbidden", rec.Code, rec.Header().Get("Location"))
+	}
+	// The log must show what was received against what was configured, so
+	// an operator can tell a missing/misnamed groups claim from a mismatch.
+	logged := logBuf.String()
+	for _, want := range []string{"reason=forbidden", "groups=[other]", "allowed_groups=[staff]", "groups_claim=groups", "subject=user-2"} {
+		if !strings.Contains(logged, want) {
+			t.Fatalf("forbidden log missing %q:\n%s", want, logged)
+		}
+	}
+}
+
+func TestOIDCCallbackGroupsFromUserInfo(t *testing.T) {
+	// Authentik default: groups come back from userinfo, not the ID token.
+	env := newOIDCTestAPI(t, func(cfg *oidcauth.Config) {
+		cfg.AllowedGroups = []string{"localadmin"}
+		cfg.AdminGroup = "localadmin"
+	})
+	stateCookie, state := oidcStart(t, env.h, "/dashboard")
+	env.idp.Issue("code-ui", map[string]any{"sub": "user-ui", "email": "ui@example.com"})
+	env.idp.SetUserInfo(map[string]any{"sub": "user-ui", "groups": []any{"LocalAdmin"}})
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=code-ui&state="+state, nil)
+	req.AddCookie(stateCookie)
+	rec := httptest.NewRecorder()
+	env.h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusFound || rec.Header().Get("Location") != "/dashboard" {
+		t.Fatalf("callback = %d %q, want 302 /dashboard", rec.Code, rec.Header().Get("Location"))
+	}
+
+	var sessionCookie *http.Cookie
+	for _, c := range rec.Result().Cookies() {
+		if c.Name == auth.SessionCookie {
+			sessionCookie = c
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("no session cookie set")
+	}
+	meReq := httptest.NewRequest(http.MethodGet, "/api/v1/me", nil)
+	meReq.AddCookie(sessionCookie)
+	meRec := httptest.NewRecorder()
+	env.h.ServeHTTP(meRec, meReq)
+	body := meRec.Body.String()
+	if meRec.Code != http.StatusOK || !strings.Contains(body, `"groups":["LocalAdmin"]`) || !strings.Contains(body, `"is_admin":true`) {
+		t.Fatalf("/api/v1/me = %d %s", meRec.Code, body)
 	}
 }
 
