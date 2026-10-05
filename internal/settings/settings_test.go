@@ -549,3 +549,104 @@ func TestSetSkipsNotifyWhenUnchanged(t *testing.T) {
 		t.Fatal("changed Set did not notify")
 	}
 }
+
+func recvKey(t *testing.T, ch <-chan string) (string, bool) {
+	t.Helper()
+	select {
+	case k := <-ch:
+		return k, true
+	case <-time.After(100 * time.Millisecond):
+		return "", false
+	}
+}
+
+func TestTxCommitNotifiesOnlyChangedKeys(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.Set(ctx, "test.same", 1); err != nil {
+		t.Fatal(err)
+	}
+	ch, cancel := s.Subscribe()
+	defer cancel()
+	for len(ch) > 0 {
+		<-ch
+	}
+
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := tx.Set(ctx, "test.same", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Set(ctx, "test.new", 2); err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := recvKey(t, ch); ok {
+		t.Fatalf("notified %q before Commit", k)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	k, ok := recvKey(t, ch)
+	if !ok || k != "test.new" {
+		t.Fatalf("got %q ok=%v, want test.new", k, ok)
+	}
+	if k, ok := recvKey(t, ch); ok {
+		t.Fatalf("unexpected extra notification %q", k)
+	}
+}
+
+func TestTxRollbackLeavesValuesAndSendsNothing(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.Set(ctx, "test.k", "old"); err != nil {
+		t.Fatal(err)
+	}
+	ch, cancel := s.Subscribe()
+	defer cancel()
+	for len(ch) > 0 {
+		<-ch
+	}
+
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Set(ctx, "test.k", "new"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Set(ctx, "test.other", "x"); err != nil {
+		t.Fatal(err)
+	}
+	tx.Rollback()
+	tx.Rollback() // idempotent
+
+	raw, _, err := s.Get(ctx, "test.k")
+	if err != nil || string(raw) != `"old"` {
+		t.Fatalf("test.k = %s err=%v, want \"old\"", raw, err)
+	}
+	if _, ok, _ := s.Get(ctx, "test.other"); ok {
+		t.Fatal("test.other persisted after Rollback")
+	}
+	if k, ok := recvKey(t, ch); ok {
+		t.Fatalf("notified %q after Rollback", k)
+	}
+}
+
+func TestTxSetAfterCommitErrors(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Set(ctx, "test.k", 1); err == nil {
+		t.Fatal("Set after Commit succeeded, want error")
+	}
+	tx.Rollback() // no-op after commit
+}

@@ -405,15 +405,51 @@ func (s *Store) Get(ctx context.Context, key string) (json.RawMessage, bool, err
 
 // Set JSON-encodes value, stores it under key and notifies subscribers.
 func (s *Store) Set(ctx context.Context, key string, value any) error {
+	tx, err := s.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := tx.Set(ctx, key, value); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// Tx groups several Set calls into one SQLite transaction. Change
+// notifications are deferred until Commit, and dropped on Rollback.
+type Tx struct {
+	s       *Store
+	tx      *sql.Tx
+	changed []string
+	done    bool
+}
+
+// Begin starts a write transaction. The store has a single write
+// connection, so the caller must not call Store.Set (or anything else
+// that writes) until Commit or Rollback.
+func (s *Store) Begin(ctx context.Context) (*Tx, error) {
+	tx, err := s.db.Write.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin settings tx: %w", err)
+	}
+	return &Tx{s: s, tx: tx}, nil
+}
+
+// Set encodes and upserts value under key inside the transaction. Unchanged
+// values are still written but never notified, so a client re-saving a whole
+// section does not trigger live reloads.
+func (t *Tx) Set(ctx context.Context, key string, value any) error {
+	if t.done {
+		return errors.New("settings tx already finished")
+	}
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", key, err)
 	}
-	// Unchanged values are still written but never notified, so a client
-	// re-saving a whole section does not trigger live reloads.
 	var old string
-	_ = s.db.Read.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&old)
-	if _, err := s.db.Write.ExecContext(ctx, `
+	_ = t.tx.QueryRowContext(ctx, `SELECT value FROM settings WHERE key=?`, key).Scan(&old)
+	if _, err := t.tx.ExecContext(ctx, `
 		INSERT INTO settings(key,value) VALUES(?,?)
 		ON CONFLICT(key) DO UPDATE SET
 			value=excluded.value,
@@ -422,9 +458,35 @@ func (s *Store) Set(ctx context.Context, key string, value any) error {
 		return fmt.Errorf("set %s: %w", key, err)
 	}
 	if old != string(encoded) {
-		s.notify(key)
+		t.changed = append(t.changed, key)
 	}
 	return nil
+}
+
+// Commit commits the transaction, then notifies each changed key. A failed
+// commit notifies nothing.
+func (t *Tx) Commit() error {
+	if t.done {
+		return errors.New("settings tx already finished")
+	}
+	t.done = true
+	if err := t.tx.Commit(); err != nil {
+		return fmt.Errorf("commit settings tx: %w", err)
+	}
+	for _, k := range t.changed {
+		t.s.notify(k)
+	}
+	return nil
+}
+
+// Rollback aborts the transaction. It is safe to defer and is a no-op
+// after Commit.
+func (t *Tx) Rollback() {
+	if t.done {
+		return
+	}
+	t.done = true
+	_ = t.tx.Rollback()
 }
 
 // General returns the General section, falling back to the seeded defaults

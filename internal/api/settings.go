@@ -270,6 +270,11 @@ func maskAuthSecrets(a *settings.Auth) {
 	}
 }
 
+// setter is the write half of settings.Store / settings.Tx.
+type setter interface {
+	Set(context.Context, string, any) error
+}
+
 // putSettings validates the full partial document before writing anything,
 // so a rejected PUT is a no-op, then writes each provided field and
 // responds with the same (masked) document getSettings would produce.
@@ -390,29 +395,39 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// Everything below writes through one transaction so a mid-way failure
+	// leaves no partial update. Nothing between Begin and Commit may touch
+	// d.Settings: there is a single write connection (it would deadlock) and
+	// reads would see the old data.
+	tx, err := d.Settings.Begin(ctx)
+	if err != nil {
+		internalError(w, d.Logger, "begin settings transaction", err)
+		return
+	}
+	defer tx.Rollback()
 	// Validation above ran over the full document up front, so a Set
 	// failure here is an infrastructure failure (DB write error), not a
 	// user error: it is safe to report 500 even mid-way through.
 	if g := body.General; g != nil {
 		writes := []func() error{
-			func() error { return setPtr(ctx, d.Settings, settings.KeyBaseURL, g.BaseURL) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyTimezone, g.Timezone) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyUnits, g.Units) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyLogLevel, g.LogLevel) },
+			func() error { return setPtr(ctx, tx, settings.KeyBaseURL, g.BaseURL) },
+			func() error { return setPtr(ctx, tx, settings.KeyTimezone, g.Timezone) },
+			func() error { return setPtr(ctx, tx, settings.KeyUnits, g.Units) },
+			func() error { return setPtr(ctx, tx, settings.KeyLogLevel, g.LogLevel) },
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyRetentionDaysResults, g.RetentionDaysResults)
+				return setPtr(ctx, tx, settings.KeyRetentionDaysResults, g.RetentionDaysResults)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyRetentionDaysRuns, g.RetentionDaysRuns)
+				return setPtr(ctx, tx, settings.KeyRetentionDaysRuns, g.RetentionDaysRuns)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyRetentionPruneIntervalMinutes, g.RetentionPruneIntervalMinutes)
+				return setPtr(ctx, tx, settings.KeyRetentionPruneIntervalMinutes, g.RetentionPruneIntervalMinutes)
 			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeySLADownloadMbps, g.SLADownloadMbps) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeySLAUploadMbps, g.SLAUploadMbps) },
+			func() error { return setPtr(ctx, tx, settings.KeySLADownloadMbps, g.SLADownloadMbps) },
+			func() error { return setPtr(ctx, tx, settings.KeySLAUploadMbps, g.SLAUploadMbps) },
 			// Always written (not via setPtr): see settingsBody.General's
 			// SLATolerancePct doc comment — nil clears the stored value.
-			func() error { return d.Settings.Set(ctx, settings.KeySLATolerancePct, g.SLATolerancePct) },
+			func() error { return tx.Set(ctx, settings.KeySLATolerancePct, g.SLATolerancePct) },
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -424,28 +439,28 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	if e := body.Engines; e != nil {
 		writes := []func() error{
-			func() error { return setPtr(ctx, d.Settings, settings.KeySpeedtestBin, e.SpeedtestBin) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyIperf3Bin, e.Iperf3Bin) },
+			func() error { return setPtr(ctx, tx, settings.KeySpeedtestBin, e.SpeedtestBin) },
+			func() error { return setPtr(ctx, tx, settings.KeyIperf3Bin, e.Iperf3Bin) },
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyOoklaAcceptLicense, e.OoklaAcceptLicense)
+				return setPtr(ctx, tx, settings.KeyOoklaAcceptLicense, e.OoklaAcceptLicense)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyOoklaAcceptGDPR, e.OoklaAcceptGDPR)
+				return setPtr(ctx, tx, settings.KeyOoklaAcceptGDPR, e.OoklaAcceptGDPR)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyServerListTTLSeconds, e.ServerListTTLSeconds)
+				return setPtr(ctx, tx, settings.KeyServerListTTLSeconds, e.ServerListTTLSeconds)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyDefaultOoklaOptions, e.DefaultOoklaOptions)
+				return setPtr(ctx, tx, settings.KeyDefaultOoklaOptions, e.DefaultOoklaOptions)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyDefaultCloudflareOptions, e.DefaultCloudflareOptions)
+				return setPtr(ctx, tx, settings.KeyDefaultCloudflareOptions, e.DefaultCloudflareOptions)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyDefaultIperf3Options, e.DefaultIperf3Options)
+				return setPtr(ctx, tx, settings.KeyDefaultIperf3Options, e.DefaultIperf3Options)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyIperf3ListURL, e.Iperf3ListURL)
+				return setPtr(ctx, tx, settings.KeyIperf3ListURL, e.Iperf3ListURL)
 			},
 		}
 		for _, w2 := range writes {
@@ -458,10 +473,10 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	if i := body.Integrations; i != nil {
 		writes := []func() error{
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMEnabled, i.VMEnabled) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMURL, i.VMURL) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthHeader, i.VMAuthHeader) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthType, i.VMAuthType) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMEnabled, i.VMEnabled) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMURL, i.VMURL) },
+			func() error { return setSecret(ctx, tx, settings.KeyVMAuthHeader, i.VMAuthHeader) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMAuthType, i.VMAuthType) },
 			// A request that explicitly writes vm_auth_type takes over
 			// from the legacy vm_auth_header fallback (VMAuth() only
 			// consults it when VMAuthType is unset/none), but the UI can
@@ -475,33 +490,33 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 				if i.VMAuthType == nil {
 					return nil
 				}
-				return d.Settings.Set(ctx, settings.KeyVMAuthHeader, "")
+				return tx.Set(ctx, settings.KeyVMAuthHeader, "")
 			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthUsername, i.VMAuthUsername) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthPassword, i.VMAuthPassword) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthToken, i.VMAuthToken) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMAuthHeaderName, i.VMAuthHeaderName) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVMAuthHeaderValue, i.VMAuthHeaderValue) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVMExtraLabels, i.VMExtraLabels) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLEnabled, i.VLEnabled) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLURL, i.VLURL) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthHeader, i.VLAuthHeader) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthType, i.VLAuthType) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMAuthUsername, i.VMAuthUsername) },
+			func() error { return setSecret(ctx, tx, settings.KeyVMAuthPassword, i.VMAuthPassword) },
+			func() error { return setSecret(ctx, tx, settings.KeyVMAuthToken, i.VMAuthToken) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMAuthHeaderName, i.VMAuthHeaderName) },
+			func() error { return setSecret(ctx, tx, settings.KeyVMAuthHeaderValue, i.VMAuthHeaderValue) },
+			func() error { return setPtr(ctx, tx, settings.KeyVMExtraLabels, i.VMExtraLabels) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLEnabled, i.VLEnabled) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLURL, i.VLURL) },
+			func() error { return setSecret(ctx, tx, settings.KeyVLAuthHeader, i.VLAuthHeader) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLAuthType, i.VLAuthType) },
 			// See the matching vm_auth_type write above: clears the
 			// legacy header the same way when vl_auth_type is written.
 			func() error {
 				if i.VLAuthType == nil {
 					return nil
 				}
-				return d.Settings.Set(ctx, settings.KeyVLAuthHeader, "")
+				return tx.Set(ctx, settings.KeyVLAuthHeader, "")
 			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthUsername, i.VLAuthUsername) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthPassword, i.VLAuthPassword) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthToken, i.VLAuthToken) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLAuthHeaderName, i.VLAuthHeaderName) },
-			func() error { return setSecret(ctx, d.Settings, settings.KeyVLAuthHeaderValue, i.VLAuthHeaderValue) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyVLStreamFields, i.VLStreamFields) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyMetricsEnabled, i.MetricsEnabled) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLAuthUsername, i.VLAuthUsername) },
+			func() error { return setSecret(ctx, tx, settings.KeyVLAuthPassword, i.VLAuthPassword) },
+			func() error { return setSecret(ctx, tx, settings.KeyVLAuthToken, i.VLAuthToken) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLAuthHeaderName, i.VLAuthHeaderName) },
+			func() error { return setSecret(ctx, tx, settings.KeyVLAuthHeaderValue, i.VLAuthHeaderValue) },
+			func() error { return setPtr(ctx, tx, settings.KeyVLStreamFields, i.VLStreamFields) },
+			func() error { return setPtr(ctx, tx, settings.KeyMetricsEnabled, i.MetricsEnabled) },
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -513,17 +528,17 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	if n := body.Notifications; n != nil {
 		writes := []func() error{
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyEnabled, n.Enabled) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyChannels, mergedChannels) },
+			func() error { return setPtr(ctx, tx, settings.KeyNotifyEnabled, n.Enabled) },
+			func() error { return setPtr(ctx, tx, settings.KeyNotifyChannels, mergedChannels) },
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyNotifyDefaultThresholds, n.DefaultThresholds)
+				return setPtr(ctx, tx, settings.KeyNotifyDefaultThresholds, n.DefaultThresholds)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyNotifyCooldownMinutes, n.CooldownMinutes)
+				return setPtr(ctx, tx, settings.KeyNotifyCooldownMinutes, n.CooldownMinutes)
 			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyQuietStart, n.QuietHoursStart) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyQuietEnd, n.QuietHoursEnd) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyNotifyRecovery, n.NotifyRecovery) },
+			func() error { return setPtr(ctx, tx, settings.KeyNotifyQuietStart, n.QuietHoursStart) },
+			func() error { return setPtr(ctx, tx, settings.KeyNotifyQuietEnd, n.QuietHoursEnd) },
+			func() error { return setPtr(ctx, tx, settings.KeyNotifyRecovery, n.NotifyRecovery) },
 		}
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
@@ -535,40 +550,40 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 
 	if a := body.Auth; a != nil {
 		writes := []func() error{
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthMode, a.Mode) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthUserHeader, a.UserHeader) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthGroupsHeader, a.GroupsHeader) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthMode, a.Mode) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthUserHeader, a.UserHeader) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthGroupsHeader, a.GroupsHeader) },
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthGroupsSeparator, a.GroupsSeparator)
+				return setPtr(ctx, tx, settings.KeyAuthGroupsSeparator, a.GroupsSeparator)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthTrustedProxies, a.TrustedProxies)
+				return setPtr(ctx, tx, settings.KeyAuthTrustedProxies, a.TrustedProxies)
 			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAdminGroup, a.AdminGroup) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthAllowTokens, a.AllowTokens) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCIssuer, a.OIDCIssuer) },
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCClientID, a.OIDCClientID) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthAdminGroup, a.AdminGroup) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthAllowTokens, a.AllowTokens) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthOIDCIssuer, a.OIDCIssuer) },
+			func() error { return setPtr(ctx, tx, settings.KeyAuthOIDCClientID, a.OIDCClientID) },
 			func() error {
-				return setSecret(ctx, d.Settings, settings.KeyAuthOIDCClientSecret, a.OIDCClientSecret)
-			},
-			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCRedirectBaseURL, a.OIDCRedirectBaseURL)
-			},
-			func() error { return setPtr(ctx, d.Settings, settings.KeyAuthOIDCScopes, a.OIDCScopes) },
-			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCGroupsClaim, a.OIDCGroupsClaim)
+				return setSecret(ctx, tx, settings.KeyAuthOIDCClientSecret, a.OIDCClientSecret)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCAllowedGroups, a.OIDCAllowedGroups)
+				return setPtr(ctx, tx, settings.KeyAuthOIDCRedirectBaseURL, a.OIDCRedirectBaseURL)
+			},
+			func() error { return setPtr(ctx, tx, settings.KeyAuthOIDCScopes, a.OIDCScopes) },
+			func() error {
+				return setPtr(ctx, tx, settings.KeyAuthOIDCGroupsClaim, a.OIDCGroupsClaim)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCAllowedEmails, a.OIDCAllowedEmails)
+				return setPtr(ctx, tx, settings.KeyAuthOIDCAllowedGroups, a.OIDCAllowedGroups)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthOIDCDisplayClaim, a.OIDCDisplayClaim)
+				return setPtr(ctx, tx, settings.KeyAuthOIDCAllowedEmails, a.OIDCAllowedEmails)
 			},
 			func() error {
-				return setPtr(ctx, d.Settings, settings.KeyAuthSessionTTLHours, a.SessionTTLHours)
+				return setPtr(ctx, tx, settings.KeyAuthOIDCDisplayClaim, a.OIDCDisplayClaim)
+			},
+			func() error {
+				return setPtr(ctx, tx, settings.KeyAuthSessionTTLHours, a.SessionTTLHours)
 			},
 		}
 		for _, w2 := range writes {
@@ -579,6 +594,10 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if err := tx.Commit(); err != nil {
+		internalError(w, d.Logger, "commit settings", err)
+		return
+	}
 	d.getSettings(w, r)
 }
 
@@ -1133,7 +1152,7 @@ func bearerTokenFromRequest(r *http.Request) (string, bool) {
 }
 
 // setPtr writes *v under key when v is non-nil; a nil v is a no-op.
-func setPtr[T any](ctx context.Context, s *settings.Store, key string, v *T) error {
+func setPtr[T any](ctx context.Context, s setter, key string, v *T) error {
 	if v == nil {
 		return nil
 	}
@@ -1243,7 +1262,7 @@ func channelHasMaskedSecret(ch settings.Channel) bool {
 // setSecret writes *v under key when v is non-nil, unless it equals
 // settings.MaskedSecret — the client echoing the mask back means "keep the
 // stored value", not "set the secret to the literal mask".
-func setSecret(ctx context.Context, s *settings.Store, key string, v *string) error {
+func setSecret(ctx context.Context, s setter, key string, v *string) error {
 	if v == nil || *v == settings.MaskedSecret {
 		return nil
 	}
