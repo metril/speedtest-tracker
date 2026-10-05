@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -106,6 +106,32 @@ it('does not fetch a previous-period history until "Compare with previous period
   await waitFor(() => expect(fetchMock).toHaveBeenCalled());
   const urlsAfterToggle = fetchMock.mock.calls.map(([input]) => String(input));
   expect(urlsAfterToggle.some((u) => u.includes('/targets/1/history') && u.includes('offset=1'))).toBe(true);
+});
+
+it('shows a target that appears after mount instead of hiding it', async () => {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={qc}>
+      <MemoryRouter><Dashboard /></MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await screen.findByText('home');
+
+  const second = { ...summary.targets[0], target_id: 2, target_name: 'work' };
+  const twoTargets = { ...summary, targets: [summary.targets[0], second] };
+  const base = fetchMock.getMockImplementation()!;
+  fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.includes('/stats/summary')) return jsonResponse(twoTargets);
+    if (url.includes('/targets/2/history')) return jsonResponse({ ...history, target_id: 2 });
+    return base(input);
+  });
+  await act(async () => { await qc.invalidateQueries({ queryKey: ['summary'] }); });
+
+  const chip = await screen.findByRole('button', { name: 'work' });
+  expect(chip).toHaveAttribute('aria-pressed', 'true');
+  await userEvent.click(chip);
+  expect(chip).toHaveAttribute('aria-pressed', 'false');
 });
 
 describe('mergePrevByOffset', () => {

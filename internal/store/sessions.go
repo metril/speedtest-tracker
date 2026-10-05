@@ -106,6 +106,17 @@ func (s *Store) DeleteSession(ctx context.Context, id string) error {
 	return nil
 }
 
+// DeleteAllSessions removes every session, returning the number removed.
+// Used when auth settings change so no session outlives the config it was
+// issued under.
+func (s *Store) DeleteAllSessions(ctx context.Context) (int64, error) {
+	res, err := s.Write.ExecContext(ctx, `DELETE FROM sessions`)
+	if err != nil {
+		return 0, fmt.Errorf("delete all sessions: %w", err)
+	}
+	return res.RowsAffected()
+}
+
 // DeleteExpiredSessions removes every session whose expires_at is at or
 // before now, returning the number removed.
 func (s *Store) DeleteExpiredSessions(ctx context.Context, now time.Time) (int64, error) {

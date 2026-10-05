@@ -1,9 +1,12 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
 	"errors"
+	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -74,9 +77,19 @@ func storeError(w http.ResponseWriter, logger *slog.Logger, what string, err err
 	return true
 }
 
-// decodeJSON reads a JSON request body, answering 400 on malformed input.
+// decodeJSON reads a JSON request body, answering 415 on a non-JSON
+// Content-Type and 400 on malformed input.
 // It reports whether decoding succeeded.
 func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	// A non-JSON Content-Type (e.g. a cross-site text/plain form POST) is
+	// refused outright; an absent one is tolerated for non-browser clients.
+	if ct := r.Header.Get("Content-Type"); ct != "" {
+		mt, _, err := mime.ParseMediaType(ct)
+		if err != nil || mt != "application/json" {
+			writeError(w, http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
+			return false
+		}
+	}
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(dst); err != nil {
@@ -84,4 +97,24 @@ func decodeJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
 		return false
 	}
 	return true
+}
+
+// decodeOptionalJSON is decodeJSON for endpoints whose body may be absent.
+// An empty body (Content-Length 0, or an unknown length - chunked - that
+// turns out to be empty) leaves dst untouched and succeeds.
+func decodeOptionalJSON(w http.ResponseWriter, r *http.Request, dst any) bool {
+	switch {
+	case r.ContentLength == 0:
+		return true
+	case r.ContentLength < 0:
+		br := bufio.NewReader(r.Body)
+		if _, err := br.Peek(1); err == io.EOF {
+			return true
+		}
+		r.Body = struct {
+			io.Reader
+			io.Closer
+		}{br, r.Body}
+	}
+	return decodeJSON(w, r, dst)
 }

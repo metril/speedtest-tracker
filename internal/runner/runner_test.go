@@ -1327,3 +1327,34 @@ func TestQueueDepthsTracksRenameWithoutSplittingChannel(t *testing.T) {
 		t.Errorf("QueueDepths = %+v, want key %q", depths, "wan-renamed")
 	}
 }
+
+type panicEngine struct{}
+
+func (panicEngine) Name() string                   { return "panicker" }
+func (panicEngine) Validate(json.RawMessage) error { return nil }
+func (panicEngine) Run(context.Context, json.RawMessage, func(engine.Progress)) (*engine.Result, error) {
+	panic("engine blew up")
+}
+
+func TestExecutePanicMarksRunFailed(t *testing.T) {
+	r, db := newTestRunnerWith(t, func(c *Config) { c.Registry.Register(panicEngine{}) })
+	ctx := context.Background()
+	tid, _ := db.CreateTarget(ctx, &store.Target{
+		Name: "p", Engine: "panicker", Enabled: true, QueueID: 1, Options: json.RawMessage(`{}`),
+	})
+	runID, err := r.Enqueue(ctx, RunRequest{Trigger: "manual", TargetIDs: []int64{tid}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run := waitForRun(t, db, runID); run.Status != "failed" {
+		t.Errorf("run status = %q, want failed after a panic", run.Status)
+	}
+	results, _, _ := db.ListResults(ctx, store.ResultFilter{TargetID: &tid})
+	if len(results) != 1 || results[0].Status != "failed" || results[0].Error != "internal error: engine blew up" {
+		t.Errorf("panic result rows = %+v, want one failed row with internal error", results)
+	}
+	// The queue worker must have survived: a normal run still completes.
+	if run := waitForRun(t, db, enqueueFakeTarget(t, r, db)); run.Status != "done" {
+		t.Errorf("follow-up run status = %q, want done", run.Status)
+	}
+}

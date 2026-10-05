@@ -68,3 +68,19 @@ func TestHubCancelUnsubscribes(t *testing.T) {
 		t.Error("channel should be closed after cancel")
 	}
 }
+
+func TestHubCloseClosesSubscribers(t *testing.T) {
+	h := NewHub()
+	ch, cancel := h.Subscribe()
+	defer cancel()
+	h.Close()
+	h.Close() // idempotent
+	if _, open := <-ch; open {
+		t.Fatal("subscriber channel still open after Close")
+	}
+	late, _ := h.Subscribe()
+	if _, open := <-late; open {
+		t.Fatal("Subscribe after Close returned an open channel")
+	}
+	h.Publish(Event{Type: EventRun}) // must not panic
+}

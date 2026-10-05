@@ -135,7 +135,7 @@ func parsePortRange(raw string) (start, end int, ok bool) {
 		last = raw[idx+1:]
 	}
 	n, err := strconv.Atoi(strings.TrimSpace(first))
-	if err != nil || n <= 0 {
+	if err != nil || n <= 0 || n > 65535 {
 		return 0, 0, false
 	}
 	if last == "" {

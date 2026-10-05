@@ -290,7 +290,38 @@ func TestCloseDrainsQueuedBatches(t *testing.T) {
 	if err := <-closeErr; err != nil {
 		t.Fatalf("Close: %v", err)
 	}
-	waitFor(t, func() bool { return len(hits) == 3 })
+	// Batch 1's in-flight POST is cancelled by Close and re-delivered, so the
+	// server may see it twice; every batch must still be pushed exactly once.
+	waitFor(t, func() bool { return len(hits) >= 3 && wr.Stats().Pushed == 3 })
+}
+
+// TestCloseDuringBackoffHandsBatchToBoundedDelivery: a batch failing with a
+// retryable status when Close arrives mid-backoff must get one more bounded
+// delivery attempt (and succeed) instead of being dropped silently.
+func TestCloseDuringBackoffHandsBatchToBoundedDelivery(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if calls.Add(1) == 1 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	wr := vmpush.New(vmpush.Config{Logger: discardLogger(), MaxBackoff: time.Hour})
+	wr.Configure(true, srv.URL, settings.ExportAuth{}, nil)
+	wr.Start()
+	wr.OnResult(context.Background(), okResult(), vmpush.Meta{})
+	waitFor(t, func() bool { return calls.Load() >= 1 && wr.Stats().Failed >= 1 })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := wr.Close(ctx); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	if s := wr.Stats(); s.Pushed != 1 {
+		t.Fatalf("stats = %+v, want the backing-off batch pushed once on shutdown", s)
+	}
 }
 
 func TestOnResultNeverBlocks(t *testing.T) {

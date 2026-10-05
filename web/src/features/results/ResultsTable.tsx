@@ -1,5 +1,5 @@
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button } from '../../components/ui/button';
 import { ConfirmDialog } from '../../components/ConfirmDialog';
 import { ErrorDialog } from '../../components/ErrorDialog';
@@ -11,12 +11,14 @@ interface Props {
   onDelete: (id: number) => void;
   onReexecute: (id: number) => void;
   onTag: (id: number, tags: string[]) => void;
+  /** Result id to scroll to and highlight (e.g. from a ?result_id= link). */
+  highlightId?: number;
 }
 
 const ROW_HEIGHT = 40;
 
 /** ResultsTable renders the result rows through a virtualiser. */
-export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
+export function ResultsTable({ rows, onDelete, onReexecute, onTag, highlightId }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const [tagging, setTagging] = useState<number | null>(null);
   const [draft, setDraft] = useState('');
@@ -29,6 +31,13 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
     estimateSize: () => ROW_HEIGHT,
     overscan: 12,
   });
+
+  useEffect(() => {
+    if (highlightId === undefined) return;
+    const index = rows.findIndex((r) => r.id === highlightId);
+    if (index >= 0) virtualizer.scrollToIndex(index, { align: 'center' });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlightId, rows]);
 
   return (
     <div className="overflow-x-auto rounded border border-line">
@@ -51,8 +60,12 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
               <div
                 key={r.id}
                 data-index={item.index}
+                data-result-id={r.id}
+                data-highlighted={r.id === highlightId ? 'true' : undefined}
                 role="row"
-                className="absolute left-0 grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2 border-b border-line px-3 py-2 text-sm hover:bg-raised"
+                className={`absolute left-0 grid w-full grid-cols-[1fr_5rem_7rem_7rem_5rem_1fr_9rem] items-center gap-2 border-b border-line px-3 py-2 text-sm hover:bg-raised ${
+                  r.id === highlightId ? 'bg-accent/15 ring-1 ring-inset ring-accent' : ''
+                }`}
                 style={{ transform: `translateY(${item.start}px)`, height: ROW_HEIGHT }}
               >
                 {failed ? (
@@ -90,6 +103,11 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                       onChange={(e) => setDraft(e.target.value)}
                       onBlur={() => setTagging(null)}
                       onKeyDown={(e) => {
+                        if (e.key === 'Escape') {
+                          e.stopPropagation();
+                          setTagging(null);
+                          return;
+                        }
                         if (e.key !== 'Enter') return;
                         onTag(r.id, draft.split(',').map((s) => s.trim()).filter(Boolean));
                         setTagging(null);
@@ -97,6 +115,7 @@ export function ResultsTable({ rows, onDelete, onReexecute, onTag }: Props) {
                     />
                   ) : (
                     <button className="text-xs text-faint hover:text-accent"
+                      aria-label={`Edit tags for ${r.target_name}`}
                       onClick={() => { setTagging(r.id); setDraft(r.tags.join(', ')); }}>
                       + tag
                     </button>

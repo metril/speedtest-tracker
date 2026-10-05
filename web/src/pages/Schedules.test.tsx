@@ -56,6 +56,20 @@ describe('Schedules page', () => {
     await waitFor(() => expect(screen.getByText('done')).toBeInTheDocument());
   });
 
+  it('shows an error when Run now fails', async () => {
+    const base = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      if (String(input).startsWith('/api/v1/schedules/1/run')) {
+        return jsonResponse({ error: { code: 'conflict', message: 'queue is full' } }, 409);
+      }
+      return base(input, init);
+    });
+    wrap();
+    await screen.findByText('nightly');
+    await userEvent.click(screen.getAllByRole('button', { name: 'Run now' })[0]);
+    expect(await screen.findByRole('alert')).toHaveTextContent('queue is full');
+  });
+
   it('renders the batched last run without fetching runs per schedule', async () => {
     const listRuns = vi.spyOn(api, 'listRuns');
     wrap();

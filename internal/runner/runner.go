@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"runtime/debug"
 	"sync"
 	"time"
 
@@ -350,7 +351,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.mu.Unlock()
 
 	if queueFull {
-		_ = r.cfg.Store.SetRunStatus(ctx, runID, "failed", "queue full")
+		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "failed", "queue full")
 		r.publishRun(runID, "failed", "queue full", len(targets), 0)
 		return 0, ErrQueueFull
 	}
@@ -419,23 +420,63 @@ func (r *Runner) execute(j job) {
 	total := st.total
 	r.mu.Unlock()
 
+	// A panic (engine, sink, store) must not strand the run in "running"
+	// or leave the queue's pending count unreleased.
+	finished := false
+	var cur *store.Target // target in flight, nil between targets
+	rowWritten := false   // cur's result row has landed
+	defer func() {
+		if rec := recover(); rec != nil {
+			r.cfg.Logger.Error("runner: panic in queue job", "panic", rec, "run_id", j.runID,
+				"queue", j.queueName, "stack", string(debug.Stack()))
+			if cur != nil && !rowWritten {
+				// Give the target a failed row and advance the stepper so
+				// the live progress reaches total.
+				tid := cur.ID
+				snap := j.snapshots[cur.ID]
+				if len(snap) == 0 {
+					snap = cur.Options
+				}
+				if len(snap) == 0 {
+					snap = json.RawMessage(`{}`)
+				}
+				res := &store.Result{
+					RunID: &j.runID, TargetID: &tid, TargetName: cur.Name, Engine: cur.Engine,
+					OptionsSnapshot: snap, StartedAt: r.cfg.Now().UTC().Format("2006-01-02T15:04:05.000Z"),
+					Status: "failed", Error: fmt.Sprintf("internal error: %v", rec),
+				}
+				r.storeResult(res, ResultMeta{RunID: j.runID, QueueName: j.queueName}, nil)
+				if total, done, ok := r.markTargetDone(j.runID); ok {
+					r.publishRun(j.runID, "running", "", total, done)
+				}
+			}
+			if !finished {
+				r.finishQueue(j.runID, true, false)
+			}
+		}
+	}()
+
 	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
 		r.publishRun(j.runID, "running", "", total, r.doneCount(j.runID))
 	}
 
 	queueFailed := false
-	for _, t := range j.targets {
+	for i := range j.targets {
+		t := j.targets[i]
 		if ctx.Err() != nil {
 			break
 		}
-		if failed := r.runTarget(ctx, j.runID, j.queueName, t, j.snapshots[t.ID]); failed {
+		cur, rowWritten = &t, false
+		if failed := r.runTarget(ctx, j.runID, j.queueName, t, j.snapshots[t.ID], &rowWritten); failed {
 			queueFailed = true
 		}
+		cur = nil
 		// The result row for this target has landed: advance the stepper.
 		if total, done, ok := r.markTargetDone(j.runID); ok {
 			r.publishRun(j.runID, "running", "", total, done)
 		}
 	}
+	finished = true
 	r.finishQueue(j.runID, queueFailed, ctx.Err() != nil)
 }
 
@@ -443,7 +484,7 @@ func (r *Runner) execute(j job) {
 // reports whether the result failed. When override is non-empty (a
 // re-execute replaying a stored result's options_snapshot), it is used as
 // the run's options instead of the target's current live options.
-func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t store.Target, override json.RawMessage) bool {
+func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t store.Target, override json.RawMessage, rowWritten *bool) bool {
 	started := r.cfg.Now().UTC()
 	options := t.Options
 	if len(override) > 0 {
@@ -481,7 +522,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t sto
 	eng, ok := r.cfg.Registry.Get(t.Engine)
 	if !ok {
 		res.Status, res.Error = "failed", fmt.Sprintf("unknown engine %q", t.Engine)
-		r.storeResult(res, meta)
+		r.storeResult(res, meta, rowWritten)
 		return true
 	}
 
@@ -513,7 +554,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t sto
 	res.DurationMs = r.cfg.Now().UTC().Sub(started).Milliseconds()
 	if err != nil {
 		res.Status, res.Error = "failed", err.Error()
-		r.storeResult(res, meta)
+		r.storeResult(res, meta, rowWritten)
 		return true
 	}
 	res.Status = "ok"
@@ -526,7 +567,7 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t sto
 	// A failure to persist the result means the run must not end up "done"
 	// with no result row for this target, even though the test itself
 	// succeeded.
-	return !r.storeResult(res, meta)
+	return !r.storeResult(res, meta, rowWritten)
 }
 
 // storeResult writes the row, publishes the result event, and notifies the
@@ -534,12 +575,15 @@ func (r *Runner) runTarget(ctx context.Context, runID int64, queue string, t sto
 // called after InsertResult (so res.ID is set) and after the hub publish,
 // with context.Background() since the run's own ctx may already be
 // canceled by the time the result lands.
-func (r *Runner) storeResult(res *store.Result, meta ResultMeta) bool {
+func (r *Runner) storeResult(res *store.Result, meta ResultMeta, rowWritten *bool) bool {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if _, err := r.cfg.Store.InsertResult(ctx, res); err != nil {
 		r.cfg.Logger.Error("store result", "error", err, "target", res.TargetName, "run_id", res.RunID)
 		return false
+	}
+	if rowWritten != nil {
+		*rowWritten = true
 	}
 	r.cfg.Hub.Publish(r.cfg.Hub.Marshal(sse.EventResult, res))
 	r.cfg.Sink.OnResult(context.Background(), res, meta)

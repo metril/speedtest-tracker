@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/metril/speedtest-tracker/internal/engine"
 	"github.com/metril/speedtest-tracker/internal/engine/execx"
@@ -43,24 +44,40 @@ type Engine struct {
 	// the single -J summary document. Used by tests.
 	ForceSummary bool
 
-	probeOnce   sync.Once
+	probeMu     sync.Mutex
+	probed      bool
 	probeStream bool
+	probeConnTO bool
 }
 
-// supportsStream probes --json-stream capability once per Engine and caches
-// the result. A failed or unparseable probe falls back to summary mode (-J)
-// rather than aborting the run: some iperf3 builds don't accept --version
-// the way we expect, but can still run a test.
-func (e *Engine) supportsStream(ctx context.Context) bool {
-	e.probeOnce.Do(func() {
-		ok, err := supportsJSONStream(ctx, e.Bin)
-		if err != nil {
-			e.probeStream = false
-			return
-		}
-		e.probeStream = ok
-	})
-	return e.probeStream
+// probeTimeout bounds the `--version` probe independently of the run's ctx.
+const probeTimeout = 5 * time.Second
+
+// connectTimeoutMs bounds the initial control connection so an unreachable
+// server fails fast instead of hanging until the run's own deadline.
+const connectTimeoutMs = 10000
+
+// probe detects --json-stream (>=3.17) and --connect-timeout (>=3.10)
+// support once per Engine. The probe runs under its own 5s timeout (not the
+// run's ctx, so a cancelled first run cannot poison it) and is cached only
+// on success: a failed or unparseable probe falls back to summary mode (-J)
+// without --connect-timeout for this run and is retried on the next.
+func (e *Engine) probe() (stream, connTO bool) {
+	e.probeMu.Lock()
+	defer e.probeMu.Unlock()
+	if e.probed {
+		return e.probeStream, e.probeConnTO
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), probeTimeout)
+	defer cancel()
+	major, minor, err := probeVersion(ctx, e.Bin)
+	if err != nil {
+		return false, false
+	}
+	e.probed = true
+	e.probeStream = versionAtLeast(major, minor, 3, 17)
+	e.probeConnTO = supportsConnectTimeout(major, minor)
+	return e.probeStream, e.probeConnTO
 }
 
 // New returns an iperf3 engine using the binary at bin.
@@ -90,9 +107,9 @@ func (e *Engine) Run(ctx context.Context, opts json.RawMessage, prog func(engine
 	if err != nil {
 		return nil, err
 	}
-	stream := false
+	stream, connTO := false, false
 	if !e.ForceSummary {
-		stream = e.supportsStream(ctx)
+		stream, connTO = e.probe()
 	}
 
 	end := o.Port
@@ -110,7 +127,7 @@ func (e *Engine) Run(ctx context.Context, opts json.RawMessage, prog func(engine
 		engine.Emit(prog, engine.Progress{
 			Phase: engine.PhaseConnecting, ServerName: fmt.Sprintf("%s:%d", o.Host, port),
 		})
-		res, err := e.runOnce(ctx, attempt, stream, prog)
+		res, err := e.runOnce(ctx, attempt, stream, connTO, prog)
 		if err == nil {
 			return res, nil
 		}
@@ -125,8 +142,8 @@ func (e *Engine) Run(ctx context.Context, opts json.RawMessage, prog func(engine
 
 // runOnce runs the iperf3 client once with o (whose Port is the exact port
 // to use for this attempt) and returns its result.
-func (e *Engine) runOnce(ctx context.Context, o Options, stream bool, prog func(engine.Progress)) (*engine.Result, error) {
-	cmd := execx.Command(ctx, e.Bin, buildArgs(o, stream)...)
+func (e *Engine) runOnce(ctx context.Context, o Options, stream, connTO bool, prog func(engine.Progress)) (*engine.Result, error) {
+	cmd := execx.Command(ctx, e.Bin, buildArgs(o, stream, connTO)...)
 	if o.Password != "" {
 		cmd.Env = append(os.Environ(), "IPERF3_PASSWORD="+o.Password)
 	}

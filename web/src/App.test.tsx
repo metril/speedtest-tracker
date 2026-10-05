@@ -36,3 +36,23 @@ it('redirects to /login when /me answers 401', async () => {
   render(<App />);
   expect(await screen.findByRole('link', { name: 'Sign in with SSO' })).toBeInTheDocument();
 });
+
+it('redirects to /login when a later query answers 401 outside open mode', async () => {
+  let meCalls = 0;
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.startsWith('/api/v1/me')) {
+      meCalls += 1;
+      return meCalls === 1
+        ? jsonResponse({ mode: 'oidc', user: 'a', groups: [], is_admin: true })
+        : jsonResponse({ error: { code: 'unauthenticated', message: 'expired' } }, 401);
+    }
+    if (url.startsWith('/api/v1/stats/summary')) {
+      return jsonResponse({ error: { code: 'unauthenticated', message: 'expired' } }, 401);
+    }
+    if (url.startsWith('/auth/mode')) return jsonResponse({ mode: 'oidc' });
+    return jsonResponse({});
+  }));
+  render(<App />);
+  expect(await screen.findByRole('link', { name: 'Sign in with SSO' })).toBeInTheDocument();
+});

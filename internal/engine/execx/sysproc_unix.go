@@ -3,6 +3,8 @@
 package execx
 
 import (
+	"errors"
+	"os"
 	"os/exec"
 	"syscall"
 )
@@ -17,5 +19,10 @@ func cancel(cmd *exec.Cmd) error {
 	if cmd.Process == nil {
 		return nil
 	}
-	return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	err := syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+	if errors.Is(err, syscall.ESRCH) {
+		// Group already gone (child exited between Wait and cancel).
+		return os.ErrProcessDone
+	}
+	return err
 }

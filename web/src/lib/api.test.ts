@@ -51,6 +51,22 @@ describe('api error handling', () => {
     expect((err as ApiError).message).toBe('error');
   });
 
+  it('throws an ApiError for a non-JSON error body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false, status: 502, statusText: 'Bad Gateway', text: async () => '<html>bad gateway</html>',
+    }));
+    const err = await listTargets().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect(err).toMatchObject({ status: 502, code: 'unknown', message: 'Bad Gateway' });
+  });
+
+  it('resolves with undefined for an invalid 2xx body', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true, status: 200, statusText: 'OK', text: async () => 'not json',
+    }));
+    await expect(listTargets()).resolves.toBeUndefined();
+  });
+
   it('resolves with undefined on 204 No Content', async () => {
     vi.stubGlobal('fetch', mockFetch(204, undefined));
     await expect(deleteTarget(1)).resolves.toBeUndefined();

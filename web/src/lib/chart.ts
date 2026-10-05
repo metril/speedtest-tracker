@@ -7,6 +7,10 @@ export const SERIES = {
   jitter: 'var(--color-series-jitter)',
 } as const;
 
+/** SERIES_EXTRA continues the palette for multi-target charts, which need
+ * two colours per target. */
+export const SERIES_EXTRA = [5, 6, 7, 8, 9, 10, 11, 12].map((n) => `var(--color-series-${n})`);
+
 const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
 /** formatAxisTick renders a bucket_start ISO timestamp for a chart's

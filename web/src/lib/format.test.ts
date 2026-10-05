@@ -12,6 +12,10 @@ describe('formatBps', () => {
   it('climbs to Gbps above 1000 Mbps', () => {
     expect(formatBps(2_400_000_000)).toBe('2.40 Gbps');
   });
+  it('promotes the unit after rounding', () => {
+    expect(formatBps(999_999)).toBe('1.0 Mbps');
+    expect(formatBps(999_990_000)).toBe('1.00 Gbps');
+  });
   it('renders a dash for missing values', () => {
     expect(formatBps(0)).toBe('—');
     expect(formatBps(Number.NaN)).toBe('—');
@@ -24,6 +28,9 @@ describe('formatMs', () => {
   });
   it('rounds above 100ms', () => {
     expect(formatMs(143.7)).toBe('144 ms');
+  });
+  it('promotes to whole ms after rounding', () => {
+    expect(formatMs(99.96)).toBe('100 ms');
   });
   it('renders a dash for missing values', () => {
     expect(formatMs(0)).toBe('—');

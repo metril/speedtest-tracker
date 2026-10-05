@@ -75,10 +75,17 @@ type shared struct {
 // batching it for shipment to VictoriaLogs.
 type Handler struct {
 	cfg    Config
-	attrs  []slog.Attr
+	attrs  []groupedAttr // WithAttrs attrs, each with the group prefix active when it was added
 	groups []string
 
 	shared *shared // config, queue and worker, shared by every WithAttrs clone
+}
+
+// groupedAttr is an attr plus the dotted group prefix in effect at WithAttrs
+// time, so With(a).WithGroup(g) emits "a", not "g.a".
+type groupedAttr struct {
+	prefix string
+	attr   slog.Attr
 }
 
 // New builds a Handler with defaults applied for any zero Config field.
@@ -176,7 +183,11 @@ func (h *Handler) Enabled(ctx context.Context, lvl slog.Level) bool {
 func (h *Handler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	clone := *h
 	clone.cfg.Next = h.cfg.Next.WithAttrs(attrs)
-	clone.attrs = append(append([]slog.Attr{}, h.attrs...), attrs...)
+	prefix := groupPrefix(h.groups)
+	clone.attrs = append([]groupedAttr{}, h.attrs...)
+	for _, a := range attrs {
+		clone.attrs = append(clone.attrs, groupedAttr{prefix, a})
+	}
 	return &clone
 }
 
@@ -214,18 +225,12 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		line[k] = v
 	}
 
-	addAttr := func(groups []string, a slog.Attr) {
-		key := a.Key
-		if len(groups) > 0 {
-			key = strings.Join(groups, ".") + "." + key
-		}
-		line[key] = jsonSafe(a.Value.Resolve().Any())
+	for _, ga := range h.attrs {
+		addAttr(line, ga.prefix, ga.attr)
 	}
-	for _, a := range h.attrs {
-		addAttr(h.groups, a)
-	}
+	recPrefix := groupPrefix(h.groups)
 	rec.Attrs(func(a slog.Attr) bool {
-		addAttr(h.groups, a)
+		addAttr(line, recPrefix, a)
 		return true
 	})
 
@@ -240,6 +245,47 @@ func (h *Handler) Handle(ctx context.Context, rec slog.Record) error {
 		h.shared.dropped.Add(1)
 	}
 	return nil
+}
+
+func groupPrefix(groups []string) string {
+	if len(groups) == 0 {
+		return ""
+	}
+	return strings.Join(groups, ".") + "."
+}
+
+// addAttr flattens a into line under prefix: groups recurse with their key
+// as an extra prefix, errors and Stringers use their text, and anything
+// else falls back to Value.String.
+func addAttr(line map[string]any, prefix string, a slog.Attr) {
+	v := a.Value.Resolve()
+	switch v.Kind() {
+	case slog.KindGroup:
+		p := prefix
+		if a.Key != "" {
+			p += a.Key + "."
+		}
+		for _, ga := range v.Group() {
+			addAttr(line, p, ga)
+		}
+		return
+	case slog.KindAny:
+		switch x := v.Any().(type) {
+		case error:
+			line[prefix+a.Key] = x.Error()
+		case fmt.Stringer:
+			line[prefix+a.Key] = x.String()
+		default:
+			line[prefix+a.Key] = jsonSafe(x)
+		}
+		return
+	case slog.KindString, slog.KindInt64, slog.KindUint64, slog.KindFloat64, slog.KindBool:
+		line[prefix+a.Key] = v.Any()
+	case slog.KindDuration, slog.KindTime:
+		line[prefix+a.Key] = v.String()
+	default:
+		line[prefix+a.Key] = v.String()
+	}
 }
 
 // jsonSafe returns v if json.Marshal can encode it, otherwise its
@@ -317,7 +363,11 @@ func (s *shared) doFlush(ctx context.Context, buf [][]byte) {
 	s.mu.Lock()
 	u, auth := s.url, s.auth
 	streamFields := s.streamFields
+	enabled := s.enabled
 	s.mu.Unlock()
+	if !enabled || u == "" {
+		return // shipping disabled since the batch was queued: drop it, no POST
+	}
 
 	if err := s.post(ctx, u, auth, streamFields, buf); err != nil {
 		s.dropped.Add(int64(len(buf)))

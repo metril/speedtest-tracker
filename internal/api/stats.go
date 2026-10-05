@@ -117,8 +117,9 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps, TolerancePct: g.SLATolerancePct}
 	}
 	key := from + "|" + to + "|" + strconv.Itoa(offset) + "|" + slaKeyPart(sla)
-	w.Header().Set("Cache-Control", "max-age=30")
+	const cacheControl = "private, max-age=30"
 	if body, hit := d.summary.get(key); hit {
+		w.Header().Set("Cache-Control", cacheControl)
 		if d.Metrics != nil {
 			d.Metrics.SummaryCacheHit()
 		}
@@ -141,6 +142,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d.summary.set(key, body)
+	w.Header().Set("Cache-Control", cacheControl)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	w.Write(body)

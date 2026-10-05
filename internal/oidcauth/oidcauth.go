@@ -42,6 +42,11 @@ type Claims struct {
 	Name              string
 	PreferredUsername string
 	Groups            []string
+
+	// EmailUnverified is true when the ID token carries email_verified
+	// explicitly set to false. A missing claim leaves it false: many
+	// providers omit it.
+	EmailUnverified bool
 }
 
 // Provider is a discovered OIDC provider ready to run the authorization
@@ -166,6 +171,9 @@ func (p *Provider) Exchange(ctx context.Context, code, verifier, redirectURI str
 	if v, ok := raw["preferred_username"].(string); ok {
 		claims.PreferredUsername = v
 	}
+	if v, ok := raw["email_verified"].(bool); ok && !v {
+		claims.EmailUnverified = true
+	}
 	claims.Groups = extractGroups(raw, p.cfg.GroupsClaim)
 	return claims, nil
 }
@@ -209,7 +217,11 @@ func extractGroups(raw map[string]any, claim string) []string {
 // reports whether cl belongs to the admin group. It returns ErrForbidden
 // when a non-empty AllowedGroups has no overlap with cl.Groups, or a
 // non-empty AllowedEmails does not contain cl.Email (case-insensitively).
+// It also returns ErrForbidden when the ID token's email_verified is false.
 func (c Config) Authorize(cl Claims) (isAdmin bool, err error) {
+	if cl.EmailUnverified {
+		return false, ErrForbidden
+	}
 	if len(c.AllowedGroups) > 0 && !intersects(cl.Groups, c.AllowedGroups) {
 		return false, ErrForbidden
 	}

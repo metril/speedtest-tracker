@@ -54,12 +54,21 @@ func (d Deps) oidcNotConfigured(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, "/login?error=oidc_not_configured", http.StatusFound)
 }
 
+// oidcProvider returns the active OIDC provider, or nil when none is wired
+// (Deps.OIDC unset) or built yet; callers answer oidcNotConfigured.
+func (d Deps) oidcProvider() *oidcauth.Provider {
+	if d.OIDC == nil {
+		return nil
+	}
+	return d.OIDC()
+}
+
 // oidcStart begins the authorization-code + PKCE flow: it stashes a
 // signed state (carrying the PKCE verifier and the post-login redirect
 // target) in a short-lived cookie, then redirects the browser to the
 // provider.
 func (d Deps) oidcStart(w http.ResponseWriter, r *http.Request) {
-	provider := d.OIDC()
+	provider := d.oidcProvider()
 	if provider == nil || d.StateCodec == nil {
 		d.oidcNotConfigured(w, r)
 		return
@@ -89,7 +98,7 @@ func (d Deps) oidcStart(w http.ResponseWriter, r *http.Request) {
 // code, authorises the resulting claims and, on success, establishes a
 // server-side session before redirecting to the original return_to path.
 func (d Deps) oidcCallback(w http.ResponseWriter, r *http.Request) {
-	provider := d.OIDC()
+	provider := d.oidcProvider()
 	if provider == nil || d.StateCodec == nil {
 		d.oidcNotConfigured(w, r)
 		return

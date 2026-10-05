@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -193,23 +194,30 @@ func (e *Engine) latency(ctx context.Context, o Options, prog func(engine.Progre
 			best = s
 		}
 	}
-	var jitter float64
-	if len(samples) > 1 {
-		var sum float64
-		for i := 1; i < len(samples); i++ {
-			d := samples[i] - samples[i-1]
-			if d < 0 {
-				d = -d
-			}
-			sum += d
-		}
-		jitter = sum / float64(len(samples)-1)
-	}
+	jitter := jitterOf(samples)
 	// A zero RTT (loopback, coarse clock) would make bps infinite later.
 	if best <= 0 {
 		best = 0.001
 	}
 	return best, jitter, colo, ip, nil
+}
+
+// jitterOf returns the mean absolute difference between consecutive latency
+// samples, discarding the first one: it carries the TLS/DNS/connection
+// warmup and would otherwise dominate the figure. With fewer than two
+// samples there is nothing to compare and the jitter is 0.
+func jitterOf(samples []float64) float64 {
+	if len(samples) < 2 {
+		return 0
+	}
+	if len(samples) > 2 {
+		samples = samples[1:]
+	}
+	var sum float64
+	for i := 1; i < len(samples); i++ {
+		sum += math.Abs(samples[i] - samples[i-1])
+	}
+	return sum / float64(len(samples)-1)
 }
 
 // transfer runs every configured size in phase and returns the p90 of the
@@ -219,6 +227,17 @@ func (e *Engine) transfer(ctx context.Context, o Options, phase engine.Phase, si
 		rates []float64
 		total int64
 	)
+	// One zeroed buffer serves every upload request (sliced per size).
+	var upBuf []byte
+	if phase != engine.PhaseDownload {
+		maxSize := 0
+		for _, sz := range sizes {
+			if sz > maxSize {
+				maxSize = sz
+			}
+		}
+		upBuf = make([]byte, maxSize)
+	}
 	for i, size := range sizes {
 		var (
 			dur time.Duration
@@ -228,7 +247,7 @@ func (e *Engine) transfer(ctx context.Context, o Options, phase engine.Phase, si
 		if phase == engine.PhaseDownload {
 			dur, n, err = e.download(ctx, o.BaseURL, size)
 		} else {
-			dur, err = e.upload(ctx, o.BaseURL, size)
+			dur, err = e.upload(ctx, o.BaseURL, upBuf[:size])
 			n = int64(size)
 		}
 		if err != nil {
@@ -274,8 +293,9 @@ func (e *Engine) download(ctx context.Context, base string, size int) (time.Dura
 	return time.Since(t0), n, nil
 }
 
-func (e *Engine) upload(ctx context.Context, base string, size int) (time.Duration, error) {
-	body := bytes.NewReader(make([]byte, size))
+func (e *Engine) upload(ctx context.Context, base string, payload []byte) (time.Duration, error) {
+	size := len(payload)
+	body := bytes.NewReader(payload)
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+"/__up", body)
 	if err != nil {
 		return 0, err

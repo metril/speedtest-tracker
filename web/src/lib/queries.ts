@@ -1,11 +1,18 @@
 import {
-  useInfiniteQuery, useMutation, useQuery, useQueryClient,
+  QueryCache, QueryClient, useInfiniteQuery, useMutation, useQuery, useQueryClient,
 } from '@tanstack/react-query';
 import * as api from './api';
 import { ApiError } from './api';
 import type {
   QueueInput, Range, ResultFilters, ScheduleInput, TargetInput,
 } from './api';
+
+/** Invalidates the aggregate queries derived from result rows. */
+function invalidateStats(qc: QueryClient) {
+  qc.invalidateQueries({ queryKey: ['summary'] });
+  qc.invalidateQueries({ queryKey: ['history'] });
+  qc.invalidateQueries({ queryKey: ['outages'] });
+}
 
 export const queryKeys = {
   targets: ['targets'] as const,
@@ -76,7 +83,10 @@ export function useUpdateTarget() {
   return useMutation({
     mutationFn: ({ id, target }: { id: number; target: TargetInput }) =>
       api.updateTarget(id, target),
-    onSuccess: () => qc.invalidateQueries({ queryKey: queryKeys.targets }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.targets });
+      invalidateStats(qc);
+    },
   });
 }
 
@@ -87,6 +97,7 @@ export function useDeleteTarget() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.targets });
       qc.invalidateQueries({ queryKey: queryKeys.deletedTargets });
+      invalidateStats(qc);
     },
   });
 }
@@ -173,7 +184,10 @@ export function useDeleteResult() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: number) => api.deleteResult(id),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['results'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['results'] });
+      invalidateStats(qc);
+    },
   });
 }
 
@@ -335,6 +349,26 @@ export function useUpdateSettings() {
       qc.invalidateQueries({ queryKey: queryKeys.me });
     },
   });
+}
+
+/** createQueryClient builds the app's client. A 401 from any query means the
+ * session ended after load, so (outside open mode, where the server never
+ * authenticates) it re-checks identity: useMe then 401s too and RequireAuth
+ * redirects to /login. */
+export function createQueryClient() {
+  const client: QueryClient = new QueryClient({
+    queryCache: new QueryCache({
+      onError: (err, query) => {
+        if (!(err instanceof ApiError) || err.status !== 401) return;
+        // me re-checking itself would loop; auth-mode is public.
+        if (query.queryKey[0] === queryKeys.me[0] || query.queryKey[0] === queryKeys.authMode[0]) return;
+        if (client.getQueryData<{ mode?: string }>(queryKeys.me)?.mode === 'open') return;
+        client.invalidateQueries({ queryKey: queryKeys.me });
+      },
+    }),
+    defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } },
+  });
+  return client;
 }
 
 /** useMe is the caller's identity under the active auth mode. It never

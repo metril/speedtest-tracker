@@ -3,6 +3,7 @@ package settings
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"testing"
 	"time"
@@ -123,6 +124,31 @@ func TestSubscribeDoesNotBlockOnSlowSubscriber(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Set blocked on a slow subscriber")
+	}
+}
+
+func TestSubscribeBurstDeliversEveryKey(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	ch, cancel := s.Subscribe()
+	defer cancel()
+
+	// Written before anything reads, far past any channel buffer.
+	want := map[string]bool{}
+	for i := 0; i < 50; i++ {
+		key := fmt.Sprintf("test.key_%02d", i)
+		want[key] = true
+		if err := s.Set(ctx, key, i); err != nil {
+			t.Fatalf("Set: %v", err)
+		}
+	}
+	for len(want) > 0 {
+		select {
+		case key := <-ch:
+			delete(want, key)
+		case <-time.After(2 * time.Second):
+			t.Fatalf("%d keys never delivered: %v", len(want), want)
+		}
 	}
 }
 
@@ -495,5 +521,31 @@ func TestSeedFromEnvIntegrationsVMAuthType(t *testing.T) {
 	}
 	if got.VMAuthType != "bearer" {
 		t.Errorf("vm_auth_type = %q, want the env seed to fill a missing key", got.VMAuthType)
+	}
+}
+
+func TestSetSkipsNotifyWhenUnchanged(t *testing.T) {
+	ctx := context.Background()
+	s := newTestStore(t)
+	if err := s.Set(ctx, "test.k", "a"); err != nil {
+		t.Fatal(err)
+	}
+	ch, cancel := s.Subscribe()
+	defer cancel()
+	if err := s.Set(ctx, "test.k", "a"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case k := <-ch:
+		t.Fatalf("unchanged Set notified %q", k)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if err := s.Set(ctx, "test.k", "b"); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-ch:
+	case <-time.After(time.Second):
+		t.Fatal("changed Set did not notify")
 	}
 }

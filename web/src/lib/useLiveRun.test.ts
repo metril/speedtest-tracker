@@ -7,9 +7,14 @@ class FakeEventSource {
   static last: FakeEventSource | null = null;
   listeners = new Map<string, ((e: MessageEvent) => void)[]>();
   closed = false;
+  readyState = 0;
+  onopen: (() => void) | null = null;
+  onerror: (() => void) | null = null;
+  static count = 0;
 
   constructor(readonly url: string) {
     FakeEventSource.last = this;
+    FakeEventSource.count += 1;
   }
   addEventListener(type: string, fn: (e: MessageEvent) => void) {
     this.listeners.set(type, [...(this.listeners.get(type) ?? []), fn]);
@@ -37,6 +42,7 @@ beforeEach(() => {
 afterEach(() => {
   vi.unstubAllGlobals();
   FakeEventSource.last = null;
+  FakeEventSource.count = 0;
 });
 
 describe('useLiveRun', () => {
@@ -218,6 +224,48 @@ describe('useLiveRun', () => {
       act(() => { vi.advanceTimersByTime(60_000); });
 
       expect(result.current?.status).toBe('done');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not arm the stale timer for a queued run event', () => {
+    vi.useFakeTimers();
+    try {
+      const { result } = renderHook(() => useLiveRun());
+      act(() => emit('run', { run_id: 1, status: 'queued', targets_total: 1, targets_done: 0 }));
+      act(() => { vi.advanceTimersByTime(120_000); });
+
+      expect(result.current?.status).toBe('queued');
+      expect(result.current?.finished).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('recreates a closed stream with backoff and resyncs on reopen', () => {
+    vi.useFakeTimers();
+    try {
+      const onEvent = vi.fn();
+      renderHook(() => useLiveRun({ onEvent }));
+      const first = FakeEventSource.last!;
+      first.readyState = 2;
+      act(() => first.onerror?.());
+      expect(FakeEventSource.count).toBe(1);
+
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(FakeEventSource.count).toBe(2);
+      const second = FakeEventSource.last!;
+      second.readyState = 2;
+      act(() => second.onerror?.());
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(FakeEventSource.count).toBe(2);
+      act(() => { vi.advanceTimersByTime(1_000); });
+      expect(FakeEventSource.count).toBe(3);
+
+      expect(onEvent).not.toHaveBeenCalled();
+      act(() => FakeEventSource.last!.onopen?.());
+      expect(onEvent).toHaveBeenCalledWith({ type: 'resync' });
     } finally {
       vi.useRealTimers();
     }

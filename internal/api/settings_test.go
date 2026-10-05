@@ -5,8 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -1266,5 +1269,119 @@ func TestSettingsTestOIDCProbesDiscovery(t *testing.T) {
 	doJSON(t, h, http.MethodPost, "/api/v1/settings/test/oidc", map[string]any{"issuer": badIssuer}, &failBody)
 	if failBody.OK || failBody.Error == "" {
 		t.Fatalf("unreachable issuer: = %+v, want ok=false with an error", failBody)
+	}
+}
+
+// withTokenIdentity serves req as if it had authenticated with an API token.
+func withTokenIdentity(h http.Handler, req *http.Request) *httptest.ResponseRecorder {
+	req = req.WithContext(auth.NewContext(req.Context(), auth.Identity{Source: auth.SourceToken, IsAdmin: true}))
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	return rec
+}
+
+func TestPutSettingsEnginesValidationAndTokenBlock(t *testing.T) {
+	_, st := newSettingsAPI(t)
+	d := Deps{Settings: st, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	h := http.HandlerFunc(d.putSettings)
+
+	for _, tc := range []struct {
+		name  string
+		token bool
+		body  map[string]any
+		want  int
+	}{
+		{"bare name ok", false, map[string]any{"speedtest_bin": "speedtest"}, 200},
+		{"abs path ok", false, map[string]any{"iperf3_bin": "/usr/bin/iperf3"}, 200},
+		{"empty list url ok", false, map[string]any{"iperf3_list_url": ""}, 200},
+		{"ttl 60 ok", false, map[string]any{"server_list_ttl_seconds": 60}, 200},
+		{"bin with args", false, map[string]any{"speedtest_bin": "/bin/sh -c id"}, 400},
+		{"bin with leading space", false, map[string]any{"iperf3_bin": " iperf3"}, 400},
+		{"relative path", false, map[string]any{"speedtest_bin": "./speedtest"}, 400},
+		{"empty bin", false, map[string]any{"iperf3_bin": ""}, 400},
+		{"ttl too small", false, map[string]any{"server_list_ttl_seconds": 59}, 400},
+		{"ttl zero", false, map[string]any{"server_list_ttl_seconds": 0}, 400},
+		{"list url ftp", false, map[string]any{"iperf3_list_url": "ftp://x/y.json"}, 400},
+		{"list url garbage", false, map[string]any{"iperf3_list_url": "not a url"}, 400},
+		{"token sets speedtest_bin", true, map[string]any{"speedtest_bin": "/tmp/evil"}, 403},
+		{"token sets iperf3_bin", true, map[string]any{"iperf3_bin": "iperf3"}, 403},
+		{"token sets list url", true, map[string]any{"iperf3_list_url": "http://169.254.169.254/x.json"}, 403},
+		{"token unchanged bins and list url", true, map[string]any{"speedtest_bin": "speedtest", "iperf3_bin": "/usr/bin/iperf3", "iperf3_list_url": ""}, 200},
+		{"token sets other engine field", true, map[string]any{"server_list_ttl_seconds": 120}, 200},
+	} {
+		req := jsonRequest(t, http.MethodPut, "/api/v1/settings", map[string]any{"engines": tc.body})
+		var rec *httptest.ResponseRecorder
+		if tc.token {
+			rec = withTokenIdentity(h, req)
+		} else {
+			rec = httptest.NewRecorder()
+			h.ServeHTTP(rec, req)
+		}
+		if rec.Code != tc.want {
+			t.Errorf("%s: status %d, want %d (%s)", tc.name, rec.Code, tc.want, rec.Body)
+		}
+	}
+}
+
+func TestCreateTokenRejectedForTokenAuth(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "tok.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { db.Close() })
+	d := Deps{Store: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
+	rec := withTokenIdentity(http.HandlerFunc(d.createToken), jsonRequest(t, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "x"}))
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d, want 403 (%s)", rec.Code, rec.Body)
+	}
+	if toks, _ := db.ListAPITokens(context.Background()); len(toks) != 0 {
+		t.Fatalf("token minted despite 403: %+v", toks)
+	}
+}
+
+func TestDecodeJSONContentType(t *testing.T) {
+	for _, tc := range []struct {
+		ct   string
+		want bool
+	}{
+		{"", true},
+		{"application/json", true},
+		{"application/json; charset=utf-8", true},
+		{"text/plain", false},
+		{"text/plain;charset=UTF-8", false},
+		{"application/x-www-form-urlencoded", false},
+	} {
+		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		if tc.ct != "" {
+			req.Header.Set("Content-Type", tc.ct)
+		}
+		rec := httptest.NewRecorder()
+		var dst map[string]any
+		ok := decodeJSON(rec, req, &dst)
+		if ok != tc.want || (!ok && rec.Code != http.StatusUnsupportedMediaType) {
+			t.Errorf("Content-Type %q: ok=%v code=%d, want ok=%v (415 on reject)", tc.ct, ok, rec.Code, tc.want)
+		}
+	}
+}
+
+func TestTestOIDCReadsBodyWithUnknownLength(t *testing.T) {
+	idp := oidctest.NewIDP(t)
+	h, _ := newSettingsAPI(t)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/settings/test/oidc",
+		io.NopCloser(strings.NewReader(`{"issuer":"`+idp.URL+`"}`)))
+	req.ContentLength = -1
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"ok":true`) {
+		t.Fatalf("status %d body %s: body issuer ignored for chunked request", rec.Code, rec.Body)
+	}
+}
+
+func TestOIDCHandlersNilSafeWithoutProvider(t *testing.T) {
+	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.OIDC = nil })
+	rec := do(t, h, http.MethodGet, "/auth/oidc/start", nil)
+	if rec.Code != http.StatusFound || !strings.Contains(rec.Header().Get("Location"), "oidc_not_configured") {
+		t.Fatalf("status %d Location %q", rec.Code, rec.Header().Get("Location"))
 	}
 }

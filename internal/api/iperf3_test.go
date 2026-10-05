@@ -3,8 +3,10 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,12 +139,15 @@ func TestRefreshIperf3ServersCallsRefresherAndReturnsResult(t *testing.T) {
 }
 
 func TestRefreshIperf3ServersPropagatesError(t *testing.T) {
-	refresher := &stubIperf3Refresher{err: context.DeadlineExceeded}
+	refresher := &stubIperf3Refresher{err: errors.New("dial tcp 10.1.2.3:443: secret-internal-detail")}
 	h, _, _ := newTestAPIWith(t, func(d *Deps) { d.Iperf3 = refresher })
 
 	rec := do(t, h, http.MethodPost, "/api/v1/iperf3/servers/refresh", nil)
 	if rec.Code != http.StatusBadGateway {
 		t.Fatalf("status = %d, want 502", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "secret-internal-detail") {
+		t.Fatalf("502 body leaks the underlying error: %s", rec.Body)
 	}
 }
 

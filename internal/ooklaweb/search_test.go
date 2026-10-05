@@ -832,3 +832,50 @@ func TestSearchWithNilLoggerDoesNotPanicOnGeocodeFailure(t *testing.T) {
 		t.Fatalf("Search: %v", err)
 	}
 }
+
+func TestSearchDoesNotCacheDegradedGeocodeResult(t *testing.T) {
+	var reqs int32
+	sp := speedtestServer(t, map[string]string{"comcast": denverFixture}, nil, &reqs)
+	defer sp.Close()
+	geo := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer geo.Close()
+
+	c := NewClient()
+	c.Base = sp.URL
+	c.GeoBase = geo.URL
+	for i := 0; i < 2; i++ {
+		if _, err := c.Search(context.Background(), SearchRequest{Q: "comcast"}); err != nil {
+			t.Fatalf("Search: %v", err)
+		}
+	}
+	if got := atomic.LoadInt32(&reqs); got != 2 {
+		t.Errorf("speedtest.net requests = %d, want 2 (a geocode failure must not be cached)", got)
+	}
+}
+
+func TestSearchReturnsWhenCallerContextCancelled(t *testing.T) {
+	release := make(chan struct{})
+	sp := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer sp.Close()
+	defer close(release)
+
+	c := NewClient()
+	c.Base = sp.URL
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := c.Search(ctx, SearchRequest{Q: "comcast"})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if time.Since(start) > 2*time.Second {
+		t.Errorf("Search blocked %v past the caller's ctx", time.Since(start))
+	}
+}

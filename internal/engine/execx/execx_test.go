@@ -4,6 +4,7 @@ package execx
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -60,5 +61,19 @@ wait`, pidFile)
 			t.Fatalf("grandchild pid %d still alive %v after cancel", pid, 3*time.Second)
 		}
 		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// TestCancelAlreadyExitedMapsToErrProcessDone verifies that killing the
+// group of a child that has already been reaped (ESRCH) reports
+// os.ErrProcessDone, which exec.Cmd treats as a benign race.
+func TestCancelAlreadyExitedMapsToErrProcessDone(t *testing.T) {
+	bin := exectest.Build(t, "quick", "exit 0")
+	cmd := Command(context.Background(), bin)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if err := cancel(cmd); !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("cancel after exit = %v, want os.ErrProcessDone", err)
 	}
 }

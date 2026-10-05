@@ -519,8 +519,12 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	changes, unsubscribe := st.Subscribe()
 	defer unsubscribe()
 	var metricsEnabled atomic.Bool
-	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger)
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger, db)
 
+	now := time.Now().UTC()
+	if err := db.CreateSession(ctx, store.Session{ID: "s1", Subject: "u", CreatedAt: now, ExpiresAt: now.Add(time.Hour)}); err != nil {
+		t.Fatal(err)
+	}
 	if err := st.Set(ctx, settings.KeyAuthMode, settings.AuthModeToken); err != nil {
 		t.Fatal(err)
 	}
@@ -530,6 +534,9 @@ func TestWatchSettingsAppliesAuthChanges(t *testing.T) {
 	}
 	if am.Mode() != settings.AuthModeToken {
 		t.Errorf("mode = %q, want %q", am.Mode(), settings.AuthModeToken)
+	}
+	if _, ok, _ := db.LookupSession(ctx, "s1", now); ok {
+		t.Error("session survived an auth.* change")
 	}
 }
 
@@ -578,5 +585,190 @@ func TestWatchSettingsStopsOnContextCancel(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("watchSettings did not stop after context cancel")
+	}
+}
+
+func TestHealthcheckHandlesWildcardAndIPv6Listen(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	defer srv.Close()
+	_, port, _ := net.SplitHostPort(srv.Listener.Addr().String())
+	for _, listen := range []string{":" + port, "0.0.0.0:" + port, "[::]:" + port} {
+		if err := healthcheck(listen); err != nil {
+			t.Errorf("healthcheck(%q): %v", listen, err)
+		}
+	}
+
+	l6, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		t.Skip("no IPv6 loopback")
+	}
+	s6 := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {}))
+	s6.Listener.Close()
+	s6.Listener = l6
+	s6.Start()
+	defer s6.Close()
+	if err := healthcheck(l6.Addr().String()); err != nil {
+		t.Errorf("healthcheck(%q): %v", l6.Addr(), err)
+	}
+}
+
+func TestAuthAdapterSeedMode(t *testing.T) {
+	am := newAuthAdapter(auth.New(slog.Default(), noTokens{}, time.Now))
+	if am.Mode() != settings.AuthModeOpen {
+		t.Fatalf("initial mode = %q", am.Mode())
+	}
+	am.seedMode(settings.AuthModeToken)
+	if am.Mode() != settings.AuthModeToken {
+		t.Errorf("mode = %q, want %q", am.Mode(), settings.AuthModeToken)
+	}
+}
+
+func TestRetryOIDCBuildEventuallySucceeds(t *testing.T) {
+	st := newTestSettings(t)
+	ctx := context.Background()
+	idp := oidctest.NewIDP(t)
+	for k, v := range map[string]any{
+		settings.KeyAuthMode:         settings.AuthModeOIDC,
+		settings.KeyAuthOIDCIssuer:   "http://127.0.0.1:1", // unreachable
+		settings.KeyAuthOIDCClientID: "client",
+	} {
+		if err := st.Set(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h := &oidcProviderHolder{}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		retryOIDCBuild(ctx, st, h, slog.New(slog.NewTextHandler(io.Discard, nil)), 10*time.Millisecond, 40*time.Millisecond)
+	}()
+	time.Sleep(100 * time.Millisecond) // several failed attempts
+	if h.Load() != nil {
+		t.Fatal("provider built against an unreachable issuer")
+	}
+	if err := st.Set(ctx, settings.KeyAuthOIDCIssuer, idp.URL); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("retry did not stop after the issuer became reachable")
+	}
+	if h.Load() == nil {
+		t.Fatal("provider not built after retry")
+	}
+}
+
+// countPurger counts DeleteAllSessions calls.
+type countPurger struct{ n atomic.Int32 }
+
+func (c *countPurger) DeleteAllSessions(context.Context) (int64, error) { c.n.Add(1); return 0, nil }
+
+func TestWatchSettingsPurgesSessionsOncePerRealAuthChange(t *testing.T) {
+	db, err := store.Open(filepath.Join(t.TempDir(), "watch-purge.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	st, err := settings.New(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	level := new(slog.LevelVar)
+	reg := engine.NewRegistry()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	servers := ookla.NewServerList("speedtest", time.Hour)
+	sch := scheduler.New(scheduler.Config{Store: db, Runner: runner.New(runner.Config{Store: db, Registry: reg, Hub: sse.NewHub(), Logger: logger}), Logger: logger})
+	vm := vmpush.New(vmpush.Config{})
+	vm.Start()
+	defer vm.Close(context.Background())
+	vl := vlpush.New(vlpush.Config{Next: slog.NewJSONHandler(io.Discard, nil)})
+	vl.Start()
+	defer vl.Close(context.Background())
+	nt := notify.New(notify.Config{Store: db, Logger: logger})
+	nt.Start()
+	defer nt.Close(context.Background())
+	am := newAuthAdapter(auth.New(logger, noTokens{}, time.Now))
+	ir := iperf3list.New(iperf3list.Config{Store: db, Logger: logger})
+	changes, unsubscribe := st.Subscribe()
+	defer unsubscribe()
+	var metricsEnabled atomic.Bool
+	p := &countPurger{}
+	go watchSettings(ctx, st, changes, level, reg, servers, sch, vm, vl, nt, am, nil, &metricsEnabled, ir, logger, p)
+
+	// Re-saving the whole auth section with unchanged values purges nothing.
+	a, err := st.Auth(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range map[string]any{
+		settings.KeyAuthMode:        a.Mode,
+		settings.KeyAuthUserHeader:  a.UserHeader,
+		settings.KeyAuthAdminGroup:  a.AdminGroup,
+		settings.KeyAuthAllowTokens: a.AllowTokens,
+	} {
+		if err := st.Set(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := p.n.Load(); n != 0 {
+		t.Fatalf("unchanged auth save purged %d times, want 0", n)
+	}
+
+	// One real change among several writes purges exactly once.
+	for k, v := range map[string]any{
+		settings.KeyAuthMode:       settings.AuthModeToken,
+		settings.KeyAuthUserHeader: a.UserHeader,
+		settings.KeyAuthAdminGroup: "admins",
+	} {
+		if err := st.Set(ctx, k, v); err != nil {
+			t.Fatal(err)
+		}
+	}
+	deadline := time.Now().Add(2 * time.Second)
+	for p.n.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	time.Sleep(300 * time.Millisecond)
+	if n := p.n.Load(); n != 1 {
+		t.Fatalf("real auth change purged %d times, want 1", n)
+	}
+}
+
+func TestUnconfiguredAuthFallsBackToTokenAndSeedsTokenMode(t *testing.T) {
+	am := newAuthAdapter(auth.New(slog.New(slog.NewTextHandler(io.Discard, nil)), noTokens{}, time.Now))
+	am.seedMode(settings.AuthModeToken)
+	if am.Mode() != settings.AuthModeToken {
+		t.Fatalf("mode = %q, want token", am.Mode())
+	}
+	rec := httptest.NewRecorder()
+	am.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200) })).
+		ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/results", nil))
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("unconfigured middleware status = %d, want 401 (token fallback)", rec.Code)
+	}
+}
+
+func TestEnsureOIDCRetrySingleLoop(t *testing.T) {
+	st := newTestSettings(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	h := &oidcProviderHolder{}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	h.ensureOIDCRetry(ctx, st, logger)
+	if !h.retrying.Load() {
+		t.Fatal("retry loop not marked running")
+	}
+	h.ensureOIDCRetry(ctx, st, logger) // no-op while one is running
+	cancel()
+	deadline := time.Now().Add(2 * time.Second)
+	for h.retrying.Load() && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if h.retrying.Load() {
+		t.Fatal("retry flag not cleared after loop exit")
 	}
 }
