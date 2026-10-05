@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -47,6 +46,12 @@ type Claims struct {
 	// explicitly set to false. A missing claim leaves it false: many
 	// providers omit it.
 	EmailUnverified bool
+
+	// UserInfoErr is set when the groups claim was absent from the ID
+	// token and the fallback userinfo request failed. Login proceeds on
+	// the ID-token claims alone; callers log it so a resulting forbidden
+	// result is explainable.
+	UserInfoErr error
 }
 
 // Provider is a discovered OIDC provider ready to run the authorization
@@ -54,6 +59,7 @@ type Claims struct {
 type Provider struct {
 	cfg      Config
 	client   *http.Client
+	provider *oidc.Provider
 	verifier *oidc.IDTokenVerifier
 	oauthCfg oauth2.Config
 }
@@ -84,6 +90,7 @@ func New(ctx context.Context, cfg Config, client *http.Client) (*Provider, error
 	return &Provider{
 		cfg:      cfg,
 		client:   client,
+		provider: p,
 		verifier: verifier,
 		oauthCfg: oauth2.Config{
 			ClientID:     cfg.ClientID,
@@ -137,7 +144,13 @@ func (p *Provider) AuthCodeURL(state, verifier, redirectURI string) string {
 }
 
 // Exchange trades an authorization code for tokens, verifies the returned
-// ID token and decodes its claims.
+// ID token and decodes its claims. When the configured groups claim is
+// absent from the ID token and the provider advertises a userinfo
+// endpoint, the claims are completed from userinfo: Authentik (unless
+// "Include claims in ID token" is on), Okta and others only emit groups
+// there. A failed userinfo request is recorded in Claims.UserInfoErr
+// rather than failing the login; a userinfo document whose sub differs
+// from the ID token's is an error.
 func (p *Provider) Exchange(ctx context.Context, code, verifier, redirectURI string) (Claims, error) {
 	ctx = clientContext(ctx, p.client)
 	cfg := p.oauthCfg
@@ -162,20 +175,70 @@ func (p *Provider) Exchange(ctx context.Context, code, verifier, redirectURI str
 	}
 
 	claims := Claims{Subject: idTok.Subject}
-	if v, ok := raw["email"].(string); ok {
-		claims.Email = v
-	}
-	if v, ok := raw["name"].(string); ok {
-		claims.Name = v
-	}
-	if v, ok := raw["preferred_username"].(string); ok {
-		claims.PreferredUsername = v
-	}
+	claims.fill(raw)
 	if v, ok := raw["email_verified"].(bool); ok && !v {
 		claims.EmailUnverified = true
 	}
+
+	_, hasGroups := raw[p.cfg.GroupsClaim]
+	if p.cfg.GroupsClaim != "" && !hasGroups && p.userInfoEndpoint() != "" {
+		info, err := p.userInfo(ctx, tok)
+		switch {
+		case err != nil:
+			claims.UserInfoErr = err
+		default:
+			if sub, _ := info["sub"].(string); sub != idTok.Subject {
+				return Claims{}, fmt.Errorf("oidcauth: userinfo: sub %q does not match id_token sub %q", sub, idTok.Subject)
+			}
+			claims.fill(info)
+			if v, ok := info["email_verified"].(bool); ok && !v {
+				claims.EmailUnverified = true
+			}
+			raw = info
+		}
+	}
 	claims.Groups = extractGroups(raw, p.cfg.GroupsClaim)
 	return claims, nil
+}
+
+// fill copies the standard profile claims from raw into c, leaving any
+// field c already has set untouched (ID-token claims win over userinfo).
+func (c *Claims) fill(raw map[string]any) {
+	set := func(dst *string, key string) {
+		if *dst != "" {
+			return
+		}
+		if v, ok := raw[key].(string); ok {
+			*dst = v
+		}
+	}
+	set(&c.Email, "email")
+	set(&c.Name, "name")
+	set(&c.PreferredUsername, "preferred_username")
+}
+
+// userInfoEndpoint returns the userinfo_endpoint from discovery, or "".
+func (p *Provider) userInfoEndpoint() string {
+	var meta struct {
+		UserInfoEndpoint string `json:"userinfo_endpoint"`
+	}
+	if p.provider == nil || p.provider.Claims(&meta) != nil {
+		return ""
+	}
+	return meta.UserInfoEndpoint
+}
+
+// userInfo fetches and decodes the userinfo document for tok.
+func (p *Provider) userInfo(ctx context.Context, tok *oauth2.Token) (map[string]any, error) {
+	ui, err := p.provider.UserInfo(ctx, oauth2.StaticTokenSource(tok))
+	if err != nil {
+		return nil, fmt.Errorf("oidcauth: userinfo: %w", err)
+	}
+	var info map[string]any
+	if err := ui.Claims(&info); err != nil {
+		return nil, fmt.Errorf("oidcauth: userinfo: decode claims: %w", err)
+	}
+	return info, nil
 }
 
 // extractGroups reads claim from raw, accepting a JSON array of strings,
@@ -216,8 +279,9 @@ func extractGroups(raw map[string]any, claim string) []string {
 // Authorize checks cl against c's allowed-groups/allowed-emails rules and
 // reports whether cl belongs to the admin group. It returns ErrForbidden
 // when a non-empty AllowedGroups has no overlap with cl.Groups, or a
-// non-empty AllowedEmails does not contain cl.Email (case-insensitively).
-// It also returns ErrForbidden when the ID token's email_verified is false.
+// non-empty AllowedEmails does not contain cl.Email. Group and email
+// comparisons are case-insensitive. It also returns ErrForbidden when the
+// ID token's email_verified is false.
 func (c Config) Authorize(cl Claims) (isAdmin bool, err error) {
 	if cl.EmailUnverified {
 		return false, ErrForbidden
@@ -228,13 +292,13 @@ func (c Config) Authorize(cl Claims) (isAdmin bool, err error) {
 	if len(c.AllowedEmails) > 0 && !containsFold(c.AllowedEmails, cl.Email) {
 		return false, ErrForbidden
 	}
-	isAdmin = c.AdminGroup == "" || slices.Contains(cl.Groups, c.AdminGroup)
+	isAdmin = c.AdminGroup == "" || containsFold(cl.Groups, c.AdminGroup)
 	return isAdmin, nil
 }
 
 func intersects(a, b []string) bool {
 	for _, x := range a {
-		if slices.Contains(b, x) {
+		if containsFold(b, x) {
 			return true
 		}
 	}

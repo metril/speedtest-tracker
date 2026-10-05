@@ -177,10 +177,19 @@ provider.
 
 `auth.admin_group` (`ST_AUTH_ADMIN_GROUP`) applies here too: members are
 admins, everyone else is read-only; unset means every signed-in user is
-admin. Group claim mapping: *Authentik* — add `groups` to the scope
-mapping's claim output. *Authelia* — its OIDC provider emits `groups` by
-default. *Keycloak* — add a "group membership" mapper with claim name
-`groups`.
+admin. Group names are matched case-insensitively.
+
+Groups are read from the ID token; when the groups claim is absent there,
+the provider's `userinfo` endpoint is queried instead, so providers that
+only emit groups via userinfo work without extra configuration.
+*Authentik* — the default `OpenID 'profile'` scope mapping already emits
+`groups`; make sure it is selected on the provider (enabling "Include
+claims in ID token" is optional). *Authelia* — its OIDC provider emits
+`groups` by default. *Keycloak* — add a "group membership" mapper with
+claim name `groups`. A rejected login logs the groups the provider returned
+alongside the configured allowed groups (`oidc login failed
+reason=forbidden ...`), which is the first place to look when a user is
+reported as not in the allowed groups.
 
 ### API tokens
 
