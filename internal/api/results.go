@@ -220,12 +220,3 @@ func validTagList(w http.ResponseWriter, tags []string) bool {
 	}
 	return true
 }
-
-func (d Deps) listTags(w http.ResponseWriter, r *http.Request) {
-	tags, err := d.Store.ListTags(r.Context())
-	if err != nil {
-		internalError(w, d.Logger, "list tags failed", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, tags)
-}

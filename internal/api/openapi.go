@@ -194,6 +194,7 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	d.registerSchedules(api)
 	d.registerRuns(api)
 	d.registerResults(api)
+	d.registerTags(api)
 	//@groups
 }
 

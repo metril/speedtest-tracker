@@ -214,11 +214,6 @@ func New(deps Deps) http.Handler {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
 		})
-		v1.Route("/tags", func(tg chi.Router) {
-			tg.Get("/", deps.listTags)
-			tg.Put("/{id}", deps.renameTag)
-			tg.Delete("/{id}", deps.deleteTag)
-		})
 		v1.Get("/outages", deps.outages)
 		v1.Get("/stats/summary", deps.statsSummary)
 		if deps.Settings != nil {
