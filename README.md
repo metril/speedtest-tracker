@@ -225,6 +225,13 @@ restart to switch back.
   data and calls `GET /api/v1/me` on load to decide what to render.
 - Tokens are full-access in this release; there is no per-token scoping.
 
+## API documentation
+
+The OpenAPI 3.1 description is served at `/openapi.json` and `/openapi.yaml`,
+with interactive docs at `/docs` (same auth as the API). It is generated from
+the Go types; run `make openapi` after changing an endpoint to refresh
+`openapi.json` and the web client types (CI fails on drift).
+
 ## Engines
 
 | Engine | How it runs | Options |
