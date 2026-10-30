@@ -12,11 +12,12 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// The handlers stay plain chi so request validation and the error envelope
-// remain byte-for-byte what they were. Huma is used purely as the OpenAPI
-// 3.1 document builder and docs renderer: every route is described by an
-// opSpec in the spec_*.go files, and TestSpecCoversRoutes fails when a
-// registered /api/v1 route has no matching operation.
+// Handlers are typed huma operations (see huma.go and the routes_*.go
+// files); huma derives the OpenAPI 3.1 document and docs UI from their
+// Input/Output structs. opSpec below describes the few operations that are
+// documented only (raw handlers such as SSE, the CSV export, /healthz and
+// the /auth flow). TestSpecCoversRoutes fails when a registered route has
+// no matching operation, or the route set drifts from the original router.
 
 // p describes one path or query parameter.
 type p struct {

@@ -10,6 +10,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/settings"
 )
 
@@ -28,6 +29,70 @@ func TestOpenAPIServed(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"/api/v1/me"`) {
 		t.Fatalf("spec missing /api/v1/me: %s", rec.Body.String())
 	}
+}
+
+// baseRoutes is the method+path set of the router before the huma
+// migration (chi handlers at 78d6156).
+var baseRoutes = []string{
+	"DELETE /api/v1/queues/{id}",
+	"DELETE /api/v1/results/{id}",
+	"DELETE /api/v1/runs/{id}",
+	"DELETE /api/v1/schedules/{id}",
+	"DELETE /api/v1/settings/tokens/{id}",
+	"DELETE /api/v1/tags/{id}",
+	"DELETE /api/v1/targets/{id}",
+	"GET /api/v1/events",
+	"GET /api/v1/iperf3/servers",
+	"GET /api/v1/me",
+	"GET /api/v1/ookla/servers",
+	"GET /api/v1/outages",
+	"GET /api/v1/queues",
+	"GET /api/v1/results",
+	"GET /api/v1/results.csv",
+	"GET /api/v1/results/{id}",
+	"GET /api/v1/runs",
+	"GET /api/v1/runs/{id}",
+	"GET /api/v1/schedules",
+	"GET /api/v1/schedules/{id}",
+	"GET /api/v1/schedules/{id}/next",
+	"GET /api/v1/settings",
+	"GET /api/v1/settings/tokens",
+	"GET /api/v1/stats/summary",
+	"GET /api/v1/tags",
+	"GET /api/v1/targets",
+	"GET /api/v1/targets/deleted",
+	"GET /api/v1/targets/{id}",
+	"GET /api/v1/targets/{id}/history",
+	"GET /api/v1/targets/{id}/latest",
+	"GET /api/v1/targets/{id}/revisions",
+	"GET /auth/logout",
+	"GET /auth/mode",
+	"GET /auth/oidc/callback",
+	"GET /auth/oidc/start",
+	"GET /healthz",
+	"GET /metrics",
+	"POST /api/v1/iperf3/servers/refresh",
+	"POST /api/v1/queues",
+	"POST /api/v1/results/{id}/reexecute",
+	"POST /api/v1/runs",
+	"POST /api/v1/schedules",
+	"POST /api/v1/schedules/validate",
+	"POST /api/v1/schedules/{id}/run",
+	"POST /api/v1/settings/test/notify/{channel_id}",
+	"POST /api/v1/settings/test/{target}",
+	"POST /api/v1/settings/tokens",
+	"POST /api/v1/targets",
+	"POST /api/v1/targets/deleted/{id}/restore",
+	"POST /api/v1/targets/test",
+	"POST /api/v1/targets/{id}/revisions/{version}/revert",
+	"POST /api/v1/targets/{id}/run",
+	"POST /auth/logout",
+	"PUT /api/v1/queues/{id}",
+	"PUT /api/v1/results/{id}/tags",
+	"PUT /api/v1/schedules/{id}",
+	"PUT /api/v1/settings",
+	"PUT /api/v1/tags/{id}",
+	"PUT /api/v1/targets/{id}",
 }
 
 // TestSpecCoversRoutes fails when an /api/v1 route is registered on the
@@ -74,8 +139,22 @@ func TestSpecCoversRoutes(t *testing.T) {
 		}
 	}
 
-	if len(routed) < 40 {
-		t.Fatalf("only %d routes discovered; walker broken?", len(routed))
+	want := map[string]bool{}
+	for _, r := range baseRoutes {
+		want[r] = true
+	}
+	for r := range want {
+		if !routed[r] {
+			t.Errorf("route %s from the original router is missing", r)
+		}
+		if !documented[r] {
+			t.Errorf("route %s from the original router is not in the spec", r)
+		}
+	}
+	for r := range routed {
+		if !want[r] {
+			t.Errorf("route %s is new relative to the original router; add it to baseRoutes", r)
+		}
 	}
 	for r := range routed {
 		if !documented[r] {
@@ -85,6 +164,51 @@ func TestSpecCoversRoutes(t *testing.T) {
 	for d := range documented {
 		if !routed[d] {
 			t.Errorf("spec documents %s but no such route is registered", d)
+		}
+	}
+}
+
+// concretePath fills path parameters with a placeholder.
+func concretePath(p string) string {
+	var b strings.Builder
+	for i := 0; i < len(p); i++ {
+		if p[i] == '{' {
+			for p[i] != '}' {
+				i++
+			}
+			b.WriteString("1")
+			continue
+		}
+		b.WriteByte(p[i])
+	}
+	return b.String()
+}
+
+func isPublicRoute(path string) bool {
+	return path == "/healthz" || path == "/metrics" || strings.HasPrefix(path, "/auth/")
+}
+
+// TestAuthGatesEveryRoute checks that a denied caller gets 401 on every
+// non-public route, the spec and docs included, and that a non-admin gets
+// 403 on every mutating /api/v1 route.
+func TestAuthGatesEveryRoute(t *testing.T) {
+	t.Parallel()
+	routes := append([]string{"GET /openapi.json", "GET /openapi.yaml", "GET /docs"}, baseRoutes...)
+
+	deny := newParityAPI(t, stubAuth{})
+	viewer := newParityAPI(t, stubAuth{&auth.Identity{Mode: "forward_auth", Source: auth.SourceForward}})
+	for _, r := range routes {
+		method, path, _ := strings.Cut(r, " ")
+		path = concretePath(path)
+		if !isPublicRoute(path) {
+			if rec := send(deny, method, path, "", ""); rec.Code != http.StatusUnauthorized {
+				t.Errorf("%s %s denied = %d, want 401", method, path, rec.Code)
+			}
+		}
+		if strings.HasPrefix(path, "/api/v1/") && method != http.MethodGet {
+			if rec := send(viewer, method, path, "application/json", "{}"); rec.Code != http.StatusForbidden {
+				t.Errorf("%s %s as viewer = %d, want 403", method, path, rec.Code)
+			}
 		}
 	}
 }

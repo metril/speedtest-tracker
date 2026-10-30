@@ -185,6 +185,7 @@ func New(deps Deps) http.Handler {
 
 	// Typed (huma) operations, the OpenAPI document and the docs UI share
 	// one middleware stack with the legacy /api/v1 group below.
+	apiChain := chi.Chain(middleware.Timeout(requestTimeout), authMW, writeGuard)
 	typed := r.With(middleware.Timeout(requestTimeout), authMW, writeGuard, withRequest, etagMiddleware)
 	api := newHumaAPI(typed)
 	deps.registerAPI(api, false)
@@ -203,17 +204,6 @@ func New(deps Deps) http.Handler {
 		r.With(authMW, middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
 	}
 
-	// Unknown /api/v1 paths still pass the auth gate first (a 401 rather
-	// than the SPA fallback for an unauthenticated probe), then fall
-	// through to the same not-found handling as everywhere else.
-	typed.HandleFunc("/api/v1/*", func(w http.ResponseWriter, r *http.Request) {
-		if deps.UI != nil {
-			deps.UI.ServeHTTP(w, r)
-			return
-		}
-		http.NotFound(w, r)
-	})
-
 	// OIDC login/logout live outside both the /api/v1 auth middleware and
 	// requestTimeout group: a browser redirect flow, not an API call.
 	// /auth/mode is mounted alongside them for the same reason: the
@@ -226,9 +216,29 @@ func New(deps Deps) http.Handler {
 
 	// The SPA is not gated: it is a static shell that fetches
 	// /api/v1/me itself and renders a sign-in hint on 401.
+	// Unknown /api/v1 paths and wrong methods still pass the auth gate
+	// first (a 401 rather than the SPA fallback or a bare 405 for an
+	// unauthenticated probe), as they did under the former /api/v1
+	// subrouter.
+	notFound := http.NotFound
 	if deps.UI != nil {
-		r.NotFound(deps.UI.ServeHTTP)
+		notFound = deps.UI.ServeHTTP
 	}
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/v1/") {
+			apiChain.HandlerFunc(notFound).ServeHTTP(w, req)
+			return
+		}
+		notFound(w, req)
+	})
+	methodNotAllowed := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMethodNotAllowed) }
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/v1/") {
+			apiChain.HandlerFunc(methodNotAllowed).ServeHTTP(w, req)
+			return
+		}
+		methodNotAllowed(w, req)
+	})
 	return r
 }
 

@@ -62,7 +62,11 @@ func newTestAPIWith(t *testing.T, tweak func(*Deps)) (http.Handler, *store.Store
 	reg.Register(fake.New())
 	run := &stubRunner{nextID: 77, cancelOK: true}
 
-	t.Cleanup(func() { reloadHook = nil })
+	t.Cleanup(func() {
+		if reloadHook != nil { // read-only for tests that never set it (parallel-safe)
+			reloadHook = nil
+		}
+	})
 
 	deps := Deps{
 		Pinger:   db,

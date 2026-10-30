@@ -6,7 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"mime"
 	"net/http"
+	"reflect"
 	"sort"
 	"strings"
 
@@ -73,6 +75,8 @@ func newHumaError(status int, msg string, errs ...error) huma.StatusError {
 			message = d.Message
 		case strings.HasPrefix(d.Location, "path.id"):
 			message = "id must be a positive integer"
+		case strings.HasPrefix(d.Location, "path.version"):
+			message = "version must be a positive integer"
 		default:
 			message = d.Location + ": " + d.Message
 		}
@@ -86,8 +90,13 @@ func newHumaError(status int, msg string, errs ...error) huma.StatusError {
 		return apiErr(http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
 	}
 	switch status {
-	case http.StatusUnprocessableEntity, http.StatusRequestEntityTooLarge:
+	case http.StatusRequestEntityTooLarge:
 		status = http.StatusBadRequest
+		message = "malformed JSON body: http: request body too large"
+	case http.StatusUnprocessableEntity:
+		status = http.StatusBadRequest
+	case http.StatusUnsupportedMediaType:
+		code = "unsupported_media_type"
 	case http.StatusNotFound:
 		code = "not_found"
 	case http.StatusUnauthorized:
@@ -177,6 +186,32 @@ type route struct {
 	Method, Path, ID, Tag, Summary string
 	Status                         int   // success status; 0 means 200 (204 without a body)
 	Errors                         []int // statuses beyond the defaults
+	// Pre runs before the request is parsed (path params, body); a non-zero
+	// status short-circuits with that status and message.
+	Pre func(ctx huma.Context) (status int, code, msg string)
+}
+
+var jsonBodyMethods = map[string]bool{http.MethodPost: true, http.MethodPut: true, http.MethodPatch: true}
+
+// jsonContentType refuses a non-JSON Content-Type on a request that
+// carries a body, like decodeJSON did; an absent one is tolerated.
+func jsonContentType(ctx huma.Context) (int, string, string) {
+	ct := ctx.Header("Content-Type")
+	if ct == "" || ctx.Header("Content-Length") == "0" {
+		return 0, "", ""
+	}
+	if mt, _, err := mime.ParseMediaType(ct); err != nil || mt != "application/json" {
+		return http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json"
+	}
+	return 0, "", ""
+}
+
+// writeRaw writes a typed error response from middleware.
+func writeRaw(api huma.API, ctx huma.Context, status int, code, msg string) {
+	e := apiErr(status, code, msg)
+	ctx.SetHeader("Content-Type", "application/json")
+	ctx.SetStatus(status)
+	_ = json.NewEncoder(ctx.BodyWriter()).Encode(e.ErrorResponse)
 }
 
 // register adds a typed operation to api.
@@ -191,6 +226,27 @@ func register[I, O any](api huma.API, rt route, h func(context.Context, *I) (*O,
 		SkipValidateParams: true,
 		SkipValidateBody:   true,
 		MaxBodyBytes:       1 << 20,
+		BodyReadTimeout:    -1,
+	}
+	var in I
+	_, hasBody := reflect.TypeOf(in).FieldByName("Body")
+	if hasBody && jsonBodyMethods[rt.Method] || rt.Pre != nil {
+		pre := rt.Pre
+		op.Middlewares = huma.Middlewares{func(ctx huma.Context, next func(huma.Context)) {
+			if hasBody && jsonBodyMethods[rt.Method] {
+				if s, c, m := jsonContentType(ctx); s != 0 {
+					writeRaw(api, ctx, s, c, m)
+					return
+				}
+			}
+			if pre != nil {
+				if s, c, m := pre(ctx); s != 0 {
+					writeRaw(api, ctx, s, c, m)
+					return
+				}
+			}
+			next(ctx)
+		}}
 	}
 	errs := map[int]bool{http.StatusUnauthorized: true}
 	if rt.Method != http.MethodGet {

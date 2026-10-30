@@ -1694,10 +1694,26 @@ func (d Deps) testIntegration(ctx context.Context, in *testIntegrationIn) (*json
 		body = *in.Body
 	}
 	if target == "oidc" {
+		for _, f := range []struct {
+			set  bool
+			name string
+		}{{body.URL != nil, "url"}, {body.AuthHeader != nil, "auth_header"}, {body.Auth != nil, "auth"}} {
+			if f.set {
+				return nil, badRequest(`malformed JSON body: json: unknown field "` + f.name + `"`)
+			}
+		}
 		return d.testOIDC(ctx, body)
 	}
 	if target != "vm" && target != "vl" {
 		return nil, notFound("unknown test target " + target)
+	}
+	for _, f := range []struct {
+		set  bool
+		name string
+	}{{body.Issuer != nil, "issuer"}, {body.ClientID != nil, "client_id"}, {body.ClientSecret != nil, "client_secret"}} {
+		if f.set {
+			return nil, badRequest(`malformed JSON body: json: unknown field "` + f.name + `"`)
+		}
 	}
 	cur, err := d.Settings.Integrations(ctx)
 	if err != nil {
