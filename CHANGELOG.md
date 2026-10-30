@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.8.10](https://github.com/metril/speedtest-tracker/compare/v0.8.9...v0.8.10) (2026-10-30)
+
+
+### Bug Fixes
+
+* **runner:** do not cancel runs still being created or finalized ([4914658](https://github.com/metril/speedtest-tracker/commit/49146584d51cf29524daac968171f353fb710b35))
+* **runner:** reap orphaned runs at startup and allow canceling them ([05e27e9](https://github.com/metril/speedtest-tracker/commit/05e27e92baede174b0f50347b89dd7b85dda84d5))
+* **runner:** unblock schedules stuck behind orphaned runs ([fcc20df](https://github.com/metril/speedtest-tracker/commit/fcc20dfeba8e3e29489951791f4399ac75e9e500))
+
 ## [0.8.9](https://github.com/metril/speedtest-tracker/compare/v0.8.8...v0.8.9) (2026-10-05)
 
 
