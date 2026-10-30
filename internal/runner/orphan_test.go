@@ -3,6 +3,7 @@ package runner
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
@@ -30,6 +31,49 @@ func TestCancelOrphanedRun(t *testing.T) {
 	}
 	if r.Cancel(99999) {
 		t.Error("Cancel of unknown run = true, want false")
+	}
+}
+
+func TestCancelDuringFinalWriteKeepsDone(t *testing.T) {
+	t.Parallel()
+	r, db, _ := newTestRunner(t)
+	entered, release := make(chan struct{}), make(chan struct{})
+	r.statusHook = func(_ int64, status string, _ int) error {
+		if status == "done" {
+			close(entered)
+			<-release
+		}
+		return nil
+	}
+	id := enqueueFakeTarget(t, r, db)
+	<-entered
+	if r.Cancel(id) {
+		t.Error("Cancel during final status write = true, want false")
+	}
+	close(release)
+	if run := waitForRun(t, db, id); run.Status != "done" {
+		t.Fatalf("status = %q, want done", run.Status)
+	}
+}
+
+func TestSetRunStatusRetrySucceedsAfterOneFailure(t *testing.T) {
+	t.Parallel()
+	var buf bytes.Buffer
+	r, db := newTestRunnerWith(t, func(c *Config) {
+		c.Logger = slog.New(slog.NewTextHandler(&buf, nil))
+	})
+	r.statusHook = func(_ int64, status string, attempt int) error {
+		if status == "done" && attempt == 0 {
+			return errors.New("transient")
+		}
+		return nil
+	}
+	id := enqueueFakeTarget(t, r, db)
+	if run := waitForRun(t, db, id); run.Status != "done" {
+		t.Fatalf("status = %q, want done", run.Status)
+	}
+	if n := strings.Count(buf.String(), "level=ERROR"); n != 1 {
+		t.Errorf("error logs = %d, want 1: %q", n, buf.String())
 	}
 }
 
