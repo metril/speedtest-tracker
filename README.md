@@ -13,7 +13,7 @@ tag management.
 
 ## Requirements
 
-- Go 1.25+ (toolchain auto-download handles patch versions)
+- Go 1.26+ (toolchain auto-download handles patch versions)
 - Node.js for building the web UI
 
 ## Quick start
@@ -224,6 +224,13 @@ restart to switch back.
 - The SPA shell itself is served without authentication — it contains no
   data and calls `GET /api/v1/me` on load to decide what to render.
 - Tokens are full-access in this release; there is no per-token scoping.
+
+## API documentation
+
+The OpenAPI 3.1 description is served at `/openapi.json` and `/openapi.yaml`,
+with interactive docs at `/docs` (same auth as the API). It is generated from
+the Go types; run `make openapi` after changing an endpoint to refresh
+`openapi.json` and the web client types (CI fails on drift).
 
 ## Engines
 

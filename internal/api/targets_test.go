@@ -62,7 +62,11 @@ func newTestAPIWith(t *testing.T, tweak func(*Deps)) (http.Handler, *store.Store
 	reg.Register(fake.New())
 	run := &stubRunner{nextID: 77, cancelOK: true}
 
-	t.Cleanup(func() { reloadHook = nil })
+	t.Cleanup(func() {
+		if reloadHook != nil { // read-only for tests that never set it (parallel-safe)
+			reloadHook = nil
+		}
+	})
 
 	deps := Deps{
 		Pinger:   db,
@@ -286,7 +290,7 @@ func TestCreateTargetValidation(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
 			}
-			var body errorBody
+			var body ErrorResponse
 			json.NewDecoder(rec.Body).Decode(&body)
 			if body.Error.Code != "invalid_request" || body.Error.Message == "" {
 				t.Errorf("envelope = %+v", body.Error)

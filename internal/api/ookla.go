@@ -103,21 +103,31 @@ func (l *tokenBucketLimiter) Allow() bool {
 // query, remote is never attempted, so a local failure there just yields an
 // empty list. A 503 "unavailable" is reserved for neither source being
 // configured at all.
-func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
+type listOoklaIn struct {
+	Q       string `query:"q" doc:"Free-text search (name, location, host, or a place to geocode)."`
+	Country string `query:"country" doc:"Restrict to a 2-letter country code."`
+	Limit   string `query:"limit" doc:"Maximum servers to return (default 20, max 200)."`
+}
+
+// OoklaSearchResult is the GET /ookla/servers body.
+type OoklaSearchResult struct {
+	Near    string         `json:"near" doc:"Display name of the geocoded place when the query resolved through geocoding."`
+	Servers []ookla.Server `json:"servers"`
+}
+
+func (d Deps) listOoklaServers(ctx context.Context, in *listOoklaIn) (*jsonOut[OoklaSearchResult], error) {
 	if d.ServerList == nil && d.OoklaSearch == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "ookla server list not configured")
-		return
+		return nil, apiErr(http.StatusServiceUnavailable, "unavailable", "ookla server list not configured")
 	}
 
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	q := strings.TrimSpace(in.Q)
 	lowerQ := strings.ToLower(q)
-	limit := parseOoklaLimit(r.URL.Query().Get("limit"))
+	limit := parseOoklaLimit(in.Limit)
 
 	country := ""
-	if raw := strings.TrimSpace(r.URL.Query().Get("country")); raw != "" {
+	if raw := strings.TrimSpace(in.Country); raw != "" {
 		if len(raw) != 2 || !isASCIILetters(raw) {
-			errBadRequest(w, "country must be a 2-letter country code")
-			return
+			return nil, badRequest("country must be a 2-letter country code")
 		}
 		country = strings.ToLower(raw)
 	}
@@ -128,7 +138,7 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 
 	var localErr error
 	if d.ServerList != nil {
-		servers, err := d.ServerList.Servers(r.Context())
+		servers, err := d.ServerList.Servers(ctx)
 		if err != nil {
 			localErr = err
 			if d.Logger != nil {
@@ -156,7 +166,7 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 			}
 		} else {
 			remoteAttempted = true
-			remote, err := d.OoklaSearch.Search(r.Context(), ooklaweb.SearchRequest{Q: q, Country: country, Limit: limit})
+			remote, err := d.OoklaSearch.Search(ctx, ooklaweb.SearchRequest{Q: q, Country: country, Limit: limit})
 			if err != nil {
 				remoteErr = err
 				if d.Logger != nil {
@@ -176,15 +186,14 @@ func (d Deps) listOoklaServers(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if q != "" && localErr != nil && (!remoteAttempted || remoteErr != nil) {
-		writeError(w, http.StatusBadGateway, "server_list_failed", "loading the server list failed; see server logs")
-		return
+		return nil, apiErr(http.StatusBadGateway, "server_list_failed", "loading the server list failed; see server logs")
 	}
 
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"servers": out, "near": near})
+	return &jsonOut[OoklaSearchResult]{OoklaSearchResult{Near: near, Servers: out}}, nil
 }
 
 func parseOoklaLimit(raw string) int {

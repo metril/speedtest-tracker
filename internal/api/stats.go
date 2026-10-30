@@ -1,8 +1,7 @@
 package api
 
 import (
-	"encoding/json"
-	"net/http"
+	"context"
 	"strconv"
 	"sync"
 	"time"
@@ -20,7 +19,7 @@ const summaryTTL = 30 * time.Second
 const maxSummaryCacheEntries = 64
 
 type summaryEntry struct {
-	body []byte
+	body *store.SummaryStats
 	at   time.Time
 }
 
@@ -38,7 +37,7 @@ func newSummaryCache(ttl time.Duration) *summaryCache {
 	return &summaryCache{ttl: ttl, entries: map[string]summaryEntry{}, now: time.Now}
 }
 
-func (c *summaryCache) get(key string) ([]byte, bool) {
+func (c *summaryCache) get(key string) (*store.SummaryStats, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	e, ok := c.entries[key]
@@ -48,7 +47,7 @@ func (c *summaryCache) get(key string) ([]byte, bool) {
 	return e.body, true
 }
 
-func (c *summaryCache) set(key string, body []byte) {
+func (c *summaryCache) set(key string, body *store.SummaryStats) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if _, exists := c.entries[key]; !exists {
@@ -79,27 +78,38 @@ func slaKeyPart(sla store.SLAPlan) string {
 // cached body for up to summaryTTL. offset=1 shifts the resolved window
 // back by its own span, giving the caller the immediately preceding
 // period of equal length for a previous-period comparison.
-func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Query().Get("from") != "" || r.URL.Query().Get("to") != "" {
-		errBadRequest(w, "stats/summary only accepts range=24h|7d|30d, not an explicit from/to pair")
-		return
+type statsSummaryIn struct {
+	Range  string `query:"range" enum:"24h,7d,30d" doc:"Named window ending now (default 24h)."`
+	Offset string `query:"offset" enum:"0,1" doc:"1 shifts the window back by its own span (previous period)."`
+	From   string `query:"from" doc:"Not accepted; present only to reject explicit windows."`
+	To     string `query:"to" doc:"Not accepted; present only to reject explicit windows."`
+}
+
+type statsSummaryOut struct {
+	CacheControl string `header:"Cache-Control"`
+	Body         store.SummaryStats
+}
+
+func (d Deps) statsSummary(ctx context.Context, in *statsSummaryIn) (*statsSummaryOut, error) {
+	if in.From != "" || in.To != "" {
+		return nil, badRequest("stats/summary only accepts range=24h|7d|30d, not an explicit from/to pair")
 	}
-	offset, ok := intQuery(w, r, "offset", 0)
+	q := queryOf("range", in.Range, "offset", in.Offset)
+	c := &errCapture{}
+	offset, ok := intQuery(c, q, "offset", 0)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	if offset < 0 || offset > 1 {
-		errBadRequest(w, "offset must be 0 or 1")
-		return
+		return nil, badRequest("offset must be 0 or 1")
 	}
-	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
+	from, to, ok := rangeWindow(c, q, defaultHistorySpan)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	from, to, ok = shiftWindow(from, to, offset)
 	if !ok {
-		errBadRequest(w, "invalid window")
-		return
+		return nil, badRequest("invalid window")
 	}
 
 	// The general SLA plan is resolved before the cache lookup (not just
@@ -109,41 +119,27 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 	// summaryTTL.
 	sla := store.SLAPlan{}
 	if d.Settings != nil {
-		g, err := d.Settings.General(r.Context())
+		g, err := d.Settings.General(ctx)
 		if err != nil {
-			internalError(w, d.Logger, "load general settings", err)
-			return
+			return nil, internalErr(d.Logger, "load general settings", err)
 		}
 		sla = store.SLAPlan{DownloadMbps: g.SLADownloadMbps, UploadMbps: g.SLAUploadMbps, TolerancePct: g.SLATolerancePct}
 	}
 	key := from + "|" + to + "|" + strconv.Itoa(offset) + "|" + slaKeyPart(sla)
 	const cacheControl = "private, max-age=30"
 	if body, hit := d.summary.get(key); hit {
-		w.Header().Set("Cache-Control", cacheControl)
 		if d.Metrics != nil {
 			d.Metrics.SummaryCacheHit()
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write(body)
-		return
+		return &statsSummaryOut{CacheControl: cacheControl, Body: *body}, nil
 	}
 	if d.Metrics != nil {
 		d.Metrics.SummaryCacheMiss()
 	}
-	stats, err := d.Store.Summary(r.Context(), from, to, sla)
+	stats, err := d.Store.Summary(ctx, from, to, sla)
 	if err != nil {
-		internalError(w, d.Logger, "summary failed", err)
-		return
+		return nil, internalErr(d.Logger, "summary failed", err)
 	}
-	body, err := json.Marshal(stats)
-	if err != nil {
-		internalError(w, d.Logger, "summary encode failed", err)
-		return
-	}
-	d.summary.set(key, body)
-	w.Header().Set("Cache-Control", cacheControl)
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write(body)
+	d.summary.set(key, stats)
+	return &statsSummaryOut{CacheControl: cacheControl, Body: *stats}, nil
 }

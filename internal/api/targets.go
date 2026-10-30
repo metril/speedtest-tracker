@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -48,14 +47,6 @@ type targetBody struct {
 
 // pathID parses the {id} URL parameter, answering 400 when it is not an
 // integer. It reports whether parsing succeeded.
-func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
-		errBadRequest(w, "id must be a positive integer")
-		return 0, false
-	}
-	return id, true
-}
 
 // validateTarget checks required fields, resolves queue_id (defaulting to
 // the wan queue when absent, and rejecting an id that names no queue) and
@@ -121,95 +112,114 @@ func (d Deps) validateTarget(ctx context.Context, w http.ResponseWriter, b *targ
 	return true
 }
 
-func (d Deps) listTargets(w http.ResponseWriter, r *http.Request) {
-	targets, err := d.Store.ListTargets(r.Context())
-	if err != nil {
-		internalError(w, d.Logger, "list targets failed", err)
-		return
-	}
-	writeJSON(w, http.StatusOK, targets)
+type targetIn struct {
+	ID   int64 `path:"id" minimum:"1" doc:"Resource ID."`
+	Body targetBody
 }
 
-func (d Deps) createTarget(w http.ResponseWriter, r *http.Request) {
-	var b targetBody
-	if !decodeJSON(w, r, &b) || !d.validateTarget(r.Context(), w, &b) {
-		return
+type targetCreateIn struct {
+	Body targetBody
+}
+
+func (d Deps) validateTargetErr(ctx context.Context, b *targetBody) error {
+	c := &errCapture{}
+	if d.validateTarget(ctx, c, b) {
+		return nil
+	}
+	return c.err()
+}
+
+func (d Deps) listTargets(ctx context.Context, _ *struct{}) (*jsonOut[[]store.Target], error) {
+	targets, err := d.Store.ListTargets(ctx)
+	if err != nil {
+		return nil, internalErr(d.Logger, "list targets failed", err)
+	}
+	return &jsonOut[[]store.Target]{targets}, nil
+}
+
+func (d Deps) createTarget(ctx context.Context, in *targetCreateIn) (*jsonOut[*store.Target], error) {
+	b := in.Body
+	if err := d.validateTargetErr(ctx, &b); err != nil {
+		return nil, err
 	}
 	t := &store.Target{Name: b.Name, Engine: b.Engine, Enabled: b.Enabled,
 		QueueID: b.QueueID, Options: b.Options, Thresholds: b.Thresholds}
-	id, err := d.Store.CreateTarget(r.Context(), t)
+	id, err := d.Store.CreateTarget(ctx, t)
 	if err != nil {
-		internalError(w, d.Logger, "create target failed", err)
-		return
+		return nil, internalErr(d.Logger, "create target failed", err)
 	}
-	created, err := d.Store.GetTarget(r.Context(), id)
-	if storeError(w, d.Logger, "target", err) {
-		return
+	created, err := d.Store.GetTarget(ctx, id)
+	if e := storeErr(d.Logger, "target", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusCreated, created)
+	return &jsonOut[*store.Target]{created}, nil
 }
 
-func (d Deps) getTarget(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) getTarget(ctx context.Context, in *idIn) (*jsonOut[*store.Target], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	t, err := d.Store.GetTarget(r.Context(), id)
-	if storeError(w, d.Logger, "target", err) {
-		return
+	t, err := d.Store.GetTarget(ctx, in.ID)
+	if e := storeErr(d.Logger, "target", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusOK, t)
+	return &jsonOut[*store.Target]{t}, nil
 }
 
-func (d Deps) updateTarget(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) updateTarget(ctx context.Context, in *targetIn) (*jsonOut[*store.Target], error) {
+	if err := (idIn{in.ID}).check(); err != nil {
+		return nil, err
 	}
-	var b targetBody
-	if !decodeJSON(w, r, &b) || !d.validateTarget(r.Context(), w, &b) {
-		return
+	b := in.Body
+	if err := d.validateTargetErr(ctx, &b); err != nil {
+		return nil, err
 	}
-	t := &store.Target{ID: id, Name: b.Name, Engine: b.Engine, Enabled: b.Enabled,
+	t := &store.Target{ID: in.ID, Name: b.Name, Engine: b.Engine, Enabled: b.Enabled,
 		QueueID: b.QueueID, Options: b.Options, Thresholds: b.Thresholds}
-	if err := d.Store.UpdateTarget(r.Context(), t); err != nil {
-		storeError(w, d.Logger, "target", err)
-		return
+	if err := d.Store.UpdateTarget(ctx, t); err != nil {
+		return nil, storeErr(d.Logger, "target", err)
 	}
-	updated, err := d.Store.GetTarget(r.Context(), id)
-	if storeError(w, d.Logger, "target", err) {
-		return
+	updated, err := d.Store.GetTarget(ctx, in.ID)
+	if e := storeErr(d.Logger, "target", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusOK, updated)
+	return &jsonOut[*store.Target]{updated}, nil
 }
 
-func (d Deps) deleteTarget(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) deleteTarget(ctx context.Context, in *idIn) (*struct{}, error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if err := d.Store.DeleteTarget(r.Context(), id); err != nil {
-		storeError(w, d.Logger, "target", err)
-		return
+	if err := d.Store.DeleteTarget(ctx, in.ID); err != nil {
+		return nil, storeErr(d.Logger, "target", err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return nil, nil
 }
 
-func (d Deps) runTarget(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) runTarget(ctx context.Context, in *idIn) (*jsonOut[RunQueued], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if _, err := d.Store.GetTarget(r.Context(), id); storeError(w, d.Logger, "target", err) {
-		return
+	if _, err := d.Store.GetTarget(ctx, in.ID); err != nil {
+		return nil, storeErr(d.Logger, "target", err)
 	}
-	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
-		Trigger: "manual", TargetIDs: []int64{id}})
+	runID, err := d.Runner.Enqueue(ctx, runner.RunRequest{
+		Trigger: "manual", TargetIDs: []int64{in.ID}})
 	if err != nil {
-		enqueueError(w, d.Logger, err)
-		return
+		return nil, enqueueErr(d.Logger, err)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
+	return &jsonOut[RunQueued]{RunQueued{RunID: runID}}, nil
+}
+
+// RunQueued is the 202 body returned when a run was enqueued.
+type RunQueued struct {
+	RunID int64 `json:"run_id" doc:"ID of the run that was enqueued."`
+}
+
+// TargetTestResponse is returned by POST /targets/test.
+type TargetTestResponse struct {
+	Engine string `json:"engine"`
+	OK     bool   `json:"ok"`
 }
 
 // enqueueError maps runner errors onto status codes.
@@ -226,27 +236,23 @@ func enqueueError(w http.ResponseWriter, logger *slog.Logger, err error) {
 	}
 }
 
-func (d Deps) targetLatest(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) targetLatest(ctx context.Context, in *idIn) (*jsonOut[*store.Result], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	res, err := d.Store.LatestResultForTarget(r.Context(), id)
-	if storeError(w, d.Logger, "result", err) {
-		return
+	res, err := d.Store.LatestResultForTarget(ctx, in.ID)
+	if e := storeErr(d.Logger, "result", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusOK, res)
+	return &jsonOut[*store.Result]{res}, nil
 }
 
 // testTarget validates an engine/options pair without storing anything.
-func (d Deps) testTarget(w http.ResponseWriter, r *http.Request) {
-	var b targetBody
-	if !decodeJSON(w, r, &b) {
-		return
-	}
+func (d Deps) testTarget(ctx context.Context, in *targetCreateIn) (*jsonOut[TargetTestResponse], error) {
+	b := in.Body
 	b.Name = "validation" // name is irrelevant for a validation-only call
-	if !d.validateTarget(r.Context(), w, &b) {
-		return
+	if err := d.validateTargetErr(ctx, &b); err != nil {
+		return nil, err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "engine": b.Engine})
+	return &jsonOut[TargetTestResponse]{TargetTestResponse{Engine: b.Engine, OK: true}}, nil
 }

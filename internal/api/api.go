@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -154,6 +155,7 @@ func New(deps Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
 	r.Use(setRequestIDHeader)
+	r.Use(trimAPISlash)
 
 	r.Get("/healthz", healthz(deps.Pinger))
 
@@ -177,6 +179,19 @@ func New(deps Deps) http.Handler {
 		authMW = deps.Auth.Handler
 	}
 
+	if deps.Store != nil && deps.summary == nil {
+		deps.summary = newSummaryCache(summaryTTL)
+	}
+
+	// Typed (huma) operations, the OpenAPI document and the docs UI share
+	// one middleware stack with the legacy /api/v1 group below.
+	apiChain := chi.Chain(middleware.Timeout(requestTimeout), authMW, writeGuard)
+	typed := r.With(middleware.Timeout(requestTimeout), authMW, writeGuard, withRequest, etagMiddleware)
+	api := newHumaAPI(typed)
+	deps.registerAPI(api, false)
+	addDocsOnly(api)
+	finalizeSpec(api)
+
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
 		r.With(authMW).Get("/api/v1/events", sse.Handler(deps.Hub))
@@ -188,91 +203,6 @@ func New(deps Deps) http.Handler {
 	if deps.Store != nil {
 		r.With(authMW, middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
 	}
-
-	r.Route("/api/v1", func(v1 chi.Router) {
-		v1.Use(middleware.Timeout(requestTimeout))
-		v1.Use(authMW)
-		v1.Use(writeGuard)
-		// /me must work even on a store-less router (e.g. the `run
-		// --engine` CLI path), since the SPA always calls it first to
-		// decide what to render.
-		v1.Get("/me", deps.me)
-		if deps.Store == nil {
-			return
-		}
-		if deps.summary == nil {
-			deps.summary = newSummaryCache(summaryTTL)
-		}
-		v1.Route("/targets", func(t chi.Router) {
-			t.Get("/", etagJSON(deps.listTargets))
-			t.Post("/", deps.createTarget)
-			t.Post("/test", deps.testTarget)
-			// Registered before "/{id}" so chi's router does not treat
-			// "deleted" as an {id} value.
-			t.Route("/deleted", func(dl chi.Router) {
-				dl.Get("/", deps.listDeletedTargets)
-				dl.Post("/{id}/restore", deps.restoreDeletedTarget)
-			})
-			t.Get("/{id}", deps.getTarget)
-			t.Put("/{id}", deps.updateTarget)
-			t.Delete("/{id}", deps.deleteTarget)
-			t.Post("/{id}/run", deps.runTarget)
-			t.Get("/{id}/latest", deps.targetLatest)
-			t.Get("/{id}/history", deps.targetHistory)
-			t.Get("/{id}/revisions", deps.listTargetRevisions)
-			t.Post("/{id}/revisions/{version}/revert", deps.revertTargetRevision)
-		})
-		v1.Route("/queues", func(q chi.Router) {
-			q.Get("/", etagJSON(deps.listQueues))
-			q.Post("/", deps.createQueue)
-			q.Put("/{id}", deps.updateQueue)
-			q.Delete("/{id}", deps.deleteQueue)
-		})
-		v1.Route("/schedules", func(s chi.Router) {
-			s.Get("/", etagJSON(deps.listSchedules))
-			s.Post("/", deps.createSchedule)
-			s.Post("/validate", deps.validateCron)
-			s.Get("/{id}", deps.getSchedule)
-			s.Put("/{id}", deps.updateSchedule)
-			s.Delete("/{id}", deps.deleteSchedule)
-			s.Post("/{id}/run", deps.runSchedule)
-			s.Get("/{id}/next", deps.scheduleNext)
-		})
-		v1.Get("/ookla/servers", deps.listOoklaServers)
-		v1.Route("/iperf3/servers", func(ip chi.Router) {
-			ip.Get("/", deps.listIperf3Servers)
-			ip.Post("/refresh", deps.refreshIperf3Servers)
-		})
-		v1.Route("/runs", func(rt chi.Router) {
-			rt.Get("/", etagJSON(deps.listRuns))
-			rt.Post("/", deps.createRun)
-			rt.Get("/{id}", deps.getRun)
-			rt.Delete("/{id}", deps.cancelRun)
-		})
-		v1.Route("/results", func(rs chi.Router) {
-			rs.Get("/", etagJSON(deps.listResults))
-			rs.Get("/{id}", deps.getResult)
-			rs.Delete("/{id}", deps.deleteResult)
-			rs.Post("/{id}/reexecute", deps.reexecuteResult)
-			rs.Put("/{id}/tags", deps.setResultTags)
-		})
-		v1.Route("/tags", func(tg chi.Router) {
-			tg.Get("/", deps.listTags)
-			tg.Put("/{id}", deps.renameTag)
-			tg.Delete("/{id}", deps.deleteTag)
-		})
-		v1.Get("/outages", deps.outages)
-		v1.Get("/stats/summary", deps.statsSummary)
-		if deps.Settings != nil {
-			v1.Get("/settings", deps.getSettings)
-			v1.Put("/settings", deps.putSettings)
-			v1.Post("/settings/test/notify/{channel_id}", deps.testNotifyChannel)
-			v1.Post("/settings/test/{target}", deps.testIntegration)
-			v1.Get("/settings/tokens", deps.listTokens)
-			v1.Post("/settings/tokens", deps.createToken)
-			v1.Delete("/settings/tokens/{id}", deps.deleteToken)
-		}
-	})
 
 	// OIDC login/logout live outside both the /api/v1 auth middleware and
 	// requestTimeout group: a browser redirect flow, not an API call.
@@ -286,9 +216,29 @@ func New(deps Deps) http.Handler {
 
 	// The SPA is not gated: it is a static shell that fetches
 	// /api/v1/me itself and renders a sign-in hint on 401.
+	// Unknown /api/v1 paths and wrong methods still pass the auth gate
+	// first (a 401 rather than the SPA fallback or a bare 405 for an
+	// unauthenticated probe), as they did under the former /api/v1
+	// subrouter.
+	notFound := http.NotFound
 	if deps.UI != nil {
-		r.NotFound(deps.UI.ServeHTTP)
+		notFound = deps.UI.ServeHTTP
 	}
+	r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/v1/") {
+			apiChain.HandlerFunc(notFound).ServeHTTP(w, req)
+			return
+		}
+		notFound(w, req)
+	})
+	methodNotAllowed := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusMethodNotAllowed) }
+	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
+		if strings.HasPrefix(req.URL.Path, "/api/v1/") {
+			apiChain.HandlerFunc(methodNotAllowed).ServeHTTP(w, req)
+			return
+		}
+		methodNotAllowed(w, req)
+	})
 	return r
 }
 
@@ -368,4 +318,16 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(ww, r)
 		})
 	}
+}
+
+// trimAPISlash serves "/api/v1/x/" like "/api/v1/x": the former chi
+// subrouter mounts answered both forms.
+func trimAPISlash(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := r.URL.Path; len(p) > len("/api/v1/") && strings.HasPrefix(p, "/api/v1/") && strings.HasSuffix(p, "/") {
+			r.URL.Path = strings.TrimRight(p, "/")
+			r.URL.RawPath = ""
+		}
+		next.ServeHTTP(w, r)
+	})
 }

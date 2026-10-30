@@ -28,6 +28,10 @@ jobs:
           cache-dependency-path: web/package-lock.json
       - name: lint
         run: make lint
+      - name: openapi drift
+        run: |
+          make openapi
+          git diff --exit-code -- openapi.json web/src/lib/openapi.d.ts
 
   test:
     runs-on: ubuntu-latest

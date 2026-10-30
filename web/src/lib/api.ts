@@ -1,112 +1,70 @@
 export const ENGINES = ['ookla', 'cloudflare', 'iperf3'] as const;
 
-export interface Target {
-  id: number;
+import type { components } from './openapi';
+
+type S = components['schemas'];
+type Obj = Record<string, unknown>;
+
+// Wire types come from the OpenAPI document generated from the Go API
+// (`make openapi`); the overlays only narrow what the schema cannot express.
+export type Target = Omit<S['Target'], 'options' | 'thresholds' | 'rotation_index'> & {
+  options: Obj;
+  thresholds: Obj;
+  /** read-only rotation cursor; optional so hand-built fixtures stay valid. */
+  rotation_index?: number;
+};
+export type Queue = S['Queue'];
+export type Result = Omit<
+  S['Result'],
+  'options_snapshot' | 'status' | 'bytes_down' | 'bytes_up' | 'external_ip' | 'server_id'
+> &
+  Partial<Pick<S['Result'], 'bytes_down' | 'bytes_up' | 'external_ip' | 'server_id'>> & {
+    options_snapshot: Obj;
+    status: 'ok' | 'failed' | 'degraded';
+  };
+export type Run = Omit<S['Run'], 'status'> & {
+  status: 'queued' | 'running' | 'done' | 'failed' | 'canceled' | 'skipped';
+};
+export type OoklaServer = S['Server'];
+export type Iperf3Server = S['Iperf3Server'];
+export type OoklaSearchResult = S['OoklaSearchResult'];
+export type Iperf3ServersPage = S['Iperf3ServersPage'];
+export type ResultsPage = Omit<S['ResultsPage'], 'results'> & { results: Result[] };
+export type HistoryPoint = S['HistoryPoint'];
+export type History = S['HistoryResponse'];
+export type TargetSummary = Omit<S['TargetSummary'], 'latest'> & { latest: Result | null };
+export type SummaryStats = Omit<S['SummaryStats'], 'targets'> & { targets: TargetSummary[] };
+export type Incident = S['Incident'];
+export type TargetInput = {
   name: string;
   engine: string;
   enabled: boolean;
   queue_id: number;
-  queue_name: string;
-  options: Record<string, unknown>;
-  thresholds: Record<string, unknown>;
-  // rotation_index is read-only: the host/server-id rotation cursor the
-  // runner advances on each run. Optional here since it's only set by the
-  // live API response, not by test fixtures that build a Target by hand.
-  rotation_index?: number;
-  created_at: string;
-  updated_at: string;
-}
+  options: Obj;
+  thresholds?: Obj;
+};
+export type QueueInput = S['QueueBody'];
+export type RevisionAction = 'create' | 'update' | 'delete' | 'revert' | 'restore';
+export type TargetRevision = Omit<S['RevisionOut'], 'action' | 'snapshot'> & {
+  action: RevisionAction;
+  snapshot: Target;
+};
+export type DeletedTarget = S['DeletedTarget'];
+export type ScheduleRun = S['ScheduleRun'];
+export type Schedule = S['ScheduleView'];
+export type ScheduleInput = S['ScheduleBody'];
+export type ScheduleSaved = Omit<S['ScheduleSaved'], 'schedule'> & { schedule: Schedule };
+export type RunsPage = Omit<S['RunsPage'], 'runs'> & { runs: Run[] };
+export type ApiTokenInfo = S['APIToken'];
+export type CreatedToken = S['CreatedToken'];
+export type ConnectionTest = S['ConnectionTest'];
+export type Me = Omit<S['MeResponse'], 'mode'> & { mode: AuthMode; source?: string };
 
-export interface Queue {
-  id: number;
-  name: string;
-  created_at: string;
-}
-
-export interface Result {
-  id: number;
-  run_id: number | null;
-  target_id: number | null;
-  target_name: string;
-  engine: string;
-  options_snapshot: Record<string, unknown>;
-  status: 'ok' | 'failed' | 'degraded';
-  error?: string;
-  started_at: string;
-  duration_ms: number;
-  download_bps: number;
-  upload_bps: number;
-  ping_ms: number;
-  jitter_ms: number;
-  packet_loss_pct: number;
-  server_name: string;
-  server_host: string;
-  isp: string;
-  result_url: string;
-  tags: string[];
-}
-
-export interface Run {
-  id: number;
-  schedule_id: number | null;
-  trigger: string;
-  status: 'queued' | 'running' | 'done' | 'failed' | 'canceled' | 'skipped';
-  started_at: string | null;
-  finished_at: string | null;
-  error: string | null;
-}
-
-export interface OoklaServer {
-  id: string;
-  name: string;
-  location: string;
-  country: string;
-  host: string;
-  sponsor?: string;
-  lat?: number;
-  lon?: number;
-  distance_km?: number;
-}
-
-export interface Iperf3Server {
-  id: number;
-  host: string;
-  port: number;
-  port_end?: number;
-  options?: string;
-  supports_reverse: boolean;
-  supports_udp: boolean;
-  supports_ipv6: boolean;
-  gbs?: string;
-  continent?: string;
-  country?: string;
-  site?: string;
-  provider?: string;
-}
-
-/** OoklaSearchResult is the /ookla/servers response shape: the matching
- * servers (already sorted by distance server-side) plus, when the query
- * resolved through geocoding, the resolved place's display name. */
-export interface OoklaSearchResult {
-  servers: OoklaServer[];
-  near: string;
-}
-
-export interface Iperf3ServersPage {
-  fetched_at: string;
-  servers: Iperf3Server[];
-  total: number;
-}
 
 export const listIperf3Servers = (q: string) =>
   request<Iperf3ServersPage>(`/iperf3/servers${query({ q })}`);
 export const refreshIperf3Servers = () =>
   request<{ fetched_at: string; count: number }>('/iperf3/servers/refresh', { method: 'POST' });
-
-export interface ResultsPage {
-  results: Result[];
-  next_cursor: string;
-}
 
 export interface ResultFilters {
   target_id?: number;
@@ -119,88 +77,6 @@ export interface ResultFilters {
 }
 
 export type Range = '24h' | '7d' | '30d';
-
-export interface HistoryPoint {
-  bucket_start: string;
-  count: number;
-  fail_count: number;
-  avg_download_bps: number;
-  min_download_bps: number;
-  max_download_bps: number;
-  avg_upload_bps: number;
-  min_upload_bps: number;
-  max_upload_bps: number;
-  avg_ping_ms: number;
-  min_ping_ms: number;
-  max_ping_ms: number;
-  avg_jitter_ms: number;
-}
-
-export interface History {
-  target_id: number;
-  from: string;
-  to: string;
-  bucket_seconds: number;
-  points: HistoryPoint[];
-}
-
-export interface TargetSummary {
-  target_id: number;
-  target_name: string;
-  engine: string;
-  latest: Result | null;
-  count: number;
-  fail_count: number;
-  success_rate: number;
-  avg_download_bps: number;
-  min_download_bps: number;
-  max_download_bps: number;
-  avg_upload_bps: number;
-  avg_ping_ms: number;
-  max_ping_ms: number;
-  /** sla_compliance is the fraction (0..1) of this target's results in
-   * range (failed ones counting as misses) that met its resolved SLA plan
-   * speeds; null when no plan resolves for it (neither a per-target
-   * override nor the general plan) or it has no results in range. */
-  sla_compliance: number | null;
-}
-
-export interface SummaryStats {
-  from: string;
-  to: string;
-  targets: TargetSummary[];
-  total_results: number;
-  total_failures: number;
-  success_rate: number;
-  /** sla_compliance is the overall fraction (0..1), weighted by each
-   * target's own result count (failed ones counting as misses); null when
-   * it resolves for no target. */
-  sla_compliance: number | null;
-}
-
-export interface Incident {
-  target_id: number | null;
-  target_name: string;
-  kind: 'result' | 'skipped';
-  status: string;
-  started_at: string;
-  ended_at: string;
-  count: number;
-  error?: string;
-}
-
-export interface TargetInput {
-  name: string;
-  engine: string;
-  enabled: boolean;
-  queue_id: number;
-  options: Record<string, unknown>;
-  thresholds?: Record<string, unknown>;
-}
-
-export interface QueueInput {
-  name: string;
-}
 
 /** ApiError carries the server's {error:{code,message}} envelope. */
 export class ApiError extends Error {
@@ -268,25 +144,6 @@ export const deleteQueue = (id: number) =>
 export const listOoklaServers = (q: string, country?: string) =>
   request<OoklaSearchResult>(`/ookla/servers${query({ q, country })}`);
 
-export type RevisionAction = 'create' | 'update' | 'delete' | 'revert' | 'restore';
-
-export interface TargetRevision {
-  version: number;
-  action: RevisionAction;
-  created_at: string;
-  snapshot: Target;
-  changed: string[];
-}
-
-export interface DeletedTarget {
-  id: number;
-  name: string;
-  engine: string;
-  queue_name: string;
-  deleted_at: string;
-  version: number;
-}
-
 export const listTargetRevisions = (id: number) =>
   request<TargetRevision[]>(`/targets/${id}/revisions`);
 export const revertTargetRevision = (id: number, version: number) =>
@@ -309,44 +166,6 @@ export const setResultTags = (id: number, tags: string[]) =>
 export const listTags = () => request<{ id: number; name: string }[]>('/tags');
 export const cancelRun = (id: number) =>
   request<{ run_id: number }>(`/runs/${id}`, { method: 'DELETE' });
-
-export interface ScheduleRun {
-  status: string;
-  started_at: string;
-}
-
-export interface Schedule {
-  id: number;
-  name: string;
-  cron: string;
-  enabled: boolean;
-  timezone: string;
-  target_ids: number[];
-  next_run: string;
-  last_run: ScheduleRun | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface ScheduleInput {
-  name: string;
-  cron: string;
-  enabled: boolean;
-  timezone: string;
-  target_ids: number[];
-}
-
-/** ScheduleSaved is the create/update response: the saved row plus any
- * overlap warnings the server computed. */
-export interface ScheduleSaved {
-  schedule: Schedule;
-  warnings: string[];
-}
-
-export interface RunsPage {
-  runs: Run[];
-  next_cursor: string;
-}
 
 export const listSchedules = async () =>
   (await request<{ schedules: Schedule[] }>('/schedules')).schedules;
@@ -559,13 +378,6 @@ export type SettingsPatch = {
   auth?: Partial<AuthSettings>;
 };
 
-export interface ConnectionTest {
-  ok: boolean;
-  status?: number;
-  latency_ms?: number;
-  error?: string;
-}
-
 export const getSettings = () => request<Settings>('/settings');
 export const updateSettings = (patch: SettingsPatch) =>
   request<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) });
@@ -575,18 +387,6 @@ export const testOIDC = (body: { issuer: string; client_id: string; client_secre
   request<ConnectionTest>('/settings/test/oidc', { method: 'POST', body: JSON.stringify(body) });
 export const testNotifyChannel = (channelId: string) =>
   request<ConnectionTest>(`/settings/test/notify/${encodeURIComponent(channelId)}`, { method: 'POST' });
-
-export interface Me {
-  mode: AuthMode;
-  user: string;
-  username?: string;
-  display_name: string;
-  groups: string[];
-  is_admin: boolean;
-  source?: string;
-  email?: string;
-  name?: string;
-}
 
 export const getMe = () => request<Me>('/me');
 
@@ -606,20 +406,6 @@ export const authMode = async (): Promise<AuthMode> => {
   const body = JSON.parse(await res.text());
   return body.mode as AuthMode;
 };
-
-/** ApiTokenInfo never carries the token itself -- only CreatedToken does,
- * and only in the response to the request that created it. */
-export interface ApiTokenInfo {
-  id: number;
-  name: string;
-  prefix: string;
-  created_at: string;
-  last_used_at?: string;
-}
-
-export interface CreatedToken extends ApiTokenInfo {
-  token: string;
-}
 
 export const listTokens = async () =>
   (await request<{ tokens: ApiTokenInfo[] }>('/settings/tokens')).tokens;

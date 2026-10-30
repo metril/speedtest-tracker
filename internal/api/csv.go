@@ -56,7 +56,7 @@ func csvRow(r *store.Result) []string {
 // sent before the first row, a mid-stream failure can only be logged — it
 // truncates the file rather than turning into a 500.
 func (d Deps) resultsCSV(w http.ResponseWriter, r *http.Request) {
-	f, ok := d.resultFilterFromQuery(w, r)
+	f, ok := d.resultFilterFromQuery(w, r.URL.Query())
 	if !ok {
 		return
 	}
