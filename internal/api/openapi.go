@@ -39,6 +39,12 @@ type opSpec struct {
 	NoAuth                         bool
 }
 
+func init() {
+	// Handlers return empty collections as [] (or the frontend guards for
+	// it); the schema should not force every consumer to handle null.
+	huma.DefaultArrayNullable = false
+}
+
 var specGroups []func() []opSpec
 
 func registerSpec(f func() []opSpec) { specGroups = append(specGroups, f) }

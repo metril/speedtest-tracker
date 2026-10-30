@@ -2,7 +2,7 @@ BINARY   := speedtest-tracker
 VERSION  ?= dev
 LDFLAGS  := -s -w -X main.version=$(VERSION)
 
-.PHONY: all build web-build web-deps go-build test go-test web-test dev lint clean
+.PHONY: all build web-build web-deps go-build test go-test web-test dev lint clean openapi
 
 all: build
 
@@ -38,6 +38,11 @@ dev:
 lint: web-deps
 	go vet ./...
 	cd web && npm run lint
+
+## openapi: regenerate openapi.json and the TypeScript types from the Go API
+openapi: web-deps
+	go run ./cmd/speedtest-tracker openapi > openapi.json
+	cd web && npm run openapi
 
 clean:
 	rm -f $(BINARY)
