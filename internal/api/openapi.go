@@ -192,6 +192,7 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	d.registerTargets(api)
 	d.registerQueues(api)
 	d.registerSchedules(api)
+	d.registerRuns(api)
 	//@groups
 }
 

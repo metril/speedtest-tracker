@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -10,84 +11,95 @@ import (
 )
 
 // listRuns answers GET /runs?limit&cursor.
-func (d Deps) listRuns(w http.ResponseWriter, r *http.Request) {
-	limit, ok := intQuery(w, r.URL.Query(), "limit", 50)
+type listRunsIn struct {
+	Limit      string `query:"limit" doc:"Maximum rows to return (default 50)."`
+	Cursor     string `query:"cursor" doc:"Opaque cursor from a previous page's next_cursor."`
+	ScheduleID string `query:"schedule_id" doc:"Only runs triggered by this schedule."`
+}
+
+// RunsPage is the GET /runs body.
+type RunsPage struct {
+	Runs       []store.Run `json:"runs"`
+	NextCursor string      `json:"next_cursor" doc:"Pass as cursor to fetch the next page; empty when exhausted."`
+}
+
+// CreateRunRequest is the POST /runs body.
+type CreateRunRequest struct {
+	TargetIDs []int64 `json:"target_ids"`
+}
+
+// RunCanceling is the 202 body returned when cancelation was requested.
+type RunCanceling struct {
+	RunID  int64  `json:"run_id"`
+	Status string `json:"status" enum:"canceling"`
+}
+
+func (d Deps) listRuns(ctx context.Context, in *listRunsIn) (*jsonOut[RunsPage], error) {
+	q := queryOf("limit", in.Limit, "cursor", in.Cursor, "schedule_id", in.ScheduleID)
+	c := &errCapture{}
+	limit, ok := intQuery(c, q, "limit", 50)
 	if !ok {
-		return
+		return nil, c.err()
 	}
-	cursor, ok := int64Query(w, r.URL.Query(), "cursor", 0)
+	cursor, ok := int64Query(c, q, "cursor", 0)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	f := store.RunFilter{Limit: limit, Cursor: cursor}
-	if r.URL.Query().Get("schedule_id") != "" {
-		sid, ok := int64Query(w, r.URL.Query(), "schedule_id", 0)
+	if q.Get("schedule_id") != "" {
+		sid, ok := int64Query(c, q, "schedule_id", 0)
 		if !ok {
-			return
+			return nil, c.err()
 		}
 		if sid == 0 {
-			errBadRequest(w, "schedule_id must be a positive integer")
-			return
+			return nil, badRequest("schedule_id must be a positive integer")
 		}
 		f.ScheduleID = &sid
 	}
-	runs, next, err := d.Store.ListRuns(r.Context(), f)
+	runs, next, err := d.Store.ListRuns(ctx, f)
 	if err != nil {
-		internalError(w, d.Logger, "list runs failed", err)
-		return
+		return nil, internalErr(d.Logger, "list runs failed", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"runs": runs, "next_cursor": cursorString(next)})
+	return &jsonOut[RunsPage]{RunsPage{Runs: runs, NextCursor: cursorString(next)}}, nil
 }
 
-func (d Deps) getRun(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) getRun(ctx context.Context, in *idIn) (*jsonOut[*store.Run], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	run, err := d.Store.GetRun(r.Context(), id)
-	if storeError(w, d.Logger, "run", err) {
-		return
+	run, err := d.Store.GetRun(ctx, in.ID)
+	if e := storeErr(d.Logger, "run", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusOK, run)
+	return &jsonOut[*store.Run]{run}, nil
 }
 
 // createRun answers POST /runs {"target_ids":[...]}.
-func (d Deps) createRun(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		TargetIDs []int64 `json:"target_ids"`
+func (d Deps) createRun(ctx context.Context, in *struct{ Body CreateRunRequest }) (*jsonOut[RunQueued], error) {
+	if len(in.Body.TargetIDs) == 0 {
+		return nil, badRequest("target_ids must contain at least one target")
 	}
-	if !decodeJSON(w, r, &body) {
-		return
-	}
-	if len(body.TargetIDs) == 0 {
-		errBadRequest(w, "target_ids must contain at least one target")
-		return
-	}
-	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
-		Trigger: "manual", TargetIDs: body.TargetIDs})
+	runID, err := d.Runner.Enqueue(ctx, runner.RunRequest{
+		Trigger: "manual", TargetIDs: in.Body.TargetIDs})
 	if err != nil {
-		enqueueError(w, d.Logger, err)
-		return
+		return nil, enqueueErr(d.Logger, err)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
+	return &jsonOut[RunQueued]{RunQueued{RunID: runID}}, nil
 }
 
 // cancelRun answers DELETE /runs/{id}. A run the runner no longer tracks is
 // already finished, which is a conflict rather than a not-found.
-func (d Deps) cancelRun(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) cancelRun(ctx context.Context, in *idIn) (*jsonOut[RunCanceling], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if _, err := d.Store.GetRun(r.Context(), id); storeError(w, d.Logger, "run", err) {
-		return
+	if _, err := d.Store.GetRun(ctx, in.ID); err != nil {
+		return nil, storeErr(d.Logger, "run", err)
 	}
-	if !d.Runner.Cancel(id) {
-		writeError(w, http.StatusConflict, "not_running", "run is not in flight")
-		return
+	if !d.Runner.Cancel(in.ID) {
+		return nil, conflict("not_running", "run is not in flight")
 	}
-	writeJSON(w, http.StatusAccepted, map[string]any{"run_id": id, "status": "canceling"})
+	return &jsonOut[RunCanceling]{RunCanceling{RunID: in.ID, Status: "canceling"}}, nil
 }
 
 // intQuery parses an integer query parameter, answering 400 on garbage.

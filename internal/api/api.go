@@ -214,12 +214,6 @@ func New(deps Deps) http.Handler {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
 		})
-		v1.Route("/runs", func(rt chi.Router) {
-			rt.Get("/", etagJSON(deps.listRuns))
-			rt.Post("/", deps.createRun)
-			rt.Get("/{id}", deps.getRun)
-			rt.Delete("/{id}", deps.cancelRun)
-		})
 		v1.Route("/results", func(rs chi.Router) {
 			rs.Get("/", etagJSON(deps.listResults))
 			rs.Get("/{id}", deps.getResult)
