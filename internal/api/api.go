@@ -6,6 +6,7 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -154,6 +155,7 @@ func New(deps Deps) http.Handler {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Compress(5))
 	r.Use(setRequestIDHeader)
+	r.Use(trimAPISlash)
 
 	r.Get("/healthz", healthz(deps.Pinger))
 
@@ -177,8 +179,16 @@ func New(deps Deps) http.Handler {
 		authMW = deps.Auth.Handler
 	}
 
-	// OpenAPI document and docs UI, gated like the API itself.
-	newSpecAPI().mountDocs(r, authMW)
+	if deps.Store != nil && deps.summary == nil {
+		deps.summary = newSummaryCache(summaryTTL)
+	}
+
+	// Typed (huma) operations, the OpenAPI document and the docs UI share
+	// one middleware stack with the legacy /api/v1 group below.
+	typed := r.With(middleware.Timeout(requestTimeout), authMW, writeGuard, etagMiddleware)
+	api := newHumaAPI(typed)
+	deps.registerAPI(api, false)
+	addDocsOnly(api)
 
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
@@ -196,15 +206,8 @@ func New(deps Deps) http.Handler {
 		v1.Use(middleware.Timeout(requestTimeout))
 		v1.Use(authMW)
 		v1.Use(writeGuard)
-		// /me must work even on a store-less router (e.g. the `run
-		// --engine` CLI path), since the SPA always calls it first to
-		// decide what to render.
-		v1.Get("/me", deps.me)
 		if deps.Store == nil {
 			return
-		}
-		if deps.summary == nil {
-			deps.summary = newSummaryCache(summaryTTL)
 		}
 		v1.Route("/targets", func(t chi.Router) {
 			t.Get("/", etagJSON(deps.listTargets))
@@ -371,4 +374,16 @@ func requestLogger(logger *slog.Logger) func(http.Handler) http.Handler {
 			next.ServeHTTP(ww, r)
 		})
 	}
+}
+
+// trimAPISlash serves "/api/v1/x/" like "/api/v1/x": the former chi
+// subrouter mounts answered both forms.
+func trimAPISlash(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p := r.URL.Path; len(p) > len("/api/v1/") && strings.HasPrefix(p, "/api/v1/") && strings.HasSuffix(p, "/") {
+			r.URL.Path = strings.TrimRight(p, "/")
+			r.URL.RawPath = ""
+		}
+		next.ServeHTTP(w, r)
+	})
 }

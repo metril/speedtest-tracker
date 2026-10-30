@@ -1,7 +1,7 @@
 package api
 
 import (
-	"net/http"
+	"context"
 
 	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/settings"
@@ -23,8 +23,8 @@ type meResponse struct {
 // me reports the caller's resolved identity. A zero Identity in the
 // context means no auth middleware is mounted (Deps.Auth is nil), which
 // is treated as open mode with an admin identity.
-func (d Deps) me(w http.ResponseWriter, r *http.Request) {
-	id := auth.FromContext(r.Context())
+func (d Deps) me(ctx context.Context, _ *struct{}) (*meOutput, error) {
+	id := auth.FromContext(ctx)
 	mode, isAdmin := id.Mode, id.IsAdmin
 	if mode == "" {
 		mode, isAdmin = "open", true
@@ -33,16 +33,20 @@ func (d Deps) me(w http.ResponseWriter, r *http.Request) {
 	if groups == nil {
 		groups = []string{}
 	}
-	writeJSON(w, http.StatusOK, meResponse{
+	return &meOutput{Body: meResponse{
 		Mode:        mode,
 		User:        id.User,
 		Email:       id.Email,
 		Name:        id.Name,
 		Username:    id.Username,
-		DisplayName: d.displayName(r, id, mode),
+		DisplayName: d.displayName(ctx, id, mode),
 		Groups:      groups,
 		IsAdmin:     isAdmin,
-	})
+	}}, nil
+}
+
+type meOutput struct {
+	Body meResponse
 }
 
 // displayName resolves the name /auth/me reports for id. In non-oidc
@@ -50,14 +54,14 @@ func (d Deps) me(w http.ResponseWriter, r *http.Request) {
 // auth.oidc_display_claim (name, preferred_username or email), falling
 // back through name -> username -> email -> user for whichever claims
 // the provider did not send.
-func (d Deps) displayName(r *http.Request, id auth.Identity, mode string) string {
+func (d Deps) displayName(ctx context.Context, id auth.Identity, mode string) string {
 	if mode != settings.AuthModeOIDC {
 		return id.User
 	}
 
 	claim := settings.OIDCDisplayClaimName
 	if d.Settings != nil {
-		if a, err := d.Settings.Auth(r.Context()); err == nil && a.OIDCDisplayClaim != "" {
+		if a, err := d.Settings.Auth(ctx); err == nil && a.OIDCDisplayClaim != "" {
 			claim = a.OIDCDisplayClaim
 		}
 	}

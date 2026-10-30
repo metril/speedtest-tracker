@@ -88,7 +88,7 @@ func TestDisplayNameResolution(t *testing.T) {
 			}
 			d := Deps{Settings: st}
 			r := httptest.NewRequest("GET", "/auth/me", nil)
-			if got := d.displayName(r, tc.id, tc.mode); got != tc.want {
+			if got := d.displayName(r.Context(), tc.id, tc.mode); got != tc.want {
 				t.Errorf("displayName = %q, want %q", got, tc.want)
 			}
 		})

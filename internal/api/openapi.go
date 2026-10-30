@@ -6,9 +6,9 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humachi"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -138,54 +138,55 @@ func (s opSpec) operation(reg huma.Registry) *huma.Operation {
 	return op
 }
 
-// specAPI is a huma API backed by a private router; it renders the spec and
-// the docs UI, and never serves the real endpoints.
-type specAPI struct {
-	api huma.API
-	mux *chi.Mux
-}
-
-func newSpecAPI() specAPI {
-	mux := chi.NewMux()
-	cfg := huma.DefaultConfig("Speedtest Tracker API", "1.0.0")
-	cfg.Info.Description = "REST API of speedtest-tracker. Authenticate with an API token " +
-		"(`Authorization: Bearer <token>`), the OIDC session cookie, or the " +
-		"reverse proxy's forward-auth headers, depending on the configured auth mode."
-	cfg.CreateHooks = nil
-	cfg.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
-		"bearer": {Type: "http", Scheme: "bearer", Description: "API token created under Settings > Tokens (auth mode token)."},
-		"cookie": {Type: "apiKey", In: "cookie", Name: "st_session", Description: "Session cookie set by the OIDC login flow."},
-		"forwardAuth": {Type: "apiKey", In: "header", Name: "Remote-User",
-			Description: "Identity header injected by a trusted reverse proxy (forward_auth mode); the header name is configurable."},
-	}
-	cfg.Security = []map[string][]string{{"bearer": {}}, {"cookie": {}}, {"forwardAuth": {}}}
-	cfg.OpenAPIPath = "/openapi"
-	cfg.DocsPath = "/docs"
-	a := humachi.New(mux, cfg)
-	oapi := a.OpenAPI()
+// addDocsOnly documents the routes that stay on hand-written chi handlers
+// because they are not JSON request/response (stream, download, redirects).
+func addDocsOnly(api huma.API) {
+	oapi := api.OpenAPI()
 	reg := oapi.Components.Schemas
-	var ops []opSpec
 	for _, g := range specGroups {
-		ops = append(ops, g()...)
+		for _, s := range g() {
+			oapi.AddOperation(s.operation(reg))
+		}
 	}
-	for _, s := range ops {
-		oapi.AddOperation(s.operation(reg))
-	}
-	return specAPI{api: a, mux: mux}
 }
 
-// OpenAPIJSON renders the API description as indented JSON.
+// OpenAPIJSON renders the API description as indented JSON. It registers
+// every typed operation regardless of which optional dependencies a
+// running server would have.
 func OpenAPIJSON() ([]byte, error) {
-	b, err := json.MarshalIndent(newSpecAPI().api.OpenAPI(), "", "  ")
+	api := newHumaAPI(chi.NewMux())
+	Deps{}.registerAPI(api, true)
+	addDocsOnly(api)
+	b, err := json.MarshalIndent(api.OpenAPI(), "", "  ")
 	if err != nil {
 		return nil, err
 	}
 	return append(b, '\n'), nil
 }
 
-// mountDocs serves /openapi.{json,yaml} and /docs behind authMW.
-func (s specAPI) mountDocs(r chi.Router, authMW func(http.Handler) http.Handler) {
-	for _, path := range []string{"/openapi.json", "/openapi.yaml", "/openapi-3.0.json", "/openapi-3.0.yaml", "/docs"} {
-		r.With(authMW).Get(path, s.mux.ServeHTTP)
+// etagPaths are the list endpoints that get a strong ETag / 304 handling.
+var etagPaths = map[string]bool{
+	"/api/v1/targets": true, "/api/v1/queues": true, "/api/v1/schedules": true,
+	"/api/v1/runs": true, "/api/v1/results": true,
+}
+
+// etagMiddleware applies etagJSON's behaviour to the list endpoints.
+func etagMiddleware(next http.Handler) http.Handler {
+	wrapped := etagJSON(next.ServeHTTP)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && etagPaths[strings.TrimSuffix(r.URL.Path, "/")] {
+			wrapped(w, r)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// registerAPI registers every typed operation. all forces the ones that
+// depend on optional dependencies (used to render the full document).
+func (d Deps) registerAPI(api huma.API, all bool) {
+	register(api, route{Method: http.MethodGet, Path: "/api/v1/me", ID: "getMe", Tag: "me", Summary: "Resolved identity of the caller"}, d.me)
+	if !all && d.Store == nil {
+		return
 	}
 }
