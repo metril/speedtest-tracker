@@ -190,6 +190,7 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 		return
 	}
 	d.registerTargets(api)
+	d.registerQueues(api)
 }
 
 // Shared parameter docs for the groups still described by opSpec.

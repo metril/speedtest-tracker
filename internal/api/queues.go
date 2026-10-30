@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strings"
@@ -51,58 +52,68 @@ func (d Deps) queueStoreError(w http.ResponseWriter, err error) bool {
 	return storeError(w, d.Logger, "queue", err)
 }
 
-func (d Deps) listQueues(w http.ResponseWriter, r *http.Request) {
-	queues, err := d.Store.ListQueues(r.Context())
+type queueIn struct {
+	ID   int64 `path:"id" minimum:"1" doc:"Resource ID."`
+	Body queueBody
+}
+
+type queueCreateIn struct {
+	Body queueBody
+}
+
+func (d Deps) listQueues(ctx context.Context, _ *struct{}) (*jsonOut[[]store.Queue], error) {
+	queues, err := d.Store.ListQueues(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "list queues failed", err)
-		return
+		return nil, internalErr(d.Logger, "list queues failed", err)
 	}
-	writeJSON(w, http.StatusOK, queues)
+	return &jsonOut[[]store.Queue]{queues}, nil
 }
 
-func (d Deps) createQueue(w http.ResponseWriter, r *http.Request) {
-	var b queueBody
-	if !decodeJSON(w, r, &b) {
-		return
-	}
-	name, ok := validateQueueName(w, b.Name)
+func (d Deps) createQueue(ctx context.Context, in *queueCreateIn) (*jsonOut[store.Queue], error) {
+	c := &errCapture{}
+	name, ok := validateQueueName(c, in.Body.Name)
 	if !ok {
-		return
+		return nil, c.err()
 	}
-	q, err := d.Store.CreateQueue(r.Context(), name)
-	if d.queueStoreError(w, err) {
-		return
+	q, err := d.Store.CreateQueue(ctx, name)
+	if e := d.queueStoreErr(err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusCreated, q)
+	return &jsonOut[store.Queue]{q}, nil
 }
 
-func (d Deps) updateQueue(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
+func (d Deps) updateQueue(ctx context.Context, in *queueIn) (*jsonOut[store.Queue], error) {
+	if err := (idIn{in.ID}).check(); err != nil {
+		return nil, err
+	}
+	c := &errCapture{}
+	name, ok := validateQueueName(c, in.Body.Name)
 	if !ok {
-		return
+		return nil, c.err()
 	}
-	var b queueBody
-	if !decodeJSON(w, r, &b) {
-		return
+	q, err := d.Store.RenameQueue(ctx, in.ID, name)
+	if e := d.queueStoreErr(err); e != nil {
+		return nil, e
 	}
-	name, ok := validateQueueName(w, b.Name)
-	if !ok {
-		return
-	}
-	q, err := d.Store.RenameQueue(r.Context(), id, name)
-	if d.queueStoreError(w, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, q)
+	return &jsonOut[store.Queue]{q}, nil
 }
 
-func (d Deps) deleteQueue(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) deleteQueue(ctx context.Context, in *idIn) (*struct{}, error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if err := d.Store.DeleteQueue(r.Context(), id); d.queueStoreError(w, err) {
-		return
+	if e := d.queueStoreErr(d.Store.DeleteQueue(ctx, in.ID)); e != nil {
+		return nil, e
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return nil, nil
+}
+
+// queueStoreErr is queueStoreError as a returned error (nil for nil).
+func (d Deps) queueStoreErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	c := &errCapture{}
+	d.queueStoreError(c, err)
+	return c.err()
 }
