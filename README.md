@@ -13,7 +13,7 @@ tag management.
 
 ## Requirements
 
-- Go 1.25+ (toolchain auto-download handles patch versions)
+- Go 1.26+ (toolchain auto-download handles patch versions)
 - Node.js for building the web UI
 
 ## Quick start

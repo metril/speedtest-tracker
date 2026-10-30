@@ -9,7 +9,7 @@ COPY web/ ./
 RUN npm run build
 
 # ---- stage 2: build the static Go binary ----------------------------------
-FROM --platform=$BUILDPLATFORM golang:1.25 AS build
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
 ARG VERSION=dev
 ARG TARGETOS
 ARG TARGETARCH
