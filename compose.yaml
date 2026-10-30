@@ -2,6 +2,7 @@ services:
   app:
     build: .
     image: ghcr.io/metril/speedtest-tracker:edge
+    stop_grace_period: 90s
     environment:
       ST_DB_PATH: /data/speedtest.db
       ST_LISTEN: 0.0.0.0:8080
