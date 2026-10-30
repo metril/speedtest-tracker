@@ -159,8 +159,8 @@ type CronValidateRequest struct {
 
 // CronValidateResponse previews the next fire times of a valid expression.
 type CronValidateResponse struct {
-	OK   bool     `json:"ok"`
 	Next []string `json:"next"`
+	OK   bool     `json:"ok"`
 }
 
 // ScheduleNext is the GET /schedules/{id}/next body.
@@ -263,7 +263,7 @@ func (d Deps) validateCron(_ context.Context, in *struct{ Body CronValidateReque
 	if err != nil {
 		return nil, badRequest(err.Error())
 	}
-	return &jsonOut[CronValidateResponse]{CronValidateResponse{OK: true, Next: formatTimes(times)}}, nil
+	return &jsonOut[CronValidateResponse]{CronValidateResponse{Next: formatTimes(times), OK: true}}, nil
 }
 
 // formatTimes renders fire times as RFC3339 strings.

@@ -81,8 +81,8 @@ type listResultsIn struct {
 
 // ResultsPage is the GET /results body.
 type ResultsPage struct {
-	Results    []store.Result `json:"results"`
 	NextCursor string         `json:"next_cursor" doc:"Pass as cursor to fetch the next page; empty when exhausted."`
+	Results    []store.Result `json:"results"`
 }
 
 // SetTagsRequest is the PUT /results/{id}/tags body.
@@ -124,7 +124,7 @@ func (d Deps) listResults(ctx context.Context, in *listResultsIn) (*jsonOut[Resu
 	if err != nil {
 		return nil, internalErr(d.Logger, "list results failed", err)
 	}
-	return &jsonOut[ResultsPage]{ResultsPage{Results: results, NextCursor: cursorString(next)}}, nil
+	return &jsonOut[ResultsPage]{ResultsPage{NextCursor: cursorString(next), Results: results}}, nil
 }
 
 func (d Deps) getResult(ctx context.Context, in *idIn) (*jsonOut[*store.Result], error) {

@@ -1,6 +1,34 @@
 {
   "components": {
     "schemas": {
+      "APIError": {
+        "additionalProperties": false,
+        "properties": {
+          "error": {
+            "$ref": "#/components/schemas/APIErrorErrorStruct"
+          }
+        },
+        "required": [
+          "error"
+        ],
+        "type": "object"
+      },
+      "APIErrorErrorStruct": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "type": "string"
+          },
+          "message": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "type": "object"
+      },
       "APIToken": {
         "additionalProperties": false,
         "properties": {
@@ -371,9 +399,6 @@
             "format": "int64",
             "type": "integer"
           },
-          "last_used_at": {
-            "type": "string"
-          },
           "name": {
             "type": "string"
           },
@@ -381,15 +406,16 @@
             "type": "string"
           },
           "token": {
+            "description": "The plaintext token; shown only in this response.",
             "type": "string"
           }
         },
         "required": [
-          "token",
+          "created_at",
           "id",
           "name",
           "prefix",
-          "created_at"
+          "token"
         ],
         "type": "object"
       },
@@ -423,8 +449,8 @@
           }
         },
         "required": [
-          "ok",
-          "next"
+          "next",
+          "ok"
         ],
         "type": "object"
       },
@@ -734,11 +760,11 @@
           }
         },
         "required": [
-          "target_id",
-          "from",
-          "to",
           "bucket_seconds",
-          "points"
+          "from",
+          "points",
+          "target_id",
+          "to"
         ],
         "type": "object"
       },
@@ -1047,12 +1073,13 @@
             "type": "integer"
           },
           "fetched_at": {
+            "format": "date-time",
             "type": "string"
           }
         },
         "required": [
-          "fetched_at",
-          "count"
+          "count",
+          "fetched_at"
         ],
         "type": "object"
       },
@@ -1286,8 +1313,8 @@
           }
         },
         "required": [
-          "servers",
-          "near"
+          "near",
+          "servers"
         ],
         "type": "object"
       },
@@ -1309,8 +1336,8 @@
         },
         "required": [
           "from",
-          "to",
-          "incidents"
+          "incidents",
+          "to"
         ],
         "type": "object"
       },
@@ -1516,8 +1543,8 @@
           }
         },
         "required": [
-          "results",
-          "next_cursor"
+          "next_cursor",
+          "results"
         ],
         "type": "object"
       },
@@ -1650,8 +1677,8 @@
           }
         },
         "required": [
-          "runs",
-          "next_cursor"
+          "next_cursor",
+          "runs"
         ],
         "type": "object"
       },
@@ -2003,12 +2030,12 @@
           }
         },
         "required": [
-          "general",
-          "engines",
-          "integrations",
-          "notifications",
           "auth",
-          "locked"
+          "engines",
+          "general",
+          "integrations",
+          "locked",
+          "notifications"
         ],
         "type": "object"
       },
@@ -2247,8 +2274,8 @@
           }
         },
         "required": [
-          "ok",
-          "engine"
+          "engine",
+          "ok"
         ],
         "type": "object"
       },
@@ -2451,18 +2478,22 @@
         "parameters": [
           {
             "description": "Free-text search.",
+            "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
+              "description": "Free-text search.",
               "type": "string"
             }
           },
           {
-            "description": "Maximum rows to return.",
+            "description": "Maximum servers to return (default 50, max 200).",
+            "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
-              "type": "integer"
+              "description": "Maximum servers to return (default 50, max 200).",
+              "type": "string"
             }
           }
         ],
@@ -2477,25 +2508,25 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Search the cached public iperf3 server list",
@@ -2518,11 +2549,21 @@
             },
             "description": "OK"
           },
+          "400": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Bad Request"
+          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2532,7 +2573,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2542,17 +2583,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "502": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2562,7 +2613,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2593,11 +2644,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Resolved identity of the caller",
@@ -2612,26 +2673,32 @@
         "parameters": [
           {
             "description": "Free-text search (name, location, host, or a place to geocode).",
+            "explode": false,
             "in": "query",
             "name": "q",
             "schema": {
+              "description": "Free-text search (name, location, host, or a place to geocode).",
               "type": "string"
             }
           },
           {
-            "description": "Restrict to a country.",
+            "description": "Restrict to a 2-letter country code.",
+            "explode": false,
             "in": "query",
             "name": "country",
             "schema": {
+              "description": "Restrict to a 2-letter country code.",
               "type": "string"
             }
           },
           {
-            "description": "Maximum rows to return.",
+            "description": "Maximum servers to return (default 20, max 200).",
+            "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
-              "type": "integer"
+              "description": "Maximum servers to return (default 20, max 200).",
+              "type": "string"
             }
           }
         ],
@@ -2646,31 +2713,31 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "502": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2680,7 +2747,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2698,10 +2765,12 @@
         "operationId": "listOutages",
         "parameters": [
           {
-            "description": "Named window ending now.",
+            "description": "Named window ending now (default 7d).",
+            "explode": false,
             "in": "query",
             "name": "range",
             "schema": {
+              "description": "Named window ending now (default 7d).",
               "enum": [
                 "24h",
                 "7d",
@@ -2711,27 +2780,33 @@
             }
           },
           {
-            "description": "Explicit window start (RFC 3339).",
+            "description": "Explicit window start (RFC 3339 or unix seconds).",
+            "explode": false,
             "in": "query",
             "name": "from",
             "schema": {
+              "description": "Explicit window start (RFC 3339 or unix seconds).",
               "type": "string"
             }
           },
           {
-            "description": "Explicit window end (RFC 3339).",
+            "description": "Explicit window end (RFC 3339 or unix seconds).",
+            "explode": false,
             "in": "query",
             "name": "to",
             "schema": {
+              "description": "Explicit window end (RFC 3339 or unix seconds).",
               "type": "string"
             }
           },
           {
-            "description": "Merge incidents closer together than this.",
+            "description": "Merge incidents closer together than this (default 1800).",
+            "explode": false,
             "in": "query",
             "name": "gap_seconds",
             "schema": {
-              "type": "integer"
+              "description": "Merge incidents closer together than this (default 1800).",
+              "type": "string"
             }
           }
         ],
@@ -2746,25 +2821,25 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Failure and skipped-run incidents in a window",
@@ -2794,11 +2869,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List queues",
@@ -2833,7 +2918,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2843,7 +2928,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2853,7 +2938,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2863,11 +2948,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a queue",
@@ -2881,11 +2976,14 @@
         "operationId": "deleteQueue",
         "parameters": [
           {
-            "description": "Queue ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -2898,7 +2996,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2908,7 +3006,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2918,7 +3016,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2928,7 +3026,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2938,11 +3036,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a queue",
@@ -2954,11 +3062,14 @@
         "operationId": "renameQueue",
         "parameters": [
           {
-            "description": "Queue ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -2988,7 +3099,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -2998,7 +3109,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3008,7 +3119,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3018,7 +3129,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3028,11 +3139,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Rename a queue",
@@ -3046,66 +3167,82 @@
         "operationId": "listResults",
         "parameters": [
           {
-            "description": "Maximum rows to return.",
+            "description": "Maximum rows to return (default 50).",
+            "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
-              "type": "integer"
+              "description": "Maximum rows to return (default 50).",
+              "type": "string"
             }
           },
           {
             "description": "Opaque cursor from a previous page's next_cursor.",
+            "explode": false,
             "in": "query",
             "name": "cursor",
             "schema": {
+              "description": "Opaque cursor from a previous page's next_cursor.",
               "type": "string"
             }
           },
           {
             "description": "Only results of this target.",
+            "explode": false,
             "in": "query",
             "name": "target_id",
             "schema": {
-              "type": "integer"
+              "description": "Only results of this target.",
+              "type": "string"
             }
           },
           {
             "description": "Only results of this engine.",
+            "explode": false,
             "in": "query",
             "name": "engine",
             "schema": {
+              "description": "Only results of this engine.",
               "type": "string"
             }
           },
           {
             "description": "Only results with this status (ok, failed, degraded).",
+            "explode": false,
             "in": "query",
             "name": "status",
             "schema": {
+              "description": "Only results with this status (ok, failed, degraded).",
               "type": "string"
             }
           },
           {
             "description": "Only results carrying this tag.",
+            "explode": false,
             "in": "query",
             "name": "tag",
             "schema": {
+              "description": "Only results carrying this tag.",
               "type": "string"
             }
           },
           {
-            "description": "Earliest start time (RFC 3339).",
+            "description": "Earliest start time (RFC 3339 or unix seconds).",
+            "explode": false,
             "in": "query",
             "name": "from",
             "schema": {
+              "description": "Earliest start time (RFC 3339 or unix seconds).",
               "type": "string"
             }
           },
           {
-            "description": "Latest start time (RFC 3339).",
+            "description": "Latest start time (RFC 3339 or unix seconds).",
+            "explode": false,
             "in": "query",
             "name": "to",
             "schema": {
+              "description": "Latest start time (RFC 3339 or unix seconds).",
               "type": "string"
             }
           }
@@ -3121,25 +3258,25 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List results (newest first)",
@@ -3244,11 +3381,14 @@
         "operationId": "deleteResult",
         "parameters": [
           {
-            "description": "Result ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3261,7 +3401,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3271,7 +3411,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3281,7 +3421,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3291,11 +3431,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a result",
@@ -3307,11 +3457,14 @@
         "operationId": "getResult",
         "parameters": [
           {
-            "description": "Result ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3331,7 +3484,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3341,7 +3494,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3351,11 +3504,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get a result",
@@ -3369,11 +3532,14 @@
         "operationId": "reexecuteResult",
         "parameters": [
           {
-            "description": "Result ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3393,7 +3559,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3403,7 +3569,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3413,7 +3579,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3423,17 +3589,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "503": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3451,11 +3627,14 @@
         "operationId": "setResultTags",
         "parameters": [
           {
-            "description": "Result ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3485,7 +3664,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3495,7 +3674,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3505,7 +3684,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3515,11 +3694,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Replace a result's tags",
@@ -3533,27 +3722,33 @@
         "operationId": "listRuns",
         "parameters": [
           {
-            "description": "Maximum rows to return.",
+            "description": "Maximum rows to return (default 50).",
+            "explode": false,
             "in": "query",
             "name": "limit",
             "schema": {
-              "type": "integer"
+              "description": "Maximum rows to return (default 50).",
+              "type": "string"
             }
           },
           {
             "description": "Opaque cursor from a previous page's next_cursor.",
+            "explode": false,
             "in": "query",
             "name": "cursor",
             "schema": {
+              "description": "Opaque cursor from a previous page's next_cursor.",
               "type": "string"
             }
           },
           {
             "description": "Only runs triggered by this schedule.",
+            "explode": false,
             "in": "query",
             "name": "schedule_id",
             "schema": {
-              "type": "integer"
+              "description": "Only runs triggered by this schedule.",
+              "type": "string"
             }
           }
         ],
@@ -3568,25 +3763,25 @@
             },
             "description": "OK"
           },
-          "400": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
-                }
-              }
-            },
-            "description": "Bad Request"
-          },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List runs (newest first)",
@@ -3621,7 +3816,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3631,7 +3826,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3641,17 +3836,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "503": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3669,11 +3874,14 @@
         "operationId": "cancelRun",
         "parameters": [
           {
-            "description": "Run ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3693,7 +3901,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3703,7 +3911,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3713,7 +3921,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3723,7 +3931,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3733,11 +3941,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Cancel an in-flight run",
@@ -3749,11 +3967,14 @@
         "operationId": "getRun",
         "parameters": [
           {
-            "description": "Run ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3773,7 +3994,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3783,7 +4004,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3793,11 +4014,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get a run",
@@ -3824,11 +4055,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List schedules",
@@ -3863,7 +4104,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3873,7 +4114,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3883,7 +4124,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3893,11 +4134,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a schedule",
@@ -3934,7 +4185,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3944,7 +4195,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3954,11 +4205,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Validate a cron expression and preview fire times",
@@ -3972,11 +4233,14 @@
         "operationId": "deleteSchedule",
         "parameters": [
           {
-            "description": "Schedule ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -3989,7 +4253,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -3999,7 +4263,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4009,7 +4273,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4019,11 +4283,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a schedule",
@@ -4035,11 +4309,14 @@
         "operationId": "getSchedule",
         "parameters": [
           {
-            "description": "Schedule ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4059,7 +4336,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4069,7 +4346,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4079,11 +4356,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get a schedule",
@@ -4095,11 +4382,14 @@
         "operationId": "updateSchedule",
         "parameters": [
           {
-            "description": "Schedule ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4129,7 +4419,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4139,7 +4429,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4149,7 +4439,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4159,7 +4449,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4169,11 +4459,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Replace a schedule",
@@ -4187,11 +4487,14 @@
         "operationId": "getScheduleNext",
         "parameters": [
           {
-            "description": "Schedule ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4211,7 +4514,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4221,7 +4524,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4231,11 +4534,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Upcoming fire times of a schedule",
@@ -4249,11 +4562,14 @@
         "operationId": "runSchedule",
         "parameters": [
           {
-            "description": "Schedule ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4273,7 +4589,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4283,7 +4599,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4293,7 +4609,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4303,17 +4619,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "503": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4344,11 +4670,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get all settings",
@@ -4383,7 +4719,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4393,7 +4729,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4403,11 +4739,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Partially update settings (omitted fields are left alone)",
@@ -4421,11 +4767,12 @@
         "operationId": "testNotifyChannel",
         "parameters": [
           {
-            "description": "Notification channel ID",
+            "description": "Notification channel ID.",
             "in": "path",
             "name": "channel_id",
             "required": true,
             "schema": {
+              "description": "Notification channel ID.",
               "type": "string"
             }
           }
@@ -4445,7 +4792,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4455,7 +4802,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4465,7 +4812,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4475,17 +4822,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "503": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4503,11 +4860,12 @@
         "operationId": "testIntegration",
         "parameters": [
           {
-            "description": "What to test",
+            "description": "What to test.",
             "in": "path",
             "name": "target",
             "required": true,
             "schema": {
+              "description": "What to test.",
               "enum": [
                 "vm",
                 "vl",
@@ -4541,7 +4899,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4551,7 +4909,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4561,7 +4919,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4571,11 +4929,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Test connectivity of an integration",
@@ -4602,11 +4970,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List API tokens",
@@ -4641,7 +5019,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4651,7 +5029,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4661,11 +5039,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create an API token",
@@ -4679,11 +5067,14 @@
         "operationId": "deleteToken",
         "parameters": [
           {
-            "description": "Token ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4696,7 +5087,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4706,7 +5097,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4716,7 +5107,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4726,7 +5117,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4736,11 +5127,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Revoke an API token",
@@ -4754,10 +5155,12 @@
         "operationId": "getStatsSummary",
         "parameters": [
           {
-            "description": "Named window ending now.",
+            "description": "Named window ending now (default 24h).",
+            "explode": false,
             "in": "query",
             "name": "range",
             "schema": {
+              "description": "Named window ending now (default 24h).",
               "enum": [
                 "24h",
                 "7d",
@@ -4767,15 +5170,37 @@
             }
           },
           {
-            "description": "1 shifts the window back by its own span (previous period); 0 or omitted keeps it.",
+            "description": "1 shifts the window back by its own span (previous period).",
+            "explode": false,
             "in": "query",
             "name": "offset",
             "schema": {
+              "description": "1 shifts the window back by its own span (previous period).",
               "enum": [
-                0,
-                1
+                "0",
+                "1"
               ],
-              "type": "integer"
+              "type": "string"
+            }
+          },
+          {
+            "description": "Not accepted; present only to reject explicit windows.",
+            "explode": false,
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "description": "Not accepted; present only to reject explicit windows.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Not accepted; present only to reject explicit windows.",
+            "explode": false,
+            "in": "query",
+            "name": "to",
+            "schema": {
+              "description": "Not accepted; present only to reject explicit windows.",
+              "type": "string"
             }
           }
         ],
@@ -4788,27 +5213,34 @@
                 }
               }
             },
-            "description": "OK"
-          },
-          "400": {
-            "content": {
-              "application/json": {
+            "description": "OK",
+            "headers": {
+              "Cache-Control": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "type": "string"
                 }
               }
-            },
-            "description": "Bad Request"
+            }
           },
           "401": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Per-target and overall summary statistics",
@@ -4838,11 +5270,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List tags",
@@ -4856,11 +5298,14 @@
         "operationId": "deleteTag",
         "parameters": [
           {
-            "description": "Tag ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4873,7 +5318,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4883,7 +5328,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4893,7 +5338,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4903,11 +5348,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a tag",
@@ -4919,11 +5374,14 @@
         "operationId": "renameTag",
         "parameters": [
           {
-            "description": "Tag ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -4953,7 +5411,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4963,7 +5421,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4973,7 +5431,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4983,7 +5441,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -4993,11 +5451,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Rename a tag",
@@ -5027,11 +5495,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List targets",
@@ -5066,7 +5544,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5076,7 +5554,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5086,11 +5564,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Create a target",
@@ -5120,11 +5608,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Unauthorized"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "List soft-deleted targets",
@@ -5138,11 +5636,14 @@
         "operationId": "restoreDeletedTarget",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5162,7 +5663,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5172,7 +5673,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5182,7 +5683,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5192,7 +5693,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5202,11 +5703,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Conflict"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Restore a deleted target",
@@ -5243,7 +5754,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5253,7 +5764,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5263,11 +5774,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Forbidden"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Validate a target's engine options without saving",
@@ -5281,11 +5802,14 @@
         "operationId": "deleteTarget",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5298,7 +5822,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5308,7 +5832,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5318,7 +5842,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5328,11 +5852,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Delete a target",
@@ -5344,11 +5878,14 @@
         "operationId": "getTarget",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5368,7 +5905,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5378,7 +5915,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5388,11 +5925,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Get a target",
@@ -5404,11 +5951,14 @@
         "operationId": "updateTarget",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5438,7 +5988,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5448,7 +5998,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5458,7 +6008,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5468,11 +6018,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Replace a target",
@@ -5486,19 +6046,24 @@
         "operationId": "getTargetHistory",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           },
           {
             "description": "Named window ending now.",
+            "explode": false,
             "in": "query",
             "name": "range",
             "schema": {
+              "description": "Named window ending now.",
               "enum": [
                 "24h",
                 "7d",
@@ -5508,30 +6073,36 @@
             }
           },
           {
-            "description": "1 shifts the window back by its own span (previous period); 0 or omitted keeps it.",
+            "description": "1 shifts the window back by its own span (previous period).",
+            "explode": false,
             "in": "query",
             "name": "offset",
             "schema": {
+              "description": "1 shifts the window back by its own span (previous period).",
               "enum": [
-                0,
-                1
+                "0",
+                "1"
               ],
-              "type": "integer"
-            }
-          },
-          {
-            "description": "Explicit window start (RFC 3339); use with to instead of range.",
-            "in": "query",
-            "name": "from",
-            "schema": {
               "type": "string"
             }
           },
           {
-            "description": "Explicit window end (RFC 3339).",
+            "description": "Explicit window start (RFC 3339 or unix seconds); use with to instead of range.",
+            "explode": false,
+            "in": "query",
+            "name": "from",
+            "schema": {
+              "description": "Explicit window start (RFC 3339 or unix seconds); use with to instead of range.",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Explicit window end (RFC 3339 or unix seconds).",
+            "explode": false,
             "in": "query",
             "name": "to",
             "schema": {
+              "description": "Explicit window end (RFC 3339 or unix seconds).",
               "type": "string"
             }
           }
@@ -5551,7 +6122,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5561,7 +6132,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5571,11 +6142,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Bucketed history of a target",
@@ -5589,11 +6170,14 @@
         "operationId": "getTargetLatest",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5613,7 +6197,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5623,7 +6207,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5633,11 +6217,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Latest result of a target",
@@ -5651,11 +6245,14 @@
         "operationId": "listTargetRevisions",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5678,7 +6275,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5688,7 +6285,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5698,11 +6295,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Revision history of a target",
@@ -5716,20 +6323,26 @@
         "operationId": "revertTargetRevision",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           },
           {
-            "description": "Revision version",
+            "description": "Revision version.",
             "in": "path",
             "name": "version",
             "required": true,
             "schema": {
+              "description": "Revision version.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5749,7 +6362,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5759,7 +6372,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5769,7 +6382,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5779,11 +6392,21 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
           }
         },
         "summary": "Revert a target to a revision",
@@ -5797,11 +6420,14 @@
         "operationId": "runTarget",
         "parameters": [
           {
-            "description": "Target ID",
+            "description": "Resource ID.",
             "in": "path",
             "name": "id",
             "required": true,
             "schema": {
+              "description": "Resource ID.",
+              "format": "int64",
+              "minimum": 1,
               "type": "integer"
             }
           }
@@ -5821,7 +6447,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5831,7 +6457,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5841,7 +6467,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
@@ -5851,17 +6477,27 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },
             "description": "Not Found"
           },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/APIError"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
           "503": {
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/APIError"
                 }
               }
             },

@@ -19,8 +19,8 @@ type listRunsIn struct {
 
 // RunsPage is the GET /runs body.
 type RunsPage struct {
-	Runs       []store.Run `json:"runs"`
 	NextCursor string      `json:"next_cursor" doc:"Pass as cursor to fetch the next page; empty when exhausted."`
+	Runs       []store.Run `json:"runs"`
 }
 
 // CreateRunRequest is the POST /runs body.
@@ -60,7 +60,7 @@ func (d Deps) listRuns(ctx context.Context, in *listRunsIn) (*jsonOut[RunsPage],
 	if err != nil {
 		return nil, internalErr(d.Logger, "list runs failed", err)
 	}
-	return &jsonOut[RunsPage]{RunsPage{Runs: runs, NextCursor: cursorString(next)}}, nil
+	return &jsonOut[RunsPage]{RunsPage{NextCursor: cursorString(next), Runs: runs}}, nil
 }
 
 func (d Deps) getRun(ctx context.Context, in *idIn) (*jsonOut[*store.Run], error) {

@@ -49,10 +49,6 @@ var specGroups []func() []opSpec
 
 func registerSpec(f func() []opSpec) { specGroups = append(specGroups, f) }
 
-func idParam(doc string) p { return p{Name: "id", Doc: doc, Required: true} }
-
-func ptr[T any](v T) *T { return &v }
-
 func (s opSpec) operation(reg huma.Registry) *huma.Operation {
 	op := &huma.Operation{
 		OperationID: s.ID,
@@ -157,6 +153,7 @@ func OpenAPIJSON() ([]byte, error) {
 	api := newHumaAPI(chi.NewMux())
 	Deps{}.registerAPI(api, true)
 	addDocsOnly(api)
+	finalizeSpec(api)
 	b, err := json.MarshalIndent(api.OpenAPI(), "", "  ")
 	if err != nil {
 		return nil, err
@@ -203,10 +200,15 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	//@groups
 }
 
-// Shared parameter docs for the groups still described by opSpec.
-var (
-	rangeParam  = p{Name: "range", Query: true, Type: "string", Doc: "Named window ending now.", Enum: []any{"24h", "7d", "30d"}}
-	offsetParam = p{Name: "offset", Query: true, Doc: "1 shifts the window back by its own span (previous period); 0 or omitted keeps it.", Enum: []any{0, 1}}
-	limitParam  = p{Name: "limit", Query: true, Doc: "Maximum rows to return."}
-	cursorParam = p{Name: "cursor", Query: true, Type: "string", Doc: "Opaque cursor from a previous page's next_cursor."}
-)
+// finalizeSpec removes the responses huma adds on its own that this API
+// never produces (validation is the handlers' job and reports 400).
+func finalizeSpec(api huma.API) {
+	for _, item := range api.OpenAPI().Paths {
+		for _, op := range []*huma.Operation{item.Get, item.Put, item.Post, item.Delete, item.Patch} {
+			if op != nil {
+				delete(op.Responses, "422")
+				delete(op.Responses, "default")
+			}
+		}
+	}
+}

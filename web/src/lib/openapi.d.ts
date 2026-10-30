@@ -771,6 +771,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        APIError: {
+            error: components["schemas"]["APIErrorErrorStruct"];
+        };
+        APIErrorErrorStruct: {
+            code: string;
+            message: string;
+        };
         APIToken: {
             created_at: string;
             /** Format: int64 */
@@ -854,9 +861,9 @@ export interface components {
             created_at: string;
             /** Format: int64 */
             id: number;
-            last_used_at?: string;
             name: string;
             prefix: string;
+            /** @description The plaintext token; shown only in this response. */
             token: string;
         };
         CronValidateRequest: {
@@ -1031,6 +1038,7 @@ export interface components {
         Iperf3Refreshed: {
             /** Format: int64 */
             count: number;
+            /** Format: date-time */
             fetched_at: string;
         };
         Iperf3Server: {
@@ -1438,8 +1446,8 @@ export interface operations {
             query?: {
                 /** @description Free-text search. */
                 q?: string;
-                /** @description Maximum rows to return. */
-                limit?: number;
+                /** @description Maximum servers to return (default 50, max 200). */
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -1456,22 +1464,22 @@ export interface operations {
                     "application/json": components["schemas"]["Iperf3ServersPage"];
                 };
             };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1494,13 +1502,22 @@ export interface operations {
                     "application/json": components["schemas"]["Iperf3Refreshed"];
                 };
             };
+            /** @description Bad Request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -1509,7 +1526,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -1518,7 +1535,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Bad Gateway */
@@ -1527,7 +1553,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -1536,7 +1562,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1565,7 +1591,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1575,10 +1610,10 @@ export interface operations {
             query?: {
                 /** @description Free-text search (name, location, host, or a place to geocode). */
                 q?: string;
-                /** @description Restrict to a country. */
+                /** @description Restrict to a 2-letter country code. */
                 country?: string;
-                /** @description Maximum rows to return. */
-                limit?: number;
+                /** @description Maximum servers to return (default 20, max 200). */
+                limit?: string;
             };
             header?: never;
             path?: never;
@@ -1595,22 +1630,22 @@ export interface operations {
                     "application/json": components["schemas"]["OoklaSearchResult"];
                 };
             };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Bad Gateway */
@@ -1619,7 +1654,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -1628,7 +1663,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1636,14 +1671,14 @@ export interface operations {
     listOutages: {
         parameters: {
             query?: {
-                /** @description Named window ending now. */
+                /** @description Named window ending now (default 7d). */
                 range?: "24h" | "7d" | "30d";
-                /** @description Explicit window start (RFC 3339). */
+                /** @description Explicit window start (RFC 3339 or unix seconds). */
                 from?: string;
-                /** @description Explicit window end (RFC 3339). */
+                /** @description Explicit window end (RFC 3339 or unix seconds). */
                 to?: string;
-                /** @description Merge incidents closer together than this. */
-                gap_seconds?: number;
+                /** @description Merge incidents closer together than this (default 1800). */
+                gap_seconds?: string;
             };
             header?: never;
             path?: never;
@@ -1660,22 +1695,22 @@ export interface operations {
                     "application/json": components["schemas"]["OutagesResponse"];
                 };
             };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1704,7 +1739,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1737,7 +1781,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -1746,7 +1790,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -1755,7 +1799,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -1764,7 +1808,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1774,7 +1827,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Queue ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -1800,7 +1853,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -1809,7 +1862,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -1818,7 +1871,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -1827,7 +1880,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -1836,7 +1889,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1846,7 +1908,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Queue ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -1866,7 +1928,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -1875,7 +1937,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -1884,7 +1946,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -1893,7 +1955,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -1902,7 +1964,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -1910,21 +1981,21 @@ export interface operations {
     listResults: {
         parameters: {
             query?: {
-                /** @description Maximum rows to return. */
-                limit?: number;
+                /** @description Maximum rows to return (default 50). */
+                limit?: string;
                 /** @description Opaque cursor from a previous page's next_cursor. */
                 cursor?: string;
                 /** @description Only results of this target. */
-                target_id?: number;
+                target_id?: string;
                 /** @description Only results of this engine. */
                 engine?: string;
                 /** @description Only results with this status (ok, failed, degraded). */
                 status?: string;
                 /** @description Only results carrying this tag. */
                 tag?: string;
-                /** @description Earliest start time (RFC 3339). */
+                /** @description Earliest start time (RFC 3339 or unix seconds). */
                 from?: string;
-                /** @description Latest start time (RFC 3339). */
+                /** @description Latest start time (RFC 3339 or unix seconds). */
                 to?: string;
             };
             header?: never;
@@ -1942,22 +2013,22 @@ export interface operations {
                     "application/json": components["schemas"]["ResultsPage"];
                 };
             };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2018,7 +2089,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Result ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2040,7 +2111,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2049,7 +2120,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2058,7 +2129,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2068,7 +2148,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Result ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2088,7 +2168,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2097,7 +2177,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2106,7 +2186,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2115,7 +2195,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2125,7 +2214,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Result ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2147,7 +2236,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2156,7 +2245,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2165,7 +2254,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2174,7 +2263,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -2183,7 +2281,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2193,7 +2291,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Result ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2219,7 +2317,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2228,7 +2326,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2237,7 +2335,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2246,7 +2344,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2254,12 +2361,12 @@ export interface operations {
     listRuns: {
         parameters: {
             query?: {
-                /** @description Maximum rows to return. */
-                limit?: number;
+                /** @description Maximum rows to return (default 50). */
+                limit?: string;
                 /** @description Opaque cursor from a previous page's next_cursor. */
                 cursor?: string;
                 /** @description Only runs triggered by this schedule. */
-                schedule_id?: number;
+                schedule_id?: string;
             };
             header?: never;
             path?: never;
@@ -2276,22 +2383,22 @@ export interface operations {
                     "application/json": components["schemas"]["RunsPage"];
                 };
             };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
-                };
-            };
             /** @description Unauthorized */
             401: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2324,7 +2431,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2333,7 +2440,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2342,7 +2449,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -2351,7 +2467,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2361,7 +2477,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Run ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2383,7 +2499,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2392,7 +2508,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2401,7 +2517,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2411,7 +2536,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Run ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2433,7 +2558,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2442,7 +2567,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2451,7 +2576,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2460,7 +2585,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -2469,7 +2594,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2498,7 +2632,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2531,7 +2674,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2540,7 +2683,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2549,7 +2692,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -2558,7 +2701,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2591,7 +2743,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2600,7 +2752,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2609,7 +2761,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2619,7 +2780,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Schedule ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2641,7 +2802,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2650,7 +2811,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2659,7 +2820,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2669,7 +2839,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Schedule ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2695,7 +2865,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2704,7 +2874,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2713,7 +2883,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2722,7 +2892,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -2731,7 +2901,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2741,7 +2920,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Schedule ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2761,7 +2940,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2770,7 +2949,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2779,7 +2958,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2788,7 +2967,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2798,7 +2986,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Schedule ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2820,7 +3008,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2829,7 +3017,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2838,7 +3026,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2848,7 +3045,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Schedule ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -2870,7 +3067,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2879,7 +3076,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2888,7 +3085,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -2897,7 +3094,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -2906,7 +3112,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2935,7 +3141,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2968,7 +3183,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -2977,7 +3192,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -2986,7 +3201,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -2996,7 +3220,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Notification channel ID */
+                /** @description Notification channel ID. */
                 channel_id: string;
             };
             cookie?: never;
@@ -3018,7 +3242,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3027,7 +3251,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3036,7 +3260,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3045,7 +3269,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -3054,7 +3287,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3064,7 +3297,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description What to test */
+                /** @description What to test. */
                 target: "vm" | "vl" | "oidc";
             };
             cookie?: never;
@@ -3090,7 +3323,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3099,7 +3332,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3108,7 +3341,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3117,7 +3350,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3146,7 +3388,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3179,7 +3430,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3188,7 +3439,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3197,7 +3448,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3207,7 +3467,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Token ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3227,7 +3487,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3236,7 +3496,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3245,7 +3505,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3254,7 +3514,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -3263,7 +3523,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3271,10 +3540,14 @@ export interface operations {
     getStatsSummary: {
         parameters: {
             query?: {
-                /** @description Named window ending now. */
+                /** @description Named window ending now (default 24h). */
                 range?: "24h" | "7d" | "30d";
-                /** @description 1 shifts the window back by its own span (previous period); 0 or omitted keeps it. */
-                offset?: 0 | 1;
+                /** @description 1 shifts the window back by its own span (previous period). */
+                offset?: "0" | "1";
+                /** @description Not accepted; present only to reject explicit windows. */
+                from?: string;
+                /** @description Not accepted; present only to reject explicit windows. */
+                to?: string;
             };
             header?: never;
             path?: never;
@@ -3285,19 +3558,11 @@ export interface operations {
             /** @description OK */
             200: {
                 headers: {
+                    "Cache-Control"?: string;
                     [name: string]: unknown;
                 };
                 content: {
                     "application/json": components["schemas"]["SummaryStats"];
-                };
-            };
-            /** @description Bad Request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
                 };
             };
             /** @description Unauthorized */
@@ -3306,7 +3571,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3335,7 +3609,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3345,7 +3628,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Tag ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3371,7 +3654,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3380,7 +3663,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3389,7 +3672,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3398,7 +3681,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -3407,7 +3690,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3417,7 +3709,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Tag ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3437,7 +3729,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3446,7 +3738,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3455,7 +3747,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3464,7 +3756,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3493,7 +3794,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3526,7 +3836,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3535,7 +3845,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3544,7 +3854,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3573,7 +3892,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3583,7 +3911,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3605,7 +3933,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3614,7 +3942,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3623,7 +3951,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3632,7 +3960,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Conflict */
@@ -3641,7 +3969,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3674,7 +4011,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3683,7 +4020,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3692,7 +4029,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3702,7 +4048,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3724,7 +4070,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3733,7 +4079,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3742,7 +4088,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3752,7 +4107,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3778,7 +4133,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3787,7 +4142,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3796,7 +4151,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3805,7 +4160,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3815,7 +4179,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3835,7 +4199,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3844,7 +4208,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -3853,7 +4217,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3862,7 +4226,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3872,16 +4245,16 @@ export interface operations {
             query?: {
                 /** @description Named window ending now. */
                 range?: "24h" | "7d" | "30d";
-                /** @description 1 shifts the window back by its own span (previous period); 0 or omitted keeps it. */
-                offset?: 0 | 1;
-                /** @description Explicit window start (RFC 3339); use with to instead of range. */
+                /** @description 1 shifts the window back by its own span (previous period). */
+                offset?: "0" | "1";
+                /** @description Explicit window start (RFC 3339 or unix seconds); use with to instead of range. */
                 from?: string;
-                /** @description Explicit window end (RFC 3339). */
+                /** @description Explicit window end (RFC 3339 or unix seconds). */
                 to?: string;
             };
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3903,7 +4276,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3912,7 +4285,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3921,7 +4294,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3931,7 +4313,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -3953,7 +4335,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -3962,7 +4344,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -3971,7 +4353,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -3981,7 +4372,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -4003,7 +4394,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -4012,7 +4403,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -4021,7 +4412,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -4031,9 +4431,9 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
-                /** @description Revision version */
+                /** @description Revision version. */
                 version: number;
             };
             cookie?: never;
@@ -4055,7 +4455,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -4064,7 +4464,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -4073,7 +4473,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -4082,7 +4482,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };
@@ -4092,7 +4501,7 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Target ID */
+                /** @description Resource ID. */
                 id: number;
             };
             cookie?: never;
@@ -4114,7 +4523,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Unauthorized */
@@ -4123,7 +4532,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Forbidden */
@@ -4132,7 +4541,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Not Found */
@@ -4141,7 +4550,16 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
+                };
+            };
+            /** @description Internal Server Error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
             /** @description Service Unavailable */
@@ -4150,7 +4568,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ErrorResponse"];
+                    "application/json": components["schemas"]["APIError"];
                 };
             };
         };

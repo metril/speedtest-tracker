@@ -1341,7 +1341,8 @@ func TestCreateTokenRejectedForTokenAuth(t *testing.T) {
 	}
 }
 
-func TestDecodeJSONContentType(t *testing.T) {
+func TestJSONBodyContentType(t *testing.T) {
+	h, _, _ := newTestAPI(t)
 	for _, tc := range []struct {
 		ct   string
 		want bool
@@ -1353,15 +1354,17 @@ func TestDecodeJSONContentType(t *testing.T) {
 		{"text/plain;charset=UTF-8", false},
 		{"application/x-www-form-urlencoded", false},
 	} {
-		req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{}`))
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/queues", strings.NewReader(`{"name":"ct-`+strings.NewReplacer("/", "-", ";", "-", "=", "-", " ", "").Replace(tc.ct)+`"}`))
 		if tc.ct != "" {
 			req.Header.Set("Content-Type", tc.ct)
 		}
 		rec := httptest.NewRecorder()
-		var dst map[string]any
-		ok := decodeJSON(rec, req, &dst)
-		if ok != tc.want || (!ok && rec.Code != http.StatusUnsupportedMediaType) {
-			t.Errorf("Content-Type %q: ok=%v code=%d, want ok=%v (415 on reject)", tc.ct, ok, rec.Code, tc.want)
+		h.ServeHTTP(rec, req)
+		if tc.want && rec.Code != http.StatusCreated {
+			t.Errorf("Content-Type %q: status %d, want 201 (%s)", tc.ct, rec.Code, rec.Body)
+		}
+		if !tc.want && rec.Code != http.StatusUnsupportedMediaType {
+			t.Errorf("Content-Type %q: status %d, want 415 (%s)", tc.ct, rec.Code, rec.Body)
 		}
 	}
 }

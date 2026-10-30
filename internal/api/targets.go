@@ -10,7 +10,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/runner"
 	"github.com/metril/speedtest-tracker/internal/settings"
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -48,14 +47,6 @@ type targetBody struct {
 
 // pathID parses the {id} URL parameter, answering 400 when it is not an
 // integer. It reports whether parsing succeeded.
-func pathID(w http.ResponseWriter, r *http.Request) (int64, bool) {
-	id, err := strconv.ParseInt(chi.URLParam(r, "id"), 10, 64)
-	if err != nil || id <= 0 {
-		errBadRequest(w, "id must be a positive integer")
-		return 0, false
-	}
-	return id, true
-}
 
 // validateTarget checks required fields, resolves queue_id (defaulting to
 // the wan queue when absent, and rejecting an id that names no queue) and
@@ -227,8 +218,8 @@ type RunQueued struct {
 
 // TargetTestResponse is returned by POST /targets/test.
 type TargetTestResponse struct {
-	OK     bool   `json:"ok"`
 	Engine string `json:"engine"`
+	OK     bool   `json:"ok"`
 }
 
 // enqueueError maps runner errors onto status codes.
@@ -263,5 +254,5 @@ func (d Deps) testTarget(ctx context.Context, in *targetCreateIn) (*jsonOut[Targ
 	if err := d.validateTargetErr(ctx, &b); err != nil {
 		return nil, err
 	}
-	return &jsonOut[TargetTestResponse]{TargetTestResponse{OK: true, Engine: b.Engine}}, nil
+	return &jsonOut[TargetTestResponse]{TargetTestResponse{Engine: b.Engine, OK: true}}, nil
 }

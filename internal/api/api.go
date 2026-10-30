@@ -189,6 +189,7 @@ func New(deps Deps) http.Handler {
 	api := newHumaAPI(typed)
 	deps.registerAPI(api, false)
 	addDocsOnly(api)
+	finalizeSpec(api)
 
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {

@@ -165,11 +165,11 @@ func (d Deps) targetHistory(ctx context.Context, in *historyIn) (*jsonOut[Histor
 
 // HistoryResponse is the GET /targets/{id}/history body.
 type HistoryResponse struct {
-	TargetID      int64                `json:"target_id"`
-	From          string               `json:"from"`
-	To            string               `json:"to"`
 	BucketSeconds int                  `json:"bucket_seconds"`
+	From          string               `json:"from"`
 	Points        []store.HistoryPoint `json:"points"`
+	TargetID      int64                `json:"target_id"`
+	To            string               `json:"to"`
 }
 
 // outages answers GET /outages?from&to&gap_seconds.
@@ -183,8 +183,8 @@ type outagesIn struct {
 // OutagesResponse is the GET /outages body.
 type OutagesResponse struct {
 	From      string           `json:"from"`
-	To        string           `json:"to"`
 	Incidents []store.Incident `json:"incidents"`
+	To        string           `json:"to"`
 }
 
 func (d Deps) outages(ctx context.Context, in *outagesIn) (*jsonOut[OutagesResponse], error) {
