@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -67,111 +68,131 @@ func (d Deps) resultFilterFromQuery(w http.ResponseWriter, q url.Values) (store.
 }
 
 // listResults answers GET /results with filters and a keyset cursor.
-func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
-	f, ok := d.resultFilterFromQuery(w, r.URL.Query())
+type listResultsIn struct {
+	Limit    string `query:"limit" doc:"Maximum rows to return (default 50)."`
+	Cursor   string `query:"cursor" doc:"Opaque cursor from a previous page's next_cursor."`
+	TargetID string `query:"target_id" doc:"Only results of this target."`
+	Engine   string `query:"engine" doc:"Only results of this engine."`
+	Status   string `query:"status" doc:"Only results with this status (ok, failed, degraded)."`
+	Tag      string `query:"tag" doc:"Only results carrying this tag."`
+	From     string `query:"from" doc:"Earliest start time (RFC 3339 or unix seconds)."`
+	To       string `query:"to" doc:"Latest start time (RFC 3339 or unix seconds)."`
+}
+
+// ResultsPage is the GET /results body.
+type ResultsPage struct {
+	Results    []store.Result `json:"results"`
+	NextCursor string         `json:"next_cursor" doc:"Pass as cursor to fetch the next page; empty when exhausted."`
+}
+
+// SetTagsRequest is the PUT /results/{id}/tags body.
+type SetTagsRequest struct {
+	Tags []string `json:"tags"`
+}
+
+// ResultTags is the PUT /results/{id}/tags response.
+type ResultTags struct {
+	ID   int64    `json:"id"`
+	Tags []string `json:"tags"`
+}
+
+type setTagsIn struct {
+	ID   int64 `path:"id" minimum:"1" doc:"Resource ID."`
+	Body SetTagsRequest
+}
+
+func (d Deps) listResults(ctx context.Context, in *listResultsIn) (*jsonOut[ResultsPage], error) {
+	q := queryOf("limit", in.Limit, "cursor", in.Cursor, "target_id", in.TargetID, "engine", in.Engine,
+		"status", in.Status, "tag", in.Tag, "from", in.From, "to", in.To)
+	c := &errCapture{}
+	f, ok := d.resultFilterFromQuery(c, q)
 	if !ok {
-		return
+		return nil, c.err()
 	}
-	limit, ok := intQuery(w, r.URL.Query(), "limit", 50)
+	limit, ok := intQuery(c, q, "limit", 50)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	f.Limit = limit
-	cursor, ok := int64Query(w, r.URL.Query(), "cursor", 0)
+	cursor, ok := int64Query(c, q, "cursor", 0)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	f.Cursor = cursor
 
-	results, next, err := d.Store.ListResults(r.Context(), f)
+	results, next, err := d.Store.ListResults(ctx, f)
 	if err != nil {
-		internalError(w, d.Logger, "list results failed", err)
-		return
+		return nil, internalErr(d.Logger, "list results failed", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"results": results, "next_cursor": cursorString(next)})
+	return &jsonOut[ResultsPage]{ResultsPage{Results: results, NextCursor: cursorString(next)}}, nil
 }
 
-func (d Deps) getResult(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) getResult(ctx context.Context, in *idIn) (*jsonOut[*store.Result], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	res, err := d.Store.GetResult(r.Context(), id)
-	if storeError(w, d.Logger, "result", err) {
-		return
+	res, err := d.Store.GetResult(ctx, in.ID)
+	if e := storeErr(d.Logger, "result", err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, http.StatusOK, res)
+	return &jsonOut[*store.Result]{res}, nil
 }
 
-func (d Deps) deleteResult(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) deleteResult(ctx context.Context, in *idIn) (*struct{}, error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if err := d.Store.DeleteResult(r.Context(), id); err != nil {
-		storeError(w, d.Logger, "result", err)
-		return
+	if err := d.Store.DeleteResult(ctx, in.ID); err != nil {
+		return nil, storeErr(d.Logger, "result", err)
 	}
-	w.WriteHeader(http.StatusNoContent)
+	return nil, nil
 }
 
 // reexecuteResult replays a stored result by re-running its target with
 // the exact options_snapshot captured at result time (not the target's
 // current live options); a result whose target is gone cannot be replayed.
-func (d Deps) reexecuteResult(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) reexecuteResult(ctx context.Context, in *idIn) (*jsonOut[RunQueued], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	res, err := d.Store.GetResult(r.Context(), id)
-	if storeError(w, d.Logger, "result", err) {
-		return
+	res, err := d.Store.GetResult(ctx, in.ID)
+	if e := storeErr(d.Logger, "result", err); e != nil {
+		return nil, e
 	}
 	if res.TargetID == nil {
-		errBadRequest(w, "result has no target to re-execute")
-		return
+		return nil, badRequest("result has no target to re-execute")
 	}
-	if _, err := d.Store.GetTarget(r.Context(), *res.TargetID); err != nil {
+	if _, err := d.Store.GetTarget(ctx, *res.TargetID); err != nil {
 		if errors.Is(err, store.ErrNotFound) {
-			errBadRequest(w, "target of this result no longer exists")
-		} else {
-			internalError(w, d.Logger, "get target failed", err)
+			return nil, badRequest("target of this result no longer exists")
 		}
-		return
+		return nil, internalErr(d.Logger, "get target failed", err)
 	}
-	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
+	runID, err := d.Runner.Enqueue(ctx, runner.RunRequest{
 		Trigger:   "reexec",
 		TargetIDs: []int64{*res.TargetID},
 		Snapshots: map[int64]json.RawMessage{*res.TargetID: res.OptionsSnapshot},
 	})
 	if err != nil {
-		enqueueError(w, d.Logger, err)
-		return
+		return nil, enqueueErr(d.Logger, err)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
+	return &jsonOut[RunQueued]{RunQueued{RunID: runID}}, nil
 }
 
 // setResultTags answers PUT /results/{id}/tags {"tags":[...]}.
-func (d Deps) setResultTags(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) setResultTags(ctx context.Context, in *setTagsIn) (*jsonOut[ResultTags], error) {
+	if err := (idIn{in.ID}).check(); err != nil {
+		return nil, err
 	}
-	var body struct {
-		Tags []string `json:"tags"`
+	c := &errCapture{}
+	if !validTagList(c, in.Body.Tags) {
+		return nil, c.err()
 	}
-	if !decodeJSON(w, r, &body) {
-		return
+	tags, err := d.Store.SetResultTags(ctx, in.ID, in.Body.Tags)
+	if e := storeErr(d.Logger, "result", err); e != nil {
+		return nil, e
 	}
-	if !validTagList(w, body.Tags) {
-		return
-	}
-	tags, err := d.Store.SetResultTags(r.Context(), id, body.Tags)
-	if storeError(w, d.Logger, "result", err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, map[string]any{"id": id, "tags": tags})
+	return &jsonOut[ResultTags]{ResultTags{ID: in.ID, Tags: tags}}, nil
 }
 
 // validTagList enforces at most 20 distinct tags, each 1-40 characters

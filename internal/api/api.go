@@ -214,13 +214,6 @@ func New(deps Deps) http.Handler {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
 		})
-		v1.Route("/results", func(rs chi.Router) {
-			rs.Get("/", etagJSON(deps.listResults))
-			rs.Get("/{id}", deps.getResult)
-			rs.Delete("/{id}", deps.deleteResult)
-			rs.Post("/{id}/reexecute", deps.reexecuteResult)
-			rs.Put("/{id}/tags", deps.setResultTags)
-		})
 		v1.Route("/tags", func(tg chi.Router) {
 			tg.Get("/", deps.listTags)
 			tg.Put("/{id}", deps.renameTag)

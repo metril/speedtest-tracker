@@ -35,3 +35,13 @@ func miscSpecs() []opSpec {
 		{Method: http.MethodPost, Path: "/auth/logout", ID: "logout", Tag: "auth", NoAuth: true, Summary: "End the session"},
 	}
 }
+
+// resultFilterParams are the filters shared by GET /results and the CSV export.
+var resultFilterParams = []p{
+	{Name: "target_id", Query: true, Doc: "Only results of this target."},
+	{Name: "engine", Query: true, Type: "string", Doc: "Only results of this engine."},
+	{Name: "status", Query: true, Type: "string", Doc: "Only results with this status (ok, failed, degraded)."},
+	{Name: "tag", Query: true, Type: "string", Doc: "Only results carrying this tag."},
+	{Name: "from", Query: true, Type: "string", Doc: "Earliest start time (RFC 3339)."},
+	{Name: "to", Query: true, Type: "string", Doc: "Latest start time (RFC 3339)."},
+}
