@@ -351,7 +351,7 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 	r.mu.Unlock()
 
 	if queueFull {
-		_ = r.cfg.Store.SetRunStatus(context.Background(), runID, "failed", "queue full")
+		_ = r.setRunStatus(runID, "failed", "queue full")
 		r.publishRun(runID, "failed", "queue full", len(targets), 0)
 		return 0, ErrQueueFull
 	}
@@ -368,13 +368,15 @@ func (r *Runner) Enqueue(ctx context.Context, req RunRequest) (int64, error) {
 // use) and persists the canceled status itself; a queue job for this run
 // still sitting in a channel will later find the run gone from r.runs and
 // return without writing or publishing anything, so the terminal status is
-// never written twice.
+// never written twice. A run the runner does not track but whose row is
+// still queued/running is an orphan left by a dead process; it is marked
+// canceled directly so it can be cleared instead of reporting not-running.
 func (r *Runner) Cancel(runID int64) bool {
 	r.mu.Lock()
 	st, ok := r.runs[runID]
 	if !ok {
 		r.mu.Unlock()
-		return false
+		return r.cancelOrphan(runID)
 	}
 	st.canceled = true
 	notStarted := !st.started
@@ -386,14 +388,45 @@ func (r *Runner) Cancel(runID int64) bool {
 	r.mu.Unlock()
 
 	if notStarted {
-		err := r.cfg.Store.SetRunStatus(context.Background(), runID, "canceled", "")
-		if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
-			r.cfg.Logger.Error("cancel: set run status", "error", err, "run_id", runID)
-		} else if err == nil {
+		if err := r.setRunStatus(runID, "canceled", ""); err == nil {
 			r.publishRun(runID, "canceled", "", total, 0)
 		}
 	}
 	return true
+}
+
+// cancelOrphan cancels a run that is absent from r.runs but still queued or
+// running in the store. It reports whether such a run was canceled.
+func (r *Runner) cancelOrphan(runID int64) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	run, err := r.cfg.Store.GetRun(ctx, runID)
+	if err != nil || (run.Status != "queued" && run.Status != "running") {
+		return false
+	}
+	if r.setRunStatus(runID, "canceled", "") != nil {
+		return false
+	}
+	r.publishRun(runID, "canceled", "", 0, 0)
+	return true
+}
+
+// setRunStatus persists a run status, logging failures at Error and retrying
+// once with a fresh short-timeout context so a transient write error (e.g.
+// SQLITE_BUSY) does not strand the run. ErrInvalidTransition is returned
+// as-is: the run already has its real outcome.
+func (r *Runner) setRunStatus(runID int64, status, errMsg string) error {
+	var err error
+	for attempt := 0; attempt < 2; attempt++ {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = r.cfg.Store.SetRunStatus(ctx, runID, status, errMsg)
+		cancel()
+		if err == nil || errors.Is(err, store.ErrInvalidTransition) {
+			return err
+		}
+		r.cfg.Logger.Error("set run status", "error", err, "run_id", runID, "status", status, "attempt", attempt+1)
+	}
+	return err
 }
 
 // execute runs one queue's targets sequentially.
@@ -456,7 +489,7 @@ func (r *Runner) execute(j job) {
 		}
 	}()
 
-	if err := r.cfg.Store.SetRunStatus(context.Background(), j.runID, "running", ""); err == nil {
+	if err := r.setRunStatus(j.runID, "running", ""); err == nil {
 		r.publishRun(j.runID, "running", "", total, r.doneCount(j.runID))
 	}
 
@@ -622,13 +655,7 @@ func (r *Runner) finishQueue(runID int64, failed, canceled bool) {
 	st.cancel()
 	r.mu.Unlock()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err := r.cfg.Store.SetRunStatus(ctx, runID, status, "")
-	if err != nil && !errors.Is(err, store.ErrInvalidTransition) {
-		r.cfg.Logger.Error("set run status", "error", err, "run_id", runID)
-	}
-	if err == nil {
+	if err := r.setRunStatus(runID, status, ""); err == nil {
 		r.publishRun(runID, status, "", total, done)
 	}
 }

@@ -533,6 +533,14 @@ func run(ctx context.Context, logger *slog.Logger, level *slog.LevelVar) error {
 	}
 	defer db.Close()
 
+	// Runs still queued/running now were orphaned by a previous process dying
+	// mid-run; fail them before the scheduler sees them and skips forever.
+	if n, err := db.ReapOrphanedRuns(ctx); err != nil {
+		return err
+	} else if n > 0 {
+		logger.Warn("reaped orphaned runs", "count", n)
+	}
+
 	st, err := settings.New(ctx, db)
 	if err != nil {
 		return err
