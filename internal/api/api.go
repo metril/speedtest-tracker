@@ -209,16 +209,6 @@ func New(deps Deps) http.Handler {
 		if deps.Store == nil {
 			return
 		}
-		v1.Route("/schedules", func(s chi.Router) {
-			s.Get("/", etagJSON(deps.listSchedules))
-			s.Post("/", deps.createSchedule)
-			s.Post("/validate", deps.validateCron)
-			s.Get("/{id}", deps.getSchedule)
-			s.Put("/{id}", deps.updateSchedule)
-			s.Delete("/{id}", deps.deleteSchedule)
-			s.Post("/{id}/run", deps.runSchedule)
-			s.Get("/{id}/next", deps.scheduleNext)
-		})
 		v1.Get("/ookla/servers", deps.listOoklaServers)
 		v1.Route("/iperf3/servers", func(ip chi.Router) {
 			ip.Get("/", deps.listIperf3Servers)

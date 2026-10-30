@@ -191,6 +191,8 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	}
 	d.registerTargets(api)
 	d.registerQueues(api)
+	d.registerSchedules(api)
+	//@groups
 }
 
 // Shared parameter docs for the groups still described by opSpec.

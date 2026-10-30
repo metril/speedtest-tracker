@@ -53,7 +53,7 @@ func (d Deps) viewSchedule(sc store.Schedule, now time.Time) scheduleView {
 
 // validateSchedule normalises and checks a schedule payload, answering 400
 // itself. It reports whether the payload is usable.
-func (d Deps) validateSchedule(w http.ResponseWriter, r *http.Request, b *scheduleBody) bool {
+func (d Deps) validateSchedule(ctx context.Context, w http.ResponseWriter, b *scheduleBody) bool {
 	b.Name = strings.TrimSpace(b.Name)
 	if b.Name == "" {
 		errBadRequest(w, "name is required")
@@ -83,7 +83,7 @@ func (d Deps) validateSchedule(w http.ResponseWriter, r *http.Request, b *schedu
 		}
 		seen[id] = true
 	}
-	found, err := d.Store.ListTargetsByIDs(r.Context(), b.TargetIDs)
+	found, err := d.Store.ListTargetsByIDs(ctx, b.TargetIDs)
 	if err != nil {
 		internalError(w, d.Logger, "load targets failed", err)
 		return false
@@ -127,106 +127,143 @@ func (d Deps) scheduleStoreError(w http.ResponseWriter, err error) bool {
 	return storeError(w, d.Logger, "schedule", err)
 }
 
-func (d Deps) listSchedules(w http.ResponseWriter, r *http.Request) {
-	list, err := d.Store.ListSchedules(r.Context())
+func (d Deps) listSchedules(ctx context.Context, _ *struct{}) (*jsonOut[ScheduleList], error) {
+	list, err := d.Store.ListSchedules(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "list schedules failed", err)
-		return
+		return nil, internalErr(d.Logger, "list schedules failed", err)
 	}
 	now := time.Now()
 	views := make([]scheduleView, 0, len(list))
 	for _, sc := range list {
 		views = append(views, d.viewSchedule(sc, now))
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"schedules": views})
+	return &jsonOut[ScheduleList]{ScheduleList{Schedules: views}}, nil
 }
 
-func (d Deps) getSchedule(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
-	}
-	sc, err := d.Store.GetSchedule(r.Context(), id)
-	if d.scheduleStoreError(w, err) {
-		return
-	}
-	writeJSON(w, http.StatusOK, d.viewSchedule(*sc, time.Now()))
+// ScheduleList is the GET /schedules body.
+type ScheduleList struct {
+	Schedules []scheduleView `json:"schedules"`
 }
 
-func (d Deps) createSchedule(w http.ResponseWriter, r *http.Request) {
-	var b scheduleBody
-	if !decodeJSON(w, r, &b) || !d.validateSchedule(w, r, &b) {
-		return
+// ScheduleSaved is the schedule create/update response.
+type ScheduleSaved struct {
+	Schedule scheduleView `json:"schedule"`
+	Warnings []string     `json:"warnings" doc:"Overlap warnings computed for the saved schedule."`
+}
+
+// CronValidateRequest is the POST /schedules/validate body.
+type CronValidateRequest struct {
+	Cron     string `json:"cron"`
+	Timezone string `json:"timezone"`
+}
+
+// CronValidateResponse previews the next fire times of a valid expression.
+type CronValidateResponse struct {
+	OK   bool     `json:"ok"`
+	Next []string `json:"next"`
+}
+
+// ScheduleNext is the GET /schedules/{id}/next body.
+type ScheduleNext struct {
+	Next []string `json:"next"`
+}
+
+type scheduleIn struct {
+	ID   int64 `path:"id" minimum:"1" doc:"Resource ID."`
+	Body scheduleBody
+}
+
+type scheduleCreateIn struct {
+	Body scheduleBody
+}
+
+func (d Deps) scheduleStoreErr(err error) error {
+	if err == nil {
+		return nil
+	}
+	c := &errCapture{}
+	d.scheduleStoreError(c, err)
+	return c.err()
+}
+
+func (d Deps) getSchedule(ctx context.Context, in *idIn) (*jsonOut[scheduleView], error) {
+	if err := in.check(); err != nil {
+		return nil, err
+	}
+	sc, err := d.Store.GetSchedule(ctx, in.ID)
+	if e := d.scheduleStoreErr(err); e != nil {
+		return nil, e
+	}
+	return &jsonOut[scheduleView]{d.viewSchedule(*sc, time.Now())}, nil
+}
+
+func (d Deps) createSchedule(ctx context.Context, in *scheduleCreateIn) (*jsonOut[ScheduleSaved], error) {
+	b := in.Body
+	c := &errCapture{}
+	if !d.validateSchedule(ctx, c, &b) {
+		return nil, c.err()
 	}
 	sc := &store.Schedule{Name: b.Name, Cron: b.Cron, Enabled: b.Enabled,
 		Timezone: b.Timezone, TargetIDs: b.TargetIDs}
-	id, err := d.Store.CreateSchedule(r.Context(), sc)
-	if d.scheduleStoreError(w, err) {
-		return
+	id, err := d.Store.CreateSchedule(ctx, sc)
+	if e := d.scheduleStoreErr(err); e != nil {
+		return nil, e
 	}
-	d.reloadSchedules(r.Context())
-	d.respondSchedule(w, r, id, http.StatusCreated)
+	d.reloadSchedules(ctx)
+	return d.respondSchedule(ctx, id)
 }
 
-func (d Deps) updateSchedule(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) updateSchedule(ctx context.Context, in *scheduleIn) (*jsonOut[ScheduleSaved], error) {
+	if err := (idIn{in.ID}).check(); err != nil {
+		return nil, err
 	}
-	var b scheduleBody
-	if !decodeJSON(w, r, &b) || !d.validateSchedule(w, r, &b) {
-		return
+	b := in.Body
+	c := &errCapture{}
+	if !d.validateSchedule(ctx, c, &b) {
+		return nil, c.err()
 	}
-	sc := &store.Schedule{ID: id, Name: b.Name, Cron: b.Cron, Enabled: b.Enabled,
+	sc := &store.Schedule{ID: in.ID, Name: b.Name, Cron: b.Cron, Enabled: b.Enabled,
 		Timezone: b.Timezone, TargetIDs: b.TargetIDs}
-	if err := d.Store.UpdateSchedule(r.Context(), sc); d.scheduleStoreError(w, err) {
-		return
+	if err := d.Store.UpdateSchedule(ctx, sc); err != nil {
+		return nil, d.scheduleStoreErr(err)
 	}
-	d.reloadSchedules(r.Context())
-	d.respondSchedule(w, r, id, http.StatusOK)
+	d.reloadSchedules(ctx)
+	return d.respondSchedule(ctx, in.ID)
 }
 
 // respondSchedule re-reads the saved schedule and answers with it plus any
 // overlap warnings (Task 5 fills warnings in; until then it is empty).
-func (d Deps) respondSchedule(w http.ResponseWriter, r *http.Request, id int64, status int) {
-	saved, err := d.Store.GetSchedule(r.Context(), id)
-	if d.scheduleStoreError(w, err) {
-		return
+func (d Deps) respondSchedule(ctx context.Context, id int64) (*jsonOut[ScheduleSaved], error) {
+	saved, err := d.Store.GetSchedule(ctx, id)
+	if e := d.scheduleStoreErr(err); e != nil {
+		return nil, e
 	}
-	writeJSON(w, status, map[string]any{
-		"schedule": d.viewSchedule(*saved, time.Now()),
-		"warnings": d.overlapWarnings(r.Context(), *saved),
-	})
+	return &jsonOut[ScheduleSaved]{ScheduleSaved{
+		Schedule: d.viewSchedule(*saved, time.Now()),
+		Warnings: d.overlapWarnings(ctx, *saved),
+	}}, nil
 }
 
-func (d Deps) deleteSchedule(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) deleteSchedule(ctx context.Context, in *idIn) (*struct{}, error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	if err := d.Store.DeleteSchedule(r.Context(), id); d.scheduleStoreError(w, err) {
-		return
+	if err := d.Store.DeleteSchedule(ctx, in.ID); err != nil {
+		return nil, d.scheduleStoreErr(err)
 	}
-	d.reloadSchedules(r.Context())
-	w.WriteHeader(http.StatusNoContent)
+	d.reloadSchedules(ctx)
+	return nil, nil
 }
 
 // validateCron answers POST /schedules/validate: 200 with the next fire
 // times, or 400 with the parse error.
-func (d Deps) validateCron(w http.ResponseWriter, r *http.Request) {
-	var b struct {
-		Cron     string `json:"cron"`
-		Timezone string `json:"timezone"`
-	}
-	if !decodeJSON(w, r, &b) {
-		return
-	}
+func (d Deps) validateCron(_ context.Context, in *struct{ Body CronValidateRequest }) (*jsonOut[CronValidateResponse], error) {
+	b := in.Body
 	times, err := scheduler.NextFireTimes(strings.TrimSpace(b.Cron), b.Timezone, nextRunCount, time.Now())
 	if err != nil {
-		errBadRequest(w, err.Error())
-		return
+		return nil, badRequest(err.Error())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "next": formatTimes(times)})
+	return &jsonOut[CronValidateResponse]{CronValidateResponse{OK: true, Next: formatTimes(times)}}, nil
 }
 
 // formatTimes renders fire times as RFC3339 strings.
@@ -289,43 +326,38 @@ func (d Deps) overlapWarnings(ctx context.Context, sc store.Schedule) []string {
 // runSchedule answers POST /schedules/{id}/run: a manual, immediate run of
 // the schedule's ordered targets, still tagged with the schedule id so the
 // run shows up in that schedule's history.
-func (d Deps) runSchedule(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) runSchedule(ctx context.Context, in *idIn) (*jsonOut[RunQueued], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	sc, err := d.Store.GetSchedule(r.Context(), id)
-	if d.scheduleStoreError(w, err) {
-		return
+	sc, err := d.Store.GetSchedule(ctx, in.ID)
+	if e := d.scheduleStoreErr(err); e != nil {
+		return nil, e
 	}
-	runID, err := d.Runner.Enqueue(r.Context(), runner.RunRequest{
+	runID, err := d.Runner.Enqueue(ctx, runner.RunRequest{
 		Trigger: "manual", ScheduleID: &sc.ID, TargetIDs: sc.TargetIDs})
 	if err != nil {
-		enqueueError(w, d.Logger, err)
-		return
+		return nil, enqueueErr(d.Logger, err)
 	}
-	writeJSON(w, http.StatusAccepted, map[string]int64{"run_id": runID})
+	return &jsonOut[RunQueued]{RunQueued{RunID: runID}}, nil
 }
 
 // scheduleNext answers GET /schedules/{id}/next with the next five fire
 // times of the stored expression.
-func (d Deps) scheduleNext(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+func (d Deps) scheduleNext(ctx context.Context, in *idIn) (*jsonOut[ScheduleNext], error) {
+	if err := in.check(); err != nil {
+		return nil, err
 	}
-	sc, err := d.Store.GetSchedule(r.Context(), id)
-	if d.scheduleStoreError(w, err) {
-		return
+	sc, err := d.Store.GetSchedule(ctx, in.ID)
+	if e := d.scheduleStoreErr(err); e != nil {
+		return nil, e
 	}
 	if !sc.Enabled {
-		writeJSON(w, http.StatusOK, map[string]any{"next": []string{}})
-		return
+		return &jsonOut[ScheduleNext]{ScheduleNext{Next: []string{}}}, nil
 	}
 	times, err := scheduler.NextFireTimes(sc.Cron, sc.Timezone, nextRunCount, time.Now())
 	if err != nil {
-		errBadRequest(w, err.Error())
-		return
+		return nil, badRequest(err.Error())
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"next": formatTimes(times)})
+	return &jsonOut[ScheduleNext]{ScheduleNext{Next: formatTimes(times)}}, nil
 }
