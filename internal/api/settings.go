@@ -15,7 +15,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
 	"github.com/metril/speedtest-tracker/internal/auth"
 	"github.com/metril/speedtest-tracker/internal/notify"
 	"github.com/metril/speedtest-tracker/internal/oidcauth"
@@ -163,48 +162,87 @@ type settingsBody struct {
 
 // getSettings returns the full sectioned settings document, masking the
 // VictoriaMetrics/VictoriaLogs auth headers.
-func (d Deps) getSettings(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
+func (d Deps) getSettings(ctx context.Context, _ *struct{}) (*jsonOut[SettingsResponse], error) {
 	g, err := d.Settings.General(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load general settings", err)
-		return
+		return nil, internalErr(d.Logger, "load general settings", err)
 	}
 	e, err := d.Settings.Engines(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load engines settings", err)
-		return
+		return nil, internalErr(d.Logger, "load engines settings", err)
 	}
 	i, err := d.Settings.Integrations(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load integrations settings", err)
-		return
+		return nil, internalErr(d.Logger, "load integrations settings", err)
 	}
 	maskSecrets(&i)
 	n, err := d.Settings.Notifications(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load notifications settings", err)
-		return
+		return nil, internalErr(d.Logger, "load notifications settings", err)
 	}
 	maskChannelTokens(&n)
 	a, err := d.Settings.Auth(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load auth settings", err)
-		return
+		return nil, internalErr(d.Logger, "load auth settings", err)
 	}
 	maskAuthSecrets(&a)
 	locked := d.Settings.LockedKeys()
 	if locked == nil {
 		locked = []string{}
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"general":       g,
-		"engines":       e,
-		"integrations":  i,
-		"notifications": n,
-		"auth":          a,
-		"locked":        locked,
-	})
+	return &jsonOut[SettingsResponse]{SettingsResponse{
+		Auth: a, Engines: e, General: g, Integrations: i, Locked: locked, Notifications: n,
+	}}, nil
+}
+
+// SettingsResponse is the sectioned settings document. Secrets are masked.
+type SettingsResponse struct {
+	Auth          settings.Auth          `json:"auth"`
+	Engines       settings.Engines       `json:"engines"`
+	General       settings.General       `json:"general"`
+	Integrations  settings.Integrations  `json:"integrations"`
+	Locked        []string               `json:"locked" doc:"Keys pinned by environment variables and not editable."`
+	Notifications settings.Notifications `json:"notifications"`
+}
+
+// ConnectionTest is the result of a settings connectivity test. A probe
+// that reached its target but got a bad answer is ok=false with the reason
+// in error, not an HTTP error.
+type ConnectionTest struct {
+	Error     string `json:"error,omitempty"`
+	LatencyMs *int64 `json:"latency_ms,omitempty"`
+	OK        bool   `json:"ok"`
+	Status    *int   `json:"status,omitempty"`
+}
+
+func connFail(err string) *jsonOut[ConnectionTest] {
+	return &jsonOut[ConnectionTest]{ConnectionTest{OK: false, Error: err}}
+}
+
+// TestIntegrationRequest is the POST /settings/test/{target} body. Fields
+// url, auth_header and auth apply to vm and vl; issuer, client_id and
+// client_secret apply to oidc. A masked secret resolves to the stored one.
+// The whole body may be omitted.
+type TestIntegrationRequest struct {
+	Auth         *testAuthBody `json:"auth,omitempty"`
+	AuthHeader   *string       `json:"auth_header,omitempty" deprecated:"true"`
+	ClientID     *string       `json:"client_id,omitempty"`
+	ClientSecret *string       `json:"client_secret,omitempty"`
+	Issuer       *string       `json:"issuer,omitempty"`
+	URL          *string       `json:"url,omitempty"`
+}
+
+type testIntegrationIn struct {
+	Target string `path:"target" enum:"vm,vl,oidc" doc:"What to test."`
+	Body   *TestIntegrationRequest
+}
+
+type testNotifyIn struct {
+	ChannelID string `path:"channel_id" doc:"Notification channel ID."`
+}
+
+type putSettingsIn struct {
+	Body settingsBody
 }
 
 // maskChannelTokens replaces every set channel secret — the token and each
@@ -278,12 +316,16 @@ type setter interface {
 // putSettings validates the full partial document before writing anything,
 // so a rejected PUT is a no-op, then writes each provided field and
 // responds with the same (masked) document getSettings would produce.
-func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-	var body settingsBody
-	if !decodeJSON(w, r, &body) {
-		return
+func (d Deps) putSettings(ctx context.Context, in *putSettingsIn) (*jsonOut[SettingsResponse], error) {
+	c := &errCapture{}
+	if !d.applySettings(c, requestFrom(ctx), in.Body) {
+		return nil, c.err()
 	}
+	return d.getSettings(ctx, nil)
+}
+
+func (d Deps) applySettings(w http.ResponseWriter, r *http.Request, body settingsBody) bool {
+	ctx := r.Context()
 
 	// Locked-key enforcement runs first, generically, over the whole
 	// document — before any per-section validation — so a future section
@@ -291,16 +333,16 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	// touching the store.
 	if locked := lockedKeysIn(d, body); len(locked) > 0 {
 		errBadRequest(w, strings.Join(locked, ", ")+" set by the environment and cannot be changed here")
-		return
+		return false
 	}
 
 	// Auth section changes are admin-only. IsAdmin already accounts for
 	// whether an admin group is configured: it is true in open/token mode
 	// and, in forward_auth, only for members of the configured group (or
 	// everyone, if no group is configured).
-	if body.Auth != nil && !requestIsAdmin(r) {
+	if body.Auth != nil && !requestIsAdmin(r.Context()) {
 		errForbidden(w, "admin access required to change auth settings")
-		return
+		return false
 	}
 
 	// RULING (final review #3): a token is full-access for normal API use,
@@ -308,9 +350,9 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	// a leaked or over-broad token could flip auth to open and remove the
 	// need for a token at all. Only a forward-auth or open-mode session
 	// (a human, or no auth configured) may write here.
-	if body.Auth != nil && requestAuthIsToken(r) {
+	if body.Auth != nil && requestAuthIsToken(r.Context()) {
 		errForbidden(w, "auth settings require a forward-auth or open-mode session")
-		return
+		return false
 	}
 
 	// Likewise an API token must not repoint the engine binaries or the
@@ -318,29 +360,29 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	// the server, so letting a token set them would turn a leaked token
 	// into command execution or SSRF. Only a changed value is refused, so
 	// a GET-then-PUT round trip of unchanged values still succeeds.
-	if e := body.Engines; e != nil && requestAuthIsToken(r) {
+	if e := body.Engines; e != nil && requestAuthIsToken(r.Context()) {
 		cur, err := d.Settings.Engines(ctx)
 		if err != nil {
 			internalError(w, d.Logger, "load engines settings", err)
-			return
+			return false
 		}
 		if (e.SpeedtestBin != nil && *e.SpeedtestBin != cur.SpeedtestBin) ||
 			(e.Iperf3Bin != nil && *e.Iperf3Bin != cur.Iperf3Bin) ||
 			(e.Iperf3ListURL != nil && *e.Iperf3ListURL != cur.Iperf3ListURL) {
 			errForbidden(w, "engine binary paths and iperf3_list_url require a forward-auth or open-mode session")
-			return
+			return false
 		}
 	}
 
 	current, err := d.Settings.Integrations(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "load integrations settings", err)
-		return
+		return false
 	}
 	currentNotify, err := d.Settings.Notifications(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "load notifications settings", err)
-		return
+		return false
 	}
 	// Merged before validation, not just before the writes: an apprise
 	// channel's URLs are validated as real apprise-go target URLs, so a
@@ -353,7 +395,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		merged, err := mergeChannelSecrets(*n.Channels, currentNotify.Channels)
 		if err != nil {
 			errBadRequest(w, err.Error())
-			return
+			return false
 		}
 		mergedChannels = &merged
 		*n.Channels = merged
@@ -370,17 +412,17 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		currentAuth, err = d.Settings.Auth(ctx)
 		if err != nil {
 			internalError(w, d.Logger, "load auth settings", err)
-			return
+			return false
 		}
 	}
 
 	if err := validateSettings(body, current); err != nil {
 		errBadRequest(w, err.Error())
-		return
+		return false
 	}
 	if err := validateAuthBody(body.Auth, currentAuth); err != nil {
 		errBadRequest(w, err.Error())
-		return
+		return false
 	}
 
 	// The lockout guard: computed only when the request actually touches
@@ -391,7 +433,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		resultingAuth := mergeAuth(currentAuth, body.Auth)
 		if err := d.checkAuthLockout(r, currentAuth, resultingAuth); err != nil {
 			errBadRequest(w, err.Error())
-			return
+			return false
 		}
 	}
 
@@ -402,7 +444,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 	tx, err := d.Settings.Begin(ctx)
 	if err != nil {
 		internalError(w, d.Logger, "begin settings transaction", err)
-		return
+		return false
 	}
 	defer tx.Rollback()
 	// Validation above ran over the full document up front, so a Set
@@ -432,7 +474,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
 				internalError(w, d.Logger, "write general settings", err)
-				return
+				return false
 			}
 		}
 	}
@@ -466,7 +508,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
 				internalError(w, d.Logger, "write engines settings", err)
-				return
+				return false
 			}
 		}
 	}
@@ -521,7 +563,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
 				internalError(w, d.Logger, "write integrations settings", err)
-				return
+				return false
 			}
 		}
 	}
@@ -543,7 +585,7 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
 				internalError(w, d.Logger, "write notifications settings", err)
-				return
+				return false
 			}
 		}
 	}
@@ -589,24 +631,24 @@ func (d Deps) putSettings(w http.ResponseWriter, r *http.Request) {
 		for _, w2 := range writes {
 			if err := w2(); err != nil {
 				internalError(w, d.Logger, "write auth settings", err)
-				return
+				return false
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
 		internalError(w, d.Logger, "commit settings", err)
-		return
+		return false
 	}
-	d.getSettings(w, r)
+	return true
 }
 
 // requestIsAdmin reports whether the caller may change admin-only
 // settings. A zero-value identity means no auth middleware is mounted
 // (Deps.Auth nil), which is treated as open access, matching GET
 // /api/v1/me's convention.
-func requestIsAdmin(r *http.Request) bool {
-	id := auth.FromContext(r.Context())
+func requestIsAdmin(ctx context.Context) bool {
+	id := auth.FromContext(ctx)
 	return id.Mode == "" || id.IsAdmin
 }
 
@@ -617,8 +659,8 @@ func requestIsAdmin(r *http.Request) bool {
 // this check (is not a token) the same as forward-auth. A zero-value
 // identity (no auth middleware mounted) is not a token, matching
 // requestIsAdmin's convention that an absent Deps.Auth means open access.
-func requestAuthIsToken(r *http.Request) bool {
-	id := auth.FromContext(r.Context())
+func requestAuthIsToken(ctx context.Context) bool {
+	id := auth.FromContext(ctx)
 	return id.Source == auth.SourceToken
 }
 
@@ -1122,10 +1164,10 @@ func (d Deps) checkAuthLockout(r *http.Request, current, resulting settings.Auth
 		// and require the configured issuer to actually be reachable and
 		// speak OIDC discovery, so a typo doesn't lock every session out
 		// the moment the SPA's own next request needs a working provider.
-		if !requestIsAdmin(r) {
+		if !requestIsAdmin(r.Context()) {
 			return fmt.Errorf("admin access required to switch to oidc mode")
 		}
-		if requestAuthIsToken(r) {
+		if requestAuthIsToken(r.Context()) {
 			return fmt.Errorf("switching to oidc mode requires a forward-auth or open-mode session")
 		}
 		discoverCtx, cancel := context.WithTimeout(r.Context(), probeTimeout)
@@ -1645,28 +1687,21 @@ func resolveMaybeMaskedSecret(v *string, storedValue string, same bool) string {
 // endpoint with GET /health. A reachable-but-unhappy endpoint is reported
 // in the body with ok=false rather than as an HTTP error, so the form can
 // show the reason inline.
-func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
-	target := chi.URLParam(r, "target")
+func (d Deps) testIntegration(ctx context.Context, in *testIntegrationIn) (*jsonOut[ConnectionTest], error) {
+	target := in.Target
+	var body TestIntegrationRequest
+	if in.Body != nil {
+		body = *in.Body
+	}
 	if target == "oidc" {
-		d.testOIDC(w, r)
-		return
+		return d.testOIDC(ctx, body)
 	}
 	if target != "vm" && target != "vl" {
-		errNotFound(w, "unknown test target "+target)
-		return
+		return nil, notFound("unknown test target " + target)
 	}
-	var body struct {
-		URL        *string       `json:"url"`
-		AuthHeader *string       `json:"auth_header"` // deprecated: use Auth
-		Auth       *testAuthBody `json:"auth"`
-	}
-	if !decodeOptionalJSON(w, r, &body) {
-		return
-	}
-	cur, err := d.Settings.Integrations(r.Context())
+	cur, err := d.Settings.Integrations(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load integrations", err)
-		return
+		return nil, internalErr(d.Logger, "load integrations", err)
 	}
 	storedURL, storedAuth := cur.VMURL, cur.VMAuth()
 	if target == "vl" {
@@ -1677,8 +1712,7 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 		rawURL = *body.URL
 	}
 	if err := validateEndpointURL(rawURL, true); err != nil {
-		errBadRequest(w, err.Error())
-		return
+		return nil, badRequest(err.Error())
 	}
 
 	// The stored credential is only reused when the effective URL is the
@@ -1692,37 +1726,28 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 	if client == nil {
 		client = &http.Client{Timeout: probeTimeout}
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(rawURL, "/")+"/health", nil)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return connFail(err.Error()), nil
 	}
 	auth.Apply(req)
 
 	start := time.Now()
 	resp, err := client.Do(req)
 	if err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return connFail(err.Error()), nil
 	}
 	latency := time.Since(start)
 	io.Copy(io.Discard, resp.Body)
 	resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		writeJSON(w, http.StatusOK, map[string]any{
-			"ok":    false,
-			"error": fmt.Sprintf("GET /health returned %d", resp.StatusCode),
-		})
-		return
+		return connFail(fmt.Sprintf("GET /health returned %d", resp.StatusCode)), nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"ok":         true,
-		"status":     resp.StatusCode,
-		"latency_ms": latency.Milliseconds(),
-	})
+	status, ms := resp.StatusCode, latency.Milliseconds()
+	return &jsonOut[ConnectionTest]{ConnectionTest{OK: true, Status: &status, LatencyMs: &ms}}, nil
 }
 
 // testOIDC probes an OIDC issuer via discovery, mirroring testIntegration's
@@ -1732,19 +1757,10 @@ func (d Deps) testIntegration(w http.ResponseWriter, r *http.Request) {
 // client_secret are accepted (and mask-resolved) for parity with the stored
 // config and future use, but discovery itself only ever fetches the
 // issuer's public metadata/JWKS, so neither is actually sent anywhere.
-func (d Deps) testOIDC(w http.ResponseWriter, r *http.Request) {
-	var body struct {
-		Issuer       *string `json:"issuer"`
-		ClientID     *string `json:"client_id"`
-		ClientSecret *string `json:"client_secret"`
-	}
-	if !decodeOptionalJSON(w, r, &body) {
-		return
-	}
-	cur, err := d.Settings.Auth(r.Context())
+func (d Deps) testOIDC(ctx context.Context, body TestIntegrationRequest) (*jsonOut[ConnectionTest], error) {
+	cur, err := d.Settings.Auth(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load auth settings", err)
-		return
+		return nil, internalErr(d.Logger, "load auth settings", err)
 	}
 
 	issuer := cur.OIDCIssuer
@@ -1752,18 +1768,17 @@ func (d Deps) testOIDC(w http.ResponseWriter, r *http.Request) {
 		issuer = *body.Issuer
 	}
 	if err := validateAbsoluteHTTPURL(issuer); err != nil {
-		errBadRequest(w, "issuer: "+err.Error())
-		return
+		return nil, badRequest("issuer: " + err.Error())
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	start := time.Now()
 	if err := oidcauth.Discover(ctx, issuer, nil); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return connFail(err.Error()), nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "latency_ms": time.Since(start).Milliseconds()})
+	ms := time.Since(start).Milliseconds()
+	return &jsonOut[ConnectionTest]{ConnectionTest{OK: true, LatencyMs: &ms}}, nil
 }
 
 // testNotifyChannel probes one stored notification channel. The channel is
@@ -1771,28 +1786,25 @@ func (d Deps) testOIDC(w http.ResponseWriter, r *http.Request) {
 // what keeps this endpoint from being an SSRF primitive, and it matches
 // the same-origin rule testIntegration uses. The user must save the
 // channel before testing it.
-func (d Deps) testNotifyChannel(w http.ResponseWriter, r *http.Request) {
+func (d Deps) testNotifyChannel(ctx context.Context, in *testNotifyIn) (*jsonOut[ConnectionTest], error) {
 	if d.Notifier == nil {
-		writeError(w, http.StatusServiceUnavailable, "unavailable", "notifications are not wired")
-		return
+		return nil, apiErr(http.StatusServiceUnavailable, "unavailable", "notifications are not wired")
 	}
-	id := chi.URLParam(r, "channel_id")
-	n, err := d.Settings.Notifications(r.Context())
+	id := in.ChannelID
+	n, err := d.Settings.Notifications(ctx)
 	if err != nil {
-		internalError(w, d.Logger, "load notifications", err)
-		return
+		return nil, internalErr(d.Logger, "load notifications", err)
 	}
 	idx := slices.IndexFunc(n.Channels, func(c settings.Channel) bool { return c.ID == id })
 	if idx < 0 {
-		errNotFound(w, "unknown channel "+id)
-		return
+		return nil, notFound("unknown channel " + id)
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), probeTimeout)
+	ctx, cancel := context.WithTimeout(ctx, probeTimeout)
 	defer cancel()
 	start := time.Now()
 	if err := d.Notifier.TestChannel(ctx, n.Channels[idx]); err != nil {
-		writeJSON(w, http.StatusOK, map[string]any{"ok": false, "error": err.Error()})
-		return
+		return connFail(err.Error()), nil
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "latency_ms": time.Since(start).Milliseconds()})
+	ms := time.Since(start).Milliseconds()
+	return &jsonOut[ConnectionTest]{ConnectionTest{OK: true, LatencyMs: &ms}}, nil
 }

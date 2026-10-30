@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/go-chi/chi/v5"
 	"io"
 	"log/slog"
 	"net/http"
@@ -1284,7 +1285,7 @@ func withTokenIdentity(h http.Handler, req *http.Request) *httptest.ResponseReco
 func TestPutSettingsEnginesValidationAndTokenBlock(t *testing.T) {
 	_, st := newSettingsAPI(t)
 	d := Deps{Settings: st, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	h := http.HandlerFunc(d.putSettings)
+	h := typedMux(d)
 
 	for _, tc := range []struct {
 		name  string
@@ -1331,7 +1332,7 @@ func TestCreateTokenRejectedForTokenAuth(t *testing.T) {
 	}
 	t.Cleanup(func() { db.Close() })
 	d := Deps{Store: db, Logger: slog.New(slog.NewTextHandler(io.Discard, nil))}
-	rec := withTokenIdentity(http.HandlerFunc(d.createToken), jsonRequest(t, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "x"}))
+	rec := withTokenIdentity(typedMux(d), jsonRequest(t, http.MethodPost, "/api/v1/settings/tokens", map[string]any{"name": "x"}))
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("status %d, want 403 (%s)", rec.Code, rec.Body)
 	}
@@ -1420,4 +1421,13 @@ func TestPutSettingsIsAtomic(t *testing.T) {
 		t.Fatalf("unexpected settings event %q", k)
 	case <-time.After(100 * time.Millisecond):
 	}
+}
+
+// typedMux serves the typed (huma) operations of d without the rest of the
+// middleware stack, for tests that inject an identity directly.
+func typedMux(d Deps) http.Handler {
+	r := chi.NewMux()
+	r.Use(withRequest)
+	d.registerAPI(newHumaAPI(r), true)
+	return r
 }

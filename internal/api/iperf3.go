@@ -56,7 +56,7 @@ func (d Deps) listIperf3Servers(w http.ResponseWriter, r *http.Request) {
 // like the other write routes. The refresh runs synchronously, using the
 // request's own context, so the response reflects the new count.
 func (d Deps) refreshIperf3Servers(w http.ResponseWriter, r *http.Request) {
-	if !requestIsAdmin(r) {
+	if !requestIsAdmin(r.Context()) {
 		errForbidden(w, "admin access required")
 		return
 	}

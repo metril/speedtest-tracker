@@ -185,7 +185,7 @@ func New(deps Deps) http.Handler {
 
 	// Typed (huma) operations, the OpenAPI document and the docs UI share
 	// one middleware stack with the legacy /api/v1 group below.
-	typed := r.With(middleware.Timeout(requestTimeout), authMW, writeGuard, etagMiddleware)
+	typed := r.With(middleware.Timeout(requestTimeout), authMW, writeGuard, withRequest, etagMiddleware)
 	api := newHumaAPI(typed)
 	deps.registerAPI(api, false)
 	addDocsOnly(api)
@@ -214,15 +214,6 @@ func New(deps Deps) http.Handler {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
 		})
-		if deps.Settings != nil {
-			v1.Get("/settings", deps.getSettings)
-			v1.Put("/settings", deps.putSettings)
-			v1.Post("/settings/test/notify/{channel_id}", deps.testNotifyChannel)
-			v1.Post("/settings/test/{target}", deps.testIntegration)
-			v1.Get("/settings/tokens", deps.listTokens)
-			v1.Post("/settings/tokens", deps.createToken)
-			v1.Delete("/settings/tokens/{id}", deps.deleteToken)
-		}
 	})
 
 	// OIDC login/logout live outside both the /api/v1 auth middleware and

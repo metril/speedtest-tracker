@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"log/slog"
+	"net/http"
 	"net/url"
 )
 
@@ -56,4 +58,20 @@ func queryOf(kv ...string) url.Values {
 		}
 	}
 	return q
+}
+
+type requestKey struct{}
+
+// withRequest stores the *http.Request in its own context so typed
+// handlers that need raw request details (headers) can reach them.
+func withRequest(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), requestKey{}, r)))
+	})
+}
+
+// requestFrom returns the request stored by withRequest.
+func requestFrom(ctx context.Context) *http.Request {
+	r, _ := ctx.Value(requestKey{}).(*http.Request)
+	return r
 }

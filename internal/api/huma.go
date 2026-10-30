@@ -82,6 +82,9 @@ func newHumaError(status int, msg string, errs ...error) huma.StatusError {
 		message = "malformed JSON body: EOF"
 	}
 	code := "invalid_request"
+	if strings.Contains(message, "unknown content type") {
+		return apiErr(http.StatusUnsupportedMediaType, "unsupported_media_type", "Content-Type must be application/json")
+	}
 	switch status {
 	case http.StatusUnprocessableEntity, http.StatusRequestEntityTooLarge:
 		status = http.StatusBadRequest
