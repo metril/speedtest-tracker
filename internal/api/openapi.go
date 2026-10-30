@@ -189,4 +189,13 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	if !all && d.Store == nil {
 		return
 	}
+	d.registerTargets(api)
 }
+
+// Shared parameter docs for the groups still described by opSpec.
+var (
+	rangeParam  = p{Name: "range", Query: true, Type: "string", Doc: "Named window ending now.", Enum: []any{"24h", "7d", "30d"}}
+	offsetParam = p{Name: "offset", Query: true, Doc: "1 shifts the window back by its own span (previous period); 0 or omitted keeps it.", Enum: []any{0, 1}}
+	limitParam  = p{Name: "limit", Query: true, Doc: "Maximum rows to return."}
+	cursorParam = p{Name: "cursor", Query: true, Type: "string", Doc: "Opaque cursor from a previous page's next_cursor."}
+)

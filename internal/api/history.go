@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"net/http"
+	"net/url"
 	"time"
 
 	"github.com/metril/speedtest-tracker/internal/store"
@@ -64,12 +66,12 @@ const windowGranularity = summaryTTL
 // a concrete window. defaultSpan is used when neither range nor from/to is
 // given, so callers (history vs. outages) can pick their own default. It
 // answers 400 itself and reports whether the window is usable.
-func rangeWindow(w http.ResponseWriter, r *http.Request, defaultSpan time.Duration) (string, string, bool) {
-	from, ok := timeQuery(w, r, "from")
+func rangeWindow(w http.ResponseWriter, q url.Values, defaultSpan time.Duration) (string, string, bool) {
+	from, ok := timeQuery(w, q, "from")
 	if !ok {
 		return "", "", false
 	}
-	to, ok := timeQuery(w, r, "to")
+	to, ok := timeQuery(w, q, "to")
 	if !ok {
 		return "", "", false
 	}
@@ -90,7 +92,7 @@ func rangeWindow(w http.ResponseWriter, r *http.Request, defaultSpan time.Durati
 		}
 		return from, to, true
 	}
-	name := r.URL.Query().Get("range")
+	name := q.Get("range")
 	now := time.Now().UTC().Truncate(windowGranularity)
 	if name == "" {
 		return now.Add(-defaultSpan).Format(dbTimeFormat), now.Format(dbTimeFormat), true
@@ -118,50 +120,65 @@ func windowSpan(from, to string) time.Duration {
 // window is. offset=1 shifts the resolved window back by its own span
 // (see shiftWindow), giving the immediately preceding period of equal
 // length — e.g. for a "compare with previous period" chart overlay.
-func (d Deps) targetHistory(w http.ResponseWriter, r *http.Request) {
-	id, ok := pathID(w, r)
-	if !ok {
-		return
+type historyIn struct {
+	ID     int64  `path:"id" minimum:"1" doc:"Resource ID."`
+	Range  string `query:"range" enum:"24h,7d,30d" doc:"Named window ending now."`
+	Offset string `query:"offset" enum:"0,1" doc:"1 shifts the window back by its own span (previous period)."`
+	From   string `query:"from" doc:"Explicit window start (RFC 3339 or unix seconds); use with to instead of range."`
+	To     string `query:"to" doc:"Explicit window end (RFC 3339 or unix seconds)."`
+}
+
+func (d Deps) targetHistory(ctx context.Context, in *historyIn) (*jsonOut[HistoryResponse], error) {
+	if err := (idIn{in.ID}).check(); err != nil {
+		return nil, err
 	}
-	if _, err := d.Store.GetTarget(r.Context(), id); storeError(w, d.Logger, "target", err) {
-		return
+	id := in.ID
+	if _, err := d.Store.GetTarget(ctx, id); err != nil {
+		return nil, storeErr(d.Logger, "target", err)
 	}
-	offset, ok := intQuery(w, r, "offset", 0)
+	q := queryOf("range", in.Range, "offset", in.Offset, "from", in.From, "to", in.To)
+	c := &errCapture{}
+	offset, ok := intQuery(c, q, "offset", 0)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	if offset < 0 || offset > 1 {
-		errBadRequest(w, "offset must be 0 or 1")
-		return
+		return nil, badRequest("offset must be 0 or 1")
 	}
-	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
+	from, to, ok := rangeWindow(c, q, defaultHistorySpan)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	from, to, ok = shiftWindow(from, to, offset)
 	if !ok {
-		errBadRequest(w, "invalid window")
-		return
+		return nil, badRequest("invalid window")
 	}
 	bucket := store.BucketSecondsFor(windowSpan(from, to))
-	points, err := d.Store.HistoryBuckets(r.Context(), id, from, to, bucket)
+	points, err := d.Store.HistoryBuckets(ctx, id, from, to, bucket)
 	if err != nil {
-		internalError(w, d.Logger, "history failed", err)
-		return
+		return nil, internalErr(d.Logger, "history failed", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"target_id": id, "from": from, "to": to,
-		"bucket_seconds": bucket, "points": points,
-	})
+	return &jsonOut[HistoryResponse]{HistoryResponse{
+		TargetID: id, From: from, To: to, BucketSeconds: bucket, Points: points,
+	}}, nil
+}
+
+// HistoryResponse is the GET /targets/{id}/history body.
+type HistoryResponse struct {
+	TargetID      int64                `json:"target_id"`
+	From          string               `json:"from"`
+	To            string               `json:"to"`
+	BucketSeconds int                  `json:"bucket_seconds"`
+	Points        []store.HistoryPoint `json:"points"`
 }
 
 // outages answers GET /outages?from&to&gap_seconds.
 func (d Deps) outages(w http.ResponseWriter, r *http.Request) {
-	from, to, ok := rangeWindow(w, r, defaultOutagesSpan)
+	from, to, ok := rangeWindow(w, r.URL.Query(), defaultOutagesSpan)
 	if !ok {
 		return
 	}
-	gap, ok := intQuery(w, r, "gap_seconds", defaultOutageGapSeconds)
+	gap, ok := intQuery(w, r.URL.Query(), "gap_seconds", defaultOutageGapSeconds)
 	if !ok {
 		return
 	}

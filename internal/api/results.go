@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -20,8 +21,8 @@ const dbTimeFormat = "2006-01-02T15:04:05.000Z"
 // timeQuery parses a from/to query parameter, accepting either RFC3339 (any
 // fractional-second precision) or unix seconds, and converts it to the
 // DB's stored timestamp format. It answers 400 on anything else.
-func timeQuery(w http.ResponseWriter, r *http.Request, name string) (string, bool) {
-	raw := r.URL.Query().Get(name)
+func timeQuery(w http.ResponseWriter, q url.Values, name string) (string, bool) {
+	raw := q.Get(name)
 	if raw == "" {
 		return "", true
 	}
@@ -39,25 +40,24 @@ func timeQuery(w http.ResponseWriter, r *http.Request, name string) (string, boo
 // resultFilterFromQuery parses the filter parameters shared by
 // GET /results and GET /results.csv (engine/status/tag/from/to/target_id).
 // Limit/Cursor are left zero; listResults fills them in on top.
-func (d Deps) resultFilterFromQuery(w http.ResponseWriter, r *http.Request) (store.ResultFilter, bool) {
-	q := r.URL.Query()
+func (d Deps) resultFilterFromQuery(w http.ResponseWriter, q url.Values) (store.ResultFilter, bool) {
 	f := store.ResultFilter{
 		Engine: q.Get("engine"),
 		Status: q.Get("status"),
 		Tag:    q.Get("tag"),
 	}
-	from, ok := timeQuery(w, r, "from")
+	from, ok := timeQuery(w, q, "from")
 	if !ok {
 		return store.ResultFilter{}, false
 	}
 	f.From = from
-	to, ok := timeQuery(w, r, "to")
+	to, ok := timeQuery(w, q, "to")
 	if !ok {
 		return store.ResultFilter{}, false
 	}
 	f.To = to
 	if raw := q.Get("target_id"); raw != "" {
-		id, ok := int64Query(w, r, "target_id", 0)
+		id, ok := int64Query(w, q, "target_id", 0)
 		if !ok {
 			return store.ResultFilter{}, false
 		}
@@ -68,16 +68,16 @@ func (d Deps) resultFilterFromQuery(w http.ResponseWriter, r *http.Request) (sto
 
 // listResults answers GET /results with filters and a keyset cursor.
 func (d Deps) listResults(w http.ResponseWriter, r *http.Request) {
-	f, ok := d.resultFilterFromQuery(w, r)
+	f, ok := d.resultFilterFromQuery(w, r.URL.Query())
 	if !ok {
 		return
 	}
-	limit, ok := intQuery(w, r, "limit", 50)
+	limit, ok := intQuery(w, r.URL.Query(), "limit", 50)
 	if !ok {
 		return
 	}
 	f.Limit = limit
-	cursor, ok := int64Query(w, r, "cursor", 0)
+	cursor, ok := int64Query(w, r.URL.Query(), "cursor", 0)
 	if !ok {
 		return
 	}

@@ -2,6 +2,7 @@ package api
 
 import (
 	"net/http"
+	"net/url"
 	"strconv"
 
 	"github.com/metril/speedtest-tracker/internal/runner"
@@ -10,17 +11,17 @@ import (
 
 // listRuns answers GET /runs?limit&cursor.
 func (d Deps) listRuns(w http.ResponseWriter, r *http.Request) {
-	limit, ok := intQuery(w, r, "limit", 50)
+	limit, ok := intQuery(w, r.URL.Query(), "limit", 50)
 	if !ok {
 		return
 	}
-	cursor, ok := int64Query(w, r, "cursor", 0)
+	cursor, ok := int64Query(w, r.URL.Query(), "cursor", 0)
 	if !ok {
 		return
 	}
 	f := store.RunFilter{Limit: limit, Cursor: cursor}
 	if r.URL.Query().Get("schedule_id") != "" {
-		sid, ok := int64Query(w, r, "schedule_id", 0)
+		sid, ok := int64Query(w, r.URL.Query(), "schedule_id", 0)
 		if !ok {
 			return
 		}
@@ -90,8 +91,8 @@ func (d Deps) cancelRun(w http.ResponseWriter, r *http.Request) {
 }
 
 // intQuery parses an integer query parameter, answering 400 on garbage.
-func intQuery(w http.ResponseWriter, r *http.Request, name string, def int) (int, bool) {
-	raw := r.URL.Query().Get(name)
+func intQuery(w http.ResponseWriter, q url.Values, name string, def int) (int, bool) {
+	raw := q.Get(name)
 	if raw == "" {
 		return def, true
 	}
@@ -104,8 +105,8 @@ func intQuery(w http.ResponseWriter, r *http.Request, name string, def int) (int
 }
 
 // int64Query parses an int64 query parameter, answering 400 on garbage.
-func int64Query(w http.ResponseWriter, r *http.Request, name string, def int64) (int64, bool) {
-	raw := r.URL.Query().Get(name)
+func int64Query(w http.ResponseWriter, q url.Values, name string, def int64) (int64, bool) {
+	raw := q.Get(name)
 	if raw == "" {
 		return def, true
 	}

@@ -84,7 +84,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 		errBadRequest(w, "stats/summary only accepts range=24h|7d|30d, not an explicit from/to pair")
 		return
 	}
-	offset, ok := intQuery(w, r, "offset", 0)
+	offset, ok := intQuery(w, r.URL.Query(), "offset", 0)
 	if !ok {
 		return
 	}
@@ -92,7 +92,7 @@ func (d Deps) statsSummary(w http.ResponseWriter, r *http.Request) {
 		errBadRequest(w, "offset must be 0 or 1")
 		return
 	}
-	from, to, ok := rangeWindow(w, r, defaultHistorySpan)
+	from, to, ok := rangeWindow(w, r.URL.Query(), defaultHistorySpan)
 	if !ok {
 		return
 	}

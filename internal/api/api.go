@@ -209,25 +209,6 @@ func New(deps Deps) http.Handler {
 		if deps.Store == nil {
 			return
 		}
-		v1.Route("/targets", func(t chi.Router) {
-			t.Get("/", etagJSON(deps.listTargets))
-			t.Post("/", deps.createTarget)
-			t.Post("/test", deps.testTarget)
-			// Registered before "/{id}" so chi's router does not treat
-			// "deleted" as an {id} value.
-			t.Route("/deleted", func(dl chi.Router) {
-				dl.Get("/", deps.listDeletedTargets)
-				dl.Post("/{id}/restore", deps.restoreDeletedTarget)
-			})
-			t.Get("/{id}", deps.getTarget)
-			t.Put("/{id}", deps.updateTarget)
-			t.Delete("/{id}", deps.deleteTarget)
-			t.Post("/{id}/run", deps.runTarget)
-			t.Get("/{id}/latest", deps.targetLatest)
-			t.Get("/{id}/history", deps.targetHistory)
-			t.Get("/{id}/revisions", deps.listTargetRevisions)
-			t.Post("/{id}/revisions/{version}/revert", deps.revertTargetRevision)
-		})
 		v1.Route("/queues", func(q chi.Router) {
 			q.Get("/", etagJSON(deps.listQueues))
 			q.Post("/", deps.createQueue)
