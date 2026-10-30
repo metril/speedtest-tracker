@@ -173,24 +173,37 @@ type HistoryResponse struct {
 }
 
 // outages answers GET /outages?from&to&gap_seconds.
-func (d Deps) outages(w http.ResponseWriter, r *http.Request) {
-	from, to, ok := rangeWindow(w, r.URL.Query(), defaultOutagesSpan)
+type outagesIn struct {
+	Range      string `query:"range" enum:"24h,7d,30d" doc:"Named window ending now (default 7d)."`
+	From       string `query:"from" doc:"Explicit window start (RFC 3339 or unix seconds)."`
+	To         string `query:"to" doc:"Explicit window end (RFC 3339 or unix seconds)."`
+	GapSeconds string `query:"gap_seconds" doc:"Merge incidents closer together than this (default 1800)."`
+}
+
+// OutagesResponse is the GET /outages body.
+type OutagesResponse struct {
+	From      string           `json:"from"`
+	To        string           `json:"to"`
+	Incidents []store.Incident `json:"incidents"`
+}
+
+func (d Deps) outages(ctx context.Context, in *outagesIn) (*jsonOut[OutagesResponse], error) {
+	q := queryOf("range", in.Range, "from", in.From, "to", in.To, "gap_seconds", in.GapSeconds)
+	c := &errCapture{}
+	from, to, ok := rangeWindow(c, q, defaultOutagesSpan)
 	if !ok {
-		return
+		return nil, c.err()
 	}
-	gap, ok := intQuery(w, r.URL.Query(), "gap_seconds", defaultOutageGapSeconds)
+	gap, ok := intQuery(c, q, "gap_seconds", defaultOutageGapSeconds)
 	if !ok {
-		return
+		return nil, c.err()
 	}
 	if gap <= 0 {
-		errBadRequest(w, "gap_seconds must be positive")
-		return
+		return nil, badRequest("gap_seconds must be positive")
 	}
-	incidents, err := d.Store.Outages(r.Context(), from, to, gap)
+	incidents, err := d.Store.Outages(ctx, from, to, gap)
 	if err != nil {
-		internalError(w, d.Logger, "outages failed", err)
-		return
+		return nil, internalErr(d.Logger, "outages failed", err)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"from": from, "to": to, "incidents": incidents})
+	return &jsonOut[OutagesResponse]{OutagesResponse{From: from, To: to, Incidents: incidents}}, nil
 }

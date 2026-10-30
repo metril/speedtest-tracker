@@ -214,7 +214,6 @@ func New(deps Deps) http.Handler {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
 		})
-		v1.Get("/outages", deps.outages)
 		v1.Get("/stats/summary", deps.statsSummary)
 		if deps.Settings != nil {
 			v1.Get("/settings", deps.getSettings)
