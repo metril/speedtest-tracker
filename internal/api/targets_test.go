@@ -286,7 +286,7 @@ func TestCreateTargetValidation(t *testing.T) {
 			if rec.Code != http.StatusBadRequest {
 				t.Fatalf("status = %d body=%s", rec.Code, rec.Body)
 			}
-			var body errorBody
+			var body ErrorResponse
 			json.NewDecoder(rec.Body).Decode(&body)
 			if body.Error.Code != "invalid_request" || body.Error.Message == "" {
 				t.Errorf("envelope = %+v", body.Error)

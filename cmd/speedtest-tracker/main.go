@@ -46,6 +46,15 @@ func main() {
 	if len(os.Args) > 1 && os.Args[1] == "-healthcheck" {
 		os.Exit(healthcheckMain(config.Load().Listen))
 	}
+	if len(os.Args) > 1 && os.Args[1] == "openapi" {
+		spec, err := api.OpenAPIJSON()
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "openapi:", err)
+			os.Exit(1)
+		}
+		os.Stdout.Write(spec)
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "run" {
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 		code := runCmd(ctx, os.Args[2:], os.Stdout, os.Stderr)

@@ -177,6 +177,9 @@ func New(deps Deps) http.Handler {
 		authMW = deps.Auth.Handler
 	}
 
+	// OpenAPI document and docs UI, gated like the API itself.
+	newSpecAPI().mountDocs(r, authMW)
+
 	// SSE lives outside the timeout group: the stream never ends on its own.
 	if deps.Hub != nil {
 		r.With(authMW).Get("/api/v1/events", sse.Handler(deps.Hub))

@@ -12,8 +12,8 @@ import (
 	"github.com/metril/speedtest-tracker/internal/store"
 )
 
-// errorBody is the JSON error envelope every handler returns.
-type errorBody struct {
+// ErrorResponse is the JSON error envelope every handler returns.
+type ErrorResponse struct {
 	Error struct {
 		Code    string `json:"code"`
 		Message string `json:"message"`
@@ -34,7 +34,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 // writeError writes the {error:{code,message}} envelope.
 func writeError(w http.ResponseWriter, status int, code, message string) {
-	var b errorBody
+	var b ErrorResponse
 	b.Error.Code = code
 	b.Error.Message = message
 	writeJSON(w, status, b)

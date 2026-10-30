@@ -219,7 +219,7 @@ func TestPutSettingsValidation(t *testing.T) {
 		if rec.Code != http.StatusBadRequest {
 			t.Fatalf("%s: status %d, want 400 (%s)", name, rec.Code, rec.Body)
 		}
-		var e errorBody
+		var e ErrorResponse
 		json.Unmarshal(rec.Body.Bytes(), &e)
 		if e.Error.Code != "invalid_request" || e.Error.Message == "" {
 			t.Fatalf("%s: envelope = %+v", name, e)
