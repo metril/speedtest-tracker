@@ -196,6 +196,7 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	d.registerResults(api)
 	d.registerTags(api)
 	d.registerOutages(api)
+	d.registerStats(api)
 	//@groups
 }
 

@@ -264,7 +264,7 @@ func TestStatsSummaryOffsetIsHalfOpenAtBoundary(t *testing.T) {
 func TestSummaryCacheEvictsOldestBeyondCap(t *testing.T) {
 	c := newSummaryCache(time.Minute)
 	for i := 0; i < 100; i++ {
-		c.set(fmt.Sprintf("k%d", i), []byte("x"))
+		c.set(fmt.Sprintf("k%d", i), &store.SummaryStats{})
 	}
 	if len(c.entries) > maxSummaryCacheEntries {
 		t.Fatalf("cache has %d entries, want <= %d", len(c.entries), maxSummaryCacheEntries)
