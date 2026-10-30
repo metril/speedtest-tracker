@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.8.11](https://github.com/metril/speedtest-tracker/compare/v0.8.10...v0.8.11) (2026-10-30)
+
+
+### Features
+
+* **api:** add huma typed-handler framework and migrate /me ([ca0305a](https://github.com/metril/speedtest-tracker/commit/ca0305a2903bd4fe3bda41fefa93994425c41581))
+* **api:** add OpenAPI spec builder, docs UI and /me operation ([ab61834](https://github.com/metril/speedtest-tracker/commit/ab61834d471c43f59381af5e50a2d7b9a721acfa))
+* **api:** document ookla and iperf3 server operations in OpenAPI spec ([3efa329](https://github.com/metril/speedtest-tracker/commit/3efa32901e7f7d8df1da151378e0981739f9643c))
+* **api:** document outages and stats operations in OpenAPI spec ([8fc33fe](https://github.com/metril/speedtest-tracker/commit/8fc33fef662583c879d5a3928cef82933dd6d351))
+* **api:** document queues operations in OpenAPI spec ([c71bda8](https://github.com/metril/speedtest-tracker/commit/c71bda8e70fde9c23749b6e079437f91eb9cd64f))
+* **api:** document results operations in OpenAPI spec ([69d948b](https://github.com/metril/speedtest-tracker/commit/69d948b1fd05f17872a69f08b27aefebc1bba712))
+* **api:** document runs operations in OpenAPI spec ([feccc9e](https://github.com/metril/speedtest-tracker/commit/feccc9e04f1a351027d4a1f48869a70eac765b6e))
+* **api:** document schedules operations in OpenAPI spec ([db99979](https://github.com/metril/speedtest-tracker/commit/db999798fd5c925b72792f2a46d76c9a18cb8c93))
+* **api:** document settings and token operations in OpenAPI spec ([c3799a6](https://github.com/metril/speedtest-tracker/commit/c3799a64748e2dcf712c4afc829342ff845debcb))
+* **api:** document stream, csv, ops and auth routes; test spec covers every route ([701aca7](https://github.com/metril/speedtest-tracker/commit/701aca724dd79c77471bbd51a25e1b2a35cbe6a8))
+* **api:** document tags operations in OpenAPI spec ([0355181](https://github.com/metril/speedtest-tracker/commit/0355181444ed93870e976f6c190a6ed53d1b10b8))
+* **api:** document targets operations in OpenAPI spec ([5c787b3](https://github.com/metril/speedtest-tracker/commit/5c787b32bffe41f5269ed7718a0a2bc0d4a46319))
+* **api:** migrate iperf3 servers to huma typed handlers ([750c309](https://github.com/metril/speedtest-tracker/commit/750c309d546d6f391b08c619f4b2e709bb24bcef))
+* **api:** migrate ookla servers to huma typed handlers ([ae27089](https://github.com/metril/speedtest-tracker/commit/ae27089c87f4a8275594c4f8662ed5517a3123ea))
+* **api:** migrate outages to huma typed handlers ([9b0f7e5](https://github.com/metril/speedtest-tracker/commit/9b0f7e5ff73730747924f9ce949e94e9c7e6c4d2))
+* **api:** migrate queues to huma typed handlers ([b8805c4](https://github.com/metril/speedtest-tracker/commit/b8805c43e0e3b6d110d99075a0c81cd7ef472d07))
+* **api:** migrate results to huma typed handlers ([1551e8b](https://github.com/metril/speedtest-tracker/commit/1551e8bf5274a59f094a1d3ffeb17c14433b628b))
+* **api:** migrate runs to huma typed handlers ([a0de12f](https://github.com/metril/speedtest-tracker/commit/a0de12ffbbd9b812267e8ee98a4cc6e3e47e0bb0))
+* **api:** migrate schedules to huma typed handlers ([a8cb906](https://github.com/metril/speedtest-tracker/commit/a8cb906cd0f387cc07fc96c2fb2e38a030f230be))
+* **api:** migrate settings and tokens to huma typed handlers ([7ee5d26](https://github.com/metril/speedtest-tracker/commit/7ee5d265ce9636b2062bc617d1261a7c67c28740))
+* **api:** migrate stats summary to huma typed handlers ([3eb04d1](https://github.com/metril/speedtest-tracker/commit/3eb04d16437747c9aa9e0153e8c438297246510b))
+* **api:** migrate tags to huma typed handlers ([6a631a4](https://github.com/metril/speedtest-tracker/commit/6a631a430869d98fa5510536ee45cbaeff0a85c8))
+* **api:** migrate targets to huma typed handlers ([a13315e](https://github.com/metril/speedtest-tracker/commit/a13315ec55a0f182522bf8c33adc64168b5c1281))
+* **api:** typed huma handlers with generated OpenAPI 3.1 spec and /docs ([bd8367d](https://github.com/metril/speedtest-tracker/commit/bd8367d5f46a48a5d77f77a6b8a406804c753c3a))
+* **web:** generate API types from the OpenAPI spec ([6b83fca](https://github.com/metril/speedtest-tracker/commit/6b83fca2bf0f4b442df60312991c14a079585fef))
+
+
+### Bug Fixes
+
+* **api:** restore chi wire behaviour for routing, validation and errors on huma handlers ([cdb3a2e](https://github.com/metril/speedtest-tracker/commit/cdb3a2e09418e25b11b79666c057a5feefc0d8f3))
+
 ## [0.8.10](https://github.com/metril/speedtest-tracker/compare/v0.8.9...v0.8.10) (2026-10-30)
 
 
