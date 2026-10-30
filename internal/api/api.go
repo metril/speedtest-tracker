@@ -202,17 +202,15 @@ func New(deps Deps) http.Handler {
 		r.With(authMW, middleware.Timeout(csvExportTimeout)).Get("/api/v1/results.csv", deps.resultsCSV)
 	}
 
-	r.Route("/api/v1", func(v1 chi.Router) {
-		v1.Use(middleware.Timeout(requestTimeout))
-		v1.Use(authMW)
-		v1.Use(writeGuard)
-		if deps.Store == nil {
+	// Unknown /api/v1 paths still pass the auth gate first (a 401 rather
+	// than the SPA fallback for an unauthenticated probe), then fall
+	// through to the same not-found handling as everywhere else.
+	typed.HandleFunc("/api/v1/*", func(w http.ResponseWriter, r *http.Request) {
+		if deps.UI != nil {
+			deps.UI.ServeHTTP(w, r)
 			return
 		}
-		v1.Route("/iperf3/servers", func(ip chi.Router) {
-			ip.Get("/", deps.listIperf3Servers)
-			ip.Post("/refresh", deps.refreshIperf3Servers)
-		})
+		http.NotFound(w, r)
 	})
 
 	// OIDC login/logout live outside both the /api/v1 auth middleware and

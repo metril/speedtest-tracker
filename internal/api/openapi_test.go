@@ -47,6 +47,9 @@ func TestSpecCoversRoutes(t *testing.T) {
 	routed := map[string]bool{}
 	err := chi.Walk(h.(chi.Routes), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
 		route = strings.TrimSuffix(route, "/")
+		if strings.HasSuffix(route, "/*") {
+			return nil // the not-found catch-all
+		}
 		if strings.HasPrefix(route, "/api/v1") || route == "/healthz" || route == "/metrics" || strings.HasPrefix(route, "/auth/") {
 			routed[method+" "+route] = true
 		}

@@ -199,6 +199,7 @@ func (d Deps) registerAPI(api huma.API, all bool) {
 	d.registerStats(api)
 	d.registerSettings(api, all)
 	d.registerOokla(api)
+	d.registerIperf3(api)
 	//@groups
 }
 
