@@ -209,7 +209,6 @@ func New(deps Deps) http.Handler {
 		if deps.Store == nil {
 			return
 		}
-		v1.Get("/ookla/servers", deps.listOoklaServers)
 		v1.Route("/iperf3/servers", func(ip chi.Router) {
 			ip.Get("/", deps.listIperf3Servers)
 			ip.Post("/refresh", deps.refreshIperf3Servers)
